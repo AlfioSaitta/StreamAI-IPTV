@@ -294,17 +294,7 @@ function App() {
     if (currentChannel) {
         return (
             <div className="fixed inset-0 z-[100] bg-black">
-                 <button 
-                    onClick={() => {
-                        // Refresh history when closing player to update UI
-                        setActiveProfile(prev => prev ? ({...prev, history: ProfileService.getHistory(prev.id)}) : null);
-                        setCurrentChannel(null);
-                    }}
-                    className="absolute top-8 left-8 z-[110] tv-focus bg-black/50 text-white px-6 py-2 rounded-lg backdrop-blur-md border border-white/10 hover:bg-white hover:text-black transition-colors flex items-center gap-2 font-bold"
-                 >
-                    &larr; {t.back}
-                 </button>
-                 <VideoPlayer 
+                 <VideoPlayer
                     channel={currentChannel} 
                     playlist={playQueue}
                     onChannelSelect={setCurrentChannel}
@@ -313,6 +303,11 @@ function App() {
                     onProgress={handleVideoProgress}
                     initialProgress={getInitialProgress()}
                     onResetProgress={handleResetProgress}
+                    onBack={() => {
+                        // Refresh history when closing player to update UI
+                        setActiveProfile(prev => prev ? ({...prev, history: ProfileService.getHistory(prev.id)}) : null);
+                        setCurrentChannel(null);
+                    }}
                 />
             </div>
         );

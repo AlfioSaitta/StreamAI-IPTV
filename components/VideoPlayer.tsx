@@ -6,7 +6,7 @@ import { DownloadManager } from '../services/downloadManager.ts';
 import { useCast } from '../hooks/useCast.ts';
 import { useCastSession } from '../hooks/useCastSession.ts';
 import CastDevicePicker from './CastDevicePicker.tsx';
-import { AlertTriangle, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipForward, SkipBack, List, X, FastForward, Rewind, RotateCcw, PictureInPicture2, Cast, Loader2, Tv, StopCircle } from 'lucide-react';
+import { AlertTriangle, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipForward, SkipBack, List, X, FastForward, Rewind, RotateCcw, PictureInPicture2, Cast, Loader2, Tv, StopCircle, ChevronLeft } from 'lucide-react';
 import Hls from 'hls.js';
 import mpegts from 'mpegts.js';
 
@@ -16,12 +16,13 @@ interface VideoPlayerProps {
   onChannelSelect?: (channel: Channel) => void;
   onNext?: () => void;
   onPrev?: () => void;
+  onBack?: () => void;
   onProgress?: (progress: number, duration: number) => void;
   initialProgress?: number; // Progresso iniziale (0-1) per riprendere
   onResetProgress?: () => void; // Callback per resettare il progresso
 }
 
-const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onChannelSelect, onNext, onPrev, onProgress, initialProgress, onResetProgress }) => {
+const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onChannelSelect, onNext, onPrev, onBack, onProgress, initialProgress, onResetProgress }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const controlsRef = useRef<HTMLDivElement>(null);
@@ -1289,7 +1290,26 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
     }
   };
   const toggleMute = () => { if (videoRef.current) { videoRef.current.muted = !isMuted; setIsMuted(!isMuted); }};
-  const toggleFull = () => { 
+
+  const handleVolumeChange = (value: number) => {
+    if (videoRef.current) {
+      videoRef.current.volume = value;
+      videoRef.current.muted = value === 0;
+      setIsMuted(value === 0);
+      setVolume(value);
+    }
+  };
+
+  const skipTime = (seconds: number) => {
+    if (videoRef.current) {
+      const newTime = Math.max(0, Math.min(videoRef.current.currentTime + seconds, duration));
+      videoRef.current.currentTime = newTime;
+      setCurrentTime(newTime);
+      showOSD(seconds > 0 ? FastForward : Rewind, `${seconds > 0 ? '+' : ''}${seconds}s`);
+    }
+  };
+
+  const toggleFull = () => {
       if (!containerRef.current) return; 
       if (!document.fullscreenElement) containerRef.current.requestFullscreen().then(() => setIsFullscreen(true));
       else document.exitFullscreen().then(() => setIsFullscreen(false));
@@ -1443,12 +1463,19 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
           <div className={`absolute inset-0 z-0 bg-cover bg-center transition-opacity duration-1000 ${(!isPlaying || showControls) ? 'opacity-30 blur-sm' : 'opacity-0'}`} style={{ backgroundImage: `url(${backdrop})` }} />
       )}
 
-      {/* Buffering Spinner */}
+      {/* Buffering Spinner - Design migliorato */}
       {isBuffering && !error && !cast.isConnected && (
-          <div className="absolute inset-0 z-40 flex items-center justify-center pointer-events-none">
-              <div className="flex flex-col items-center gap-3">
-                  <div className="w-14 h-14 border-4 border-white/20 border-t-white rounded-full animate-spin"></div>
-                  <span className="text-white/80 text-sm font-medium">Buffering...</span>
+          <div className="absolute inset-0 z-40 flex items-center justify-center pointer-events-none bg-black/30">
+              <div className="flex flex-col items-center gap-4">
+                  <div className="relative">
+                      <div className="w-16 h-16 border-4 border-white/20 border-t-red-500 rounded-full animate-spin"></div>
+                      <div className="absolute inset-0 flex items-center justify-center">
+                          <Play className="w-6 h-6 text-white/50" />
+                      </div>
+                  </div>
+                  <span className="text-white/90 text-sm font-medium bg-black/50 px-4 py-1.5 rounded-full backdrop-blur-sm">
+                      Caricamento...
+                  </span>
               </div>
           </div>
       )}
@@ -1477,12 +1504,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
           </div>
       )}
 
-      {/* OSD */}
+      {/* OSD - Design migliorato */}
       {osdMessage && (
-          <div className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none animate-fade-in">
-              <div className="bg-black/60 backdrop-blur-md p-8 rounded-3xl flex flex-col items-center gap-4 border border-white/10 shadow-2xl">
-                  <osdMessage.icon className="w-16 h-16 text-white" />
-                  {osdMessage.text && <span className="text-2xl font-bold text-white">{osdMessage.text}</span>}
+          <div className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none">
+              <div className="bg-black/70 backdrop-blur-xl p-6 rounded-2xl flex flex-col items-center gap-3 border border-white/10 shadow-2xl animate-fade-in">
+                  <div className="p-4 bg-white/10 rounded-full">
+                      <osdMessage.icon className="w-10 h-10 text-white" />
+                  </div>
+                  {osdMessage.text && <span className="text-lg font-semibold text-white">{osdMessage.text}</span>}
               </div>
           </div>
       )}
@@ -1525,7 +1554,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
                     </p>
                 )}
                 <p className="text-xs text-gray-400 mt-2">
-                    Usa il pulsante "Indietro" in alto a sinistra per tornare alla lista.
+                    Premi il pulsante X in alto a destra per tornare alla lista.
                 </p>
             </div>
         </div>
@@ -1701,44 +1730,76 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
         </div>
       )}
 
-      {/* HEADER INFO */}
-      <div className={`absolute top-0 left-0 right-0 p-8 pt-20 bg-gradient-to-b from-black/90 to-transparent transition-all duration-500 z-20 pointer-events-none ${showControls ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-10'}`}>
-          <h2 className="text-4xl font-light text-white tracking-tight text-shadow-lg mb-2">{meta?.title || channel.name}</h2>
-          <div className="flex gap-4 text-gray-300 text-sm font-medium tracking-wider">
-             {channel.type === 'live' && <span className="bg-red-600 px-2 py-0.5 rounded text-white text-xs font-bold">LIVE</span>}
-             {meta?.release_date && <span>{meta.release_date.split('-')[0]}</span>}
-             {channel.type !== 'live' && <span className="bg-gray-800 px-2 py-0.5 rounded border border-gray-600 text-xs text-gray-300">Instant Play</span>}
+      {/* HEADER INFO - Design migliorato */}
+      <div className={`absolute top-0 left-0 right-0 p-6 md:p-8 bg-gradient-to-b from-black/95 via-black/60 to-transparent transition-all duration-500 z-20 pointer-events-none ${showControls ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-10'}`}>
+          <div className="flex items-start justify-between">
+            <div className="flex-1">
+              <h2 className="text-2xl md:text-4xl font-bold text-white tracking-tight drop-shadow-lg mb-2 line-clamp-1">
+                {meta?.title || channel.cleanName || channel.name}
+              </h2>
+              <div className="flex flex-wrap items-center gap-2 md:gap-3">
+                {channel.type === 'live' && (
+                  <span className="flex items-center gap-1.5 bg-red-600 px-2.5 py-1 rounded-md text-white text-xs font-bold uppercase tracking-wide shadow-lg">
+                    <span className="w-2 h-2 bg-white rounded-full animate-pulse"></span>
+                    LIVE
+                  </span>
+                )}
+                {meta?.release_date && (
+                  <span className="bg-white/10 backdrop-blur-sm px-2.5 py-1 rounded-md text-white/90 text-xs font-medium">
+                    {meta.release_date.split('-')[0]}
+                  </span>
+                )}
+                {meta?.rating && (
+                  <span className="bg-yellow-500/20 text-yellow-400 px-2.5 py-1 rounded-md text-xs font-bold">
+                    ⭐ {Number(meta.rating).toFixed(1)}
+                  </span>
+                )}
+                {channel.type !== 'live' && (
+                  <span className="bg-white/10 backdrop-blur-sm px-2.5 py-1 rounded-md text-white/70 text-xs font-medium">
+                    HD
+                  </span>
+                )}
+              </div>
+            </div>
+            {/* Pulsante chiudi/indietro */}
+            <button
+              onClick={() => onBack ? onBack() : window.history.back()}
+              className="pointer-events-auto p-2.5 rounded-full bg-black/50 hover:bg-black/70 text-white/80 hover:text-white transition-all backdrop-blur-sm border border-white/10"
+              title="Chiudi"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
       </div>
 
-      {/* CONTROLS */}
-      <div 
+      {/* CONTROLS - Design migliorato */}
+      <div
         ref={controlsRef}
         onFocus={() => setShowControls(true)}
         className={`
-            absolute bottom-8 left-1/2 -translate-x-1/2 w-[90%] max-w-4xl bg-black/60 backdrop-blur-2xl border border-white/10 rounded-3xl p-6 shadow-[0_20px_60px_rgba(0,0,0,0.8)]
-            transition-all duration-500 ease-out z-40 flex flex-col gap-4
-            ${showControls ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-20'}
+            absolute bottom-0 left-0 right-0 p-4 md:p-6 bg-gradient-to-t from-black/95 via-black/80 to-transparent
+            transition-all duration-500 ease-out z-40
+            ${showControls ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10'}
       `}>
           
           {showSeekBar && (
-            <div className="flex items-center gap-4 text-xs font-mono text-gray-400 select-none">
-                <span>{formatTime(currentTime)}</span>
-                <div className="relative flex-1 h-1.5 bg-white/20 rounded-full group/seek cursor-pointer items-center flex">
-                    
+            <div className="flex items-center gap-3 md:gap-4 text-xs font-mono text-white/70 select-none mb-4">
+                <span className="w-12 text-right tabular-nums">{formatTime(currentTime)}</span>
+                <div className="relative flex-1 h-1 bg-white/20 rounded-full group/seek cursor-pointer hover:h-2 transition-all duration-200">
+
                     {/* Buffer Bar */}
                     <div 
-                        className="absolute h-full bg-white/30 rounded-full transition-all duration-300 ease-linear" 
-                        style={{ width: `${Math.min((buffered / duration) * 100, 100)}%` }} 
+                        className="absolute h-full bg-white/30 rounded-full transition-all duration-300"
+                        style={{ width: `${Math.min((buffered / duration) * 100, 100)}%` }}
                     />
 
                     {/* Play Progress Bar */}
                     <div 
-                        className="absolute h-full bg-gradient-to-r from-purple-600 to-indigo-500 rounded-full" 
-                        style={{ width: `${(currentTime / duration) * 100}%` }} 
+                        className="absolute h-full bg-gradient-to-r from-red-500 to-red-600 rounded-full transition-all"
+                        style={{ width: `${(currentTime / duration) * 100}%` }}
                     >
-                        {/* Visual Thumb */}
-                        <div className="absolute right-[-6px] top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-white rounded-full shadow-lg scale-0 group-hover/seek:scale-100 transition-transform duration-200" />
+                        {/* Thumb */}
+                        <div className="absolute right-0 top-1/2 -translate-y-1/2 w-4 h-4 bg-red-500 rounded-full shadow-lg shadow-red-500/50 scale-0 group-hover/seek:scale-100 transition-transform border-2 border-white" />
                     </div>
 
                     <input 
@@ -1748,66 +1809,112 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
                         className="tv-focus absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"
                     />
                 </div>
-                <span>{formatTime(duration)}</span>
+                <span className="w-12 tabular-nums">{formatTime(duration)}</span>
             </div>
           )}
 
-          <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                  {/* Pulsante lista canali: solo per series, non per live e movies */}
+          <div className="flex items-center justify-between max-w-5xl mx-auto">
+              {/* Left Controls */}
+              <div className="flex items-center gap-2 md:gap-3 flex-1">
+                  {/* Volume */}
+                  <div className="hidden md:flex items-center gap-2 group/vol">
+                      <button
+                        onClick={toggleMute}
+                        className="tv-focus p-2.5 rounded-full hover:bg-white/10 text-white/80 hover:text-white transition-all"
+                      >
+                        {isMuted || (videoRef.current?.volume ?? 1) === 0 ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+                      </button>
+                      <div className="w-0 group-hover/vol:w-24 overflow-hidden transition-all duration-300">
+                        <input
+                          type="range"
+                          min={0}
+                          max={1}
+                          step={0.05}
+                          value={isMuted ? 0 : (videoRef.current?.volume ?? 1)}
+                          onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
+                          className="w-full h-1 bg-white/30 rounded-full appearance-none cursor-pointer
+                            [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3
+                            [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full"
+                        />
+                      </div>
+                  </div>
+
+                  {/* Lista episodi */}
                   {channel.type === 'series' && (
-                      <button onClick={() => setShowPlaylist(!showPlaylist)} className="tv-focus p-2 rounded-full hover:bg-white/10 text-gray-300 hover:text-white" title="Lista episodi">
-                          <List className="w-6 h-6" />
+                      <button onClick={() => setShowPlaylist(!showPlaylist)} className="tv-focus p-2.5 rounded-full hover:bg-white/10 text-white/80 hover:text-white transition-all" title="Lista episodi">
+                          <List className="w-5 h-5" />
                       </button>
                   )}
-                  {/* Pulsante riparti dall'inizio: solo per movie e series */}
+
+                  {/* Riparti dall'inizio */}
                   {(channel.type === 'movie' || channel.type === 'series') && currentTime > 30 && (
-                      <button onClick={restartFromBeginning} className="tv-focus p-2 rounded-full hover:bg-white/10 text-gray-300 hover:text-white" title="Riparti dall'inizio">
-                          <RotateCcw className="w-6 h-6" />
+                      <button onClick={restartFromBeginning} className="tv-focus p-2.5 rounded-full hover:bg-white/10 text-white/80 hover:text-white transition-all" title="Riparti dall'inizio">
+                          <RotateCcw className="w-5 h-5" />
                       </button>
                   )}
               </div>
 
-              <div className="flex items-center gap-6">
-                  {onPrev && (
-                    <button onClick={onPrev} className="tv-focus p-3 rounded-full hover:bg-white/10 text-white"><SkipBack className="w-8 h-8" /></button>
-                  )}
-                  <button 
-                    onClick={togglePlay} 
-                    className="tv-focus p-4 rounded-full bg-white text-black hover:scale-105 shadow-[0_0_20px_rgba(255,255,255,0.3)]"
+              {/* Center Controls - Playback */}
+              <div className="flex items-center gap-2 md:gap-4">
+                  {/* Rewind 10s */}
+                  <button
+                    onClick={() => skipTime(-10)}
+                    className="tv-focus p-2 md:p-3 rounded-full hover:bg-white/10 text-white/80 hover:text-white transition-all"
+                    title="Indietro 10s"
                   >
-                    {isPlaying ? <Pause className="w-8 h-8 fill-current" /> : <Play className="w-8 h-8 fill-current" />}
+                    <Rewind className="w-5 h-5 md:w-6 md:h-6" />
                   </button>
-                  {onNext && (
-                    <button onClick={onNext} className="tv-focus p-3 rounded-full hover:bg-white/10 text-white"><SkipForward className="w-8 h-8" /></button>
+
+                  {onPrev && (
+                    <button onClick={onPrev} className="tv-focus p-2 md:p-3 rounded-full hover:bg-white/10 text-white"><SkipBack className="w-5 h-5 md:w-6 md:h-6" /></button>
                   )}
+
+                  {/* Play/Pause - Central */}
+                  <button
+                    onClick={togglePlay} 
+                    className="tv-focus p-4 md:p-5 rounded-full bg-white text-black hover:scale-110 shadow-xl shadow-white/20 transition-transform active:scale-95"
+                  >
+                    {isPlaying ? <Pause className="w-7 h-7 md:w-8 md:h-8" /> : <Play className="w-7 h-7 md:w-8 md:h-8 ml-0.5" />}
+                  </button>
+
+                  {onNext && (
+                    <button onClick={onNext} className="tv-focus p-2 md:p-3 rounded-full hover:bg-white/10 text-white"><SkipForward className="w-5 h-5 md:w-6 md:h-6" /></button>
+                  )}
+
+                  {/* Forward 10s */}
+                  <button
+                    onClick={() => skipTime(10)}
+                    className="tv-focus p-2 md:p-3 rounded-full hover:bg-white/10 text-white/80 hover:text-white transition-all"
+                    title="Avanti 10s"
+                  >
+                    <FastForward className="w-5 h-5 md:w-6 md:h-6" />
+                  </button>
               </div>
 
-              <div className="flex items-center gap-4">
-                  {/* Pulsante Cast - apre direttamente il picker dispositivi o mostra lo stato */}
+              {/* Right Controls */}
+              <div className="flex items-center gap-2 md:gap-3 flex-1 justify-end">
+                  {/* Cast */}
                   <button
                       onClick={() => castSession.isConnected ? null : setShowDevicePicker(true)}
                       disabled={isCastLoading || castSession.isConnecting}
-                      className={`tv-focus p-2 rounded-full hover:bg-white/10 transition-colors ${
-                        castSession.isConnected ? 'text-blue-400 animate-pulse' : 
-                        'text-gray-300 hover:text-white'
+                      className={`tv-focus p-2.5 rounded-full hover:bg-white/10 transition-all ${
+                        castSession.isConnected ? 'text-blue-400' : 'text-white/80 hover:text-white'
                       } ${isCastLoading || castSession.isConnecting ? 'opacity-50' : ''}`}
-                      title={castSession.isConnected ? `Casting su ${castSession.device?.name}` : 'Trasmetti su dispositivo'}
+                      title={castSession.isConnected ? `Casting su ${castSession.device?.name}` : 'Trasmetti'}
                   >
-                      {isCastLoading ? (
-                          <Loader2 className="w-6 h-6 animate-spin" />
-                      ) : (
-                          <Cast className="w-6 h-6" />
-                      )}
+                      {isCastLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Cast className="w-5 h-5" />}
                   </button>
-                  {/* Pulsante PiP - disponibile se supportato */}
+
+                  {/* PiP */}
                   {document.pictureInPictureEnabled && (
-                      <button onClick={togglePiP} className={`tv-focus p-2 rounded-full hover:bg-white/10 transition-colors ${isPiP ? 'text-purple-400' : 'text-gray-300 hover:text-white'}`} title="Picture-in-Picture">
-                          <PictureInPicture2 className="w-6 h-6" />
+                      <button onClick={togglePiP} className={`tv-focus p-2.5 rounded-full hover:bg-white/10 transition-all ${isPiP ? 'text-purple-400' : 'text-white/80 hover:text-white'}`} title="Picture-in-Picture">
+                          <PictureInPicture2 className="w-5 h-5" />
                       </button>
                   )}
-                  <button onClick={toggleFull} className="tv-focus p-2 rounded-full hover:bg-white/10 text-gray-300 hover:text-white" title={isFullscreen ? 'Esci da schermo intero' : 'Schermo intero'}>
-                      {isFullscreen ? <Minimize className="w-6 h-6" /> : <Maximize className="w-6 h-6" />}
+
+                  {/* Fullscreen */}
+                  <button onClick={toggleFull} className="tv-focus p-2.5 rounded-full hover:bg-white/10 text-white/80 hover:text-white transition-all" title={isFullscreen ? 'Esci' : 'Schermo intero'}>
+                      {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
                   </button>
               </div>
           </div>
