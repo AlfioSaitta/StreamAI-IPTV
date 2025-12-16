@@ -23,6 +23,7 @@ export interface Translations {
   deleteProfile: string;
   
   // Channel List / Navigation
+  home: string;
   live: string;
   movies: string;
   series: string;
@@ -130,6 +131,7 @@ const translations: Record<SupportedLanguage, Translations> = {
     deleteProfile: 'Elimina Profilo?',
     
     // Channel List / Navigation
+    home: 'Home',
     live: 'Live TV',
     movies: 'Film',
     series: 'Serie TV',
@@ -236,6 +238,7 @@ const translations: Record<SupportedLanguage, Translations> = {
     deleteProfile: 'Delete Profile?',
     
     // Channel List / Navigation
+    home: 'Home',
     live: 'Live TV',
     movies: 'Movies',
     series: 'TV Series',
@@ -342,6 +345,7 @@ const translations: Record<SupportedLanguage, Translations> = {
     deleteProfile: '¿Eliminar Perfil?',
     
     // Channel List / Navigation
+    home: 'Inicio',
     live: 'TV en vivo',
     movies: 'Películas',
     series: 'Series',
@@ -448,6 +452,7 @@ const translations: Record<SupportedLanguage, Translations> = {
     deleteProfile: 'Supprimer le Profil?',
     
     // Channel List / Navigation
+    home: 'Accueil',
     live: 'TV en direct',
     movies: 'Films',
     series: 'Séries',
@@ -554,6 +559,7 @@ const translations: Record<SupportedLanguage, Translations> = {
     deleteProfile: 'Profil löschen?',
     
     // Channel List / Navigation
+    home: 'Startseite',
     live: 'Live-TV',
     movies: 'Filme',
     series: 'Serien',
@@ -660,6 +666,7 @@ const translations: Record<SupportedLanguage, Translations> = {
     deleteProfile: 'Excluir Perfil?',
     
     // Channel List / Navigation
+    home: 'Início',
     live: 'TV ao vivo',
     movies: 'Filmes',
     series: 'Séries',
@@ -766,6 +773,7 @@ const translations: Record<SupportedLanguage, Translations> = {
     deleteProfile: 'Удалить профиль?',
     
     // Channel List / Navigation
+    home: 'Главная',
     live: 'Прямой эфир',
     movies: 'Фильмы',
     series: 'Сериалы',
@@ -872,6 +880,7 @@ const translations: Record<SupportedLanguage, Translations> = {
     deleteProfile: 'プロフィールを削除しますか？',
     
     // Channel List / Navigation
+    home: 'ホーム',
     live: 'ライブTV',
     movies: '映画',
     series: 'ドラマ',
@@ -978,6 +987,7 @@ const translations: Record<SupportedLanguage, Translations> = {
     deleteProfile: '프로필을 삭제하시겠습니까?',
     
     // Channel List / Navigation
+    home: '홈',
     live: '실시간 TV',
     movies: '영화',
     series: '시리즈',
@@ -1084,6 +1094,7 @@ const translations: Record<SupportedLanguage, Translations> = {
     deleteProfile: '删除档案？',
     
     // Channel List / Navigation
+    home: '首页',
     live: '直播',
     movies: '电影',
     series: '电视剧',
@@ -1190,6 +1201,7 @@ const translations: Record<SupportedLanguage, Translations> = {
     deleteProfile: 'حذف الملف الشخصي؟',
     
     // Channel List / Navigation
+    home: 'الرئيسية',
     live: 'البث المباشر',
     movies: 'الأفلام',
     series: 'المسلسلات',

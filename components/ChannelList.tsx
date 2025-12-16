@@ -7,6 +7,9 @@ import { useLanguage } from '../contexts/LanguageContext.tsx';
 
 interface ChannelListProps {
   categories: Category[];
+  liveCategories?: Category[];
+  vodCategories?: Category[];
+  seriesCategories?: Category[];
   onSelectChannel: (channel: Channel) => void;
   currentChannelId?: string | null;
   isOpen: boolean; 
@@ -119,7 +122,10 @@ const ContentRow = React.memo(({ title, channels, onSelect, isPoster, progressMa
 
 const ChannelList: React.FC<ChannelListProps> = ({ 
   categories, 
-  onSelectChannel, 
+  liveCategories = [],
+  vodCategories = [],
+  seriesCategories = [],
+  onSelectChannel,
   currentChannelId,
   activeTab,
   setActiveTab,
@@ -154,12 +160,20 @@ const ChannelList: React.FC<ChannelListProps> = ({
   }, [history]);
 
   const continueWatching = useMemo(() => {
-      const allChannels = categories.flatMap(c => c.channels);
+      // Per la Home usa tutti i canali, altrimenti usa solo quelli della categoria corrente
+      const channelsToUse = activeTab === 'home' ? allChannels : categories.flatMap(c => c.channels);
       const seen = new Set<string>();
+
       return history
           .filter(h => h.progress && h.progress > 0 && h.progress < 0.95)
+          // Filtra per tipo se non siamo nella Home
+          .filter(h => {
+              if (activeTab === 'home') return true;
+              // Filtra in base al tipo di tab attivo
+              return h.type === activeTab;
+          })
           .map(h => {
-              const channel = allChannels.find(c => c.id === h.channelId);
+              const channel = channelsToUse.find(c => c.id === h.channelId);
               if (channel) {
                   return { channel, timestamp: h.timestamp, progress: h.progress };
               }
@@ -173,7 +187,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
           })
           .sort((a, b) => b.timestamp - a.timestamp)
           .map(item => item.channel);
-  }, [categories, history]);
+  }, [categories, history, activeTab, allChannels]);
 
   const watchlistSet = useMemo(() => new Set(watchlistIds), [watchlistIds]);
 
@@ -188,6 +202,47 @@ const ChannelList: React.FC<ChannelListProps> = ({
             return true;
         });
   }, [watchlistIds, allChannels]);
+
+  // Home page categories - mix di contenuti
+  const homeCategories = useMemo(() => {
+      if (activeTab !== 'home') return [];
+
+      const homeCats: Category[] = [];
+
+      // Film popolari (prime 20)
+      const popularMovies = vodCategories.flatMap(c => c.channels).slice(0, 20);
+      if (popularMovies.length > 0) {
+          homeCats.push({ name: t.movies + ' - ' + t.popular, channels: popularMovies });
+      }
+
+      // Serie popolari (prime 20)
+      const popularSeries = seriesCategories.flatMap(c => c.channels).slice(0, 20);
+      if (popularSeries.length > 0) {
+          homeCats.push({ name: t.series + ' - ' + t.popular, channels: popularSeries });
+      }
+
+      // Canali live popolari (primi 20)
+      const popularLive = liveCategories.flatMap(c => c.channels).slice(0, 20);
+      if (popularLive.length > 0) {
+          homeCats.push({ name: t.live + ' - ' + t.popular, channels: popularLive });
+      }
+
+      // Aggiungi alcune categorie specifiche dai film
+      vodCategories.slice(0, 3).forEach(cat => {
+          if (cat.channels.length > 0) {
+              homeCats.push({ name: t.movies + ' - ' + cat.name, channels: cat.channels.slice(0, 20) });
+          }
+      });
+
+      // Aggiungi alcune categorie specifiche dalle serie
+      seriesCategories.slice(0, 3).forEach(cat => {
+          if (cat.channels.length > 0) {
+              homeCats.push({ name: t.series + ' - ' + cat.name, channels: cat.channels.slice(0, 20) });
+          }
+      });
+
+      return homeCats;
+  }, [activeTab, liveCategories, vodCategories, seriesCategories, t]);
 
 
   // Clock Update
@@ -314,15 +369,22 @@ const ChannelList: React.FC<ChannelListProps> = ({
       return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  // Usa homeCategories per la Home, altrimenti le categorie normali
+  const activeCategories = useMemo(() => {
+      return activeTab === 'home' ? homeCategories : categories;
+  }, [activeTab, homeCategories, categories]);
+
   const filteredCategories = useMemo(() => {
-    if (!searchTerm) return categories;
-    return categories.map(cat => ({
-      ...cat,
-      channels: cat.channels.filter(ch => 
+    if (!searchTerm) return activeCategories;
+    // Durante la ricerca, cerca in tutti i canali
+    const searchChannels = allChannels.filter(ch =>
         ch.name.toLowerCase().includes(searchTerm.toLowerCase())
-      )
-    })).filter(cat => cat.channels.length > 0);
-  }, [categories, searchTerm]);
+    );
+    if (searchChannels.length > 0) {
+        return [{ name: t.search, channels: searchChannels }];
+    }
+    return [];
+  }, [activeCategories, searchTerm, allChannels, t]);
 
   const displayedCategories = filteredCategories.slice(0, visibleRows);
 
@@ -337,14 +399,14 @@ const ChannelList: React.FC<ChannelListProps> = ({
              <h1 className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-red-600 to-red-500 tracking-tighter cursor-pointer drop-shadow-sm" onClick={() => {window.scrollTo({top:0, behavior:'smooth'})}}>STREAMAI</h1>
              
              <div className="hidden md:flex gap-4 text-sm font-medium text-gray-300">
-                 {(['live', 'movie', 'series'] as StreamType[]).map(tab => (
+                 {(['home', 'live', 'movie', 'series'] as StreamType[]).map(tab => (
                      <button
                         key={tab}
                         onClick={() => { setActiveTab(tab); window.scrollTo({top:0, behavior:'smooth'}); setVisibleRows(5); }}
                         className={`tv-focus px-4 py-2 rounded-md transition-all outline-none focus:ring-2 focus:ring-white ${activeTab === tab ? 'bg-white/10 text-white font-bold' : 'hover:text-white hover:bg-white/5'}`}
                         tabIndex={0}
                      >
-                         {tab === 'live' ? t.live : tab === 'movie' ? t.movies : t.series}
+                         {tab === 'home' ? t.home : tab === 'live' ? t.live : tab === 'movie' ? t.movies : t.series}
                      </button>
                  ))}
              </div>
@@ -470,10 +532,10 @@ const ChannelList: React.FC<ChannelListProps> = ({
       <div className={`relative z-20 px-4 md:px-12 space-y-10 ${!searchTerm && featuredItem ? '-mt-32' : 'mt-28'}`}>
           {!searchTerm && watchlistChannels.length > 0 && (
               <ContentRow 
-                  title="La mia lista" 
+                  title={t.myList}
                   channels={watchlistChannels}
                   onSelect={onSelectChannel}
-                  isPoster={activeTab === 'movie'}
+                  isPoster={activeTab === 'movie' || (activeTab === 'home' && watchlistChannels.some(ch => ch.type === 'movie'))}
                   progressMap={progressMap}
                   watchlistSet={watchlistSet}
                   onToggleWatchlist={(c) => onToggleWatchlist(c.id)}
@@ -486,7 +548,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
                   title={t.continueWatching}
                   channels={continueWatching}
                   onSelect={onSelectChannel}
-                  isPoster={activeTab === 'movie'}
+                  isPoster={activeTab === 'movie' || (activeTab === 'home' && continueWatching.some(ch => ch.type === 'movie'))}
                   progressMap={progressMap}
                   watchlistSet={watchlistSet}
                   onToggleWatchlist={(c) => onToggleWatchlist(c.id)}
@@ -495,19 +557,23 @@ const ChannelList: React.FC<ChannelListProps> = ({
           )}
 
           {displayedCategories.length > 0 ? (
-              displayedCategories.map((cat) => (
-                  <ContentRow 
-                    key={cat.name} 
-                    title={cat.name} 
-                    channels={cat.channels} 
-                    onSelect={onSelectChannel}
-                    isPoster={activeTab === 'movie'}
-                    progressMap={progressMap}
-                    watchlistSet={watchlistSet}
-                    onToggleWatchlist={(c) => onToggleWatchlist(c.id)}
-                    onShowDetails={onShowDetails}
-                  />
-              ))
+              displayedCategories.map((cat) => {
+                  // Verifica se la categoria contiene film (per usare poster style)
+                  const hasMovies = cat.channels.some(ch => ch.type === 'movie');
+                  return (
+                      <ContentRow
+                        key={cat.name}
+                        title={cat.name}
+                        channels={cat.channels}
+                        onSelect={onSelectChannel}
+                        isPoster={activeTab === 'movie' || (activeTab === 'home' && hasMovies)}
+                        progressMap={progressMap}
+                        watchlistSet={watchlistSet}
+                        onToggleWatchlist={(c) => onToggleWatchlist(c.id)}
+                        onShowDetails={onShowDetails}
+                      />
+                  );
+              })
           ) : (
               // Loading State Skeletons
               Array.from({length: 4}).map((_, i) => (

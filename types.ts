@@ -1,5 +1,5 @@
 
-export type StreamType = 'live' | 'movie' | 'series';
+export type StreamType = 'home' | 'live' | 'movie' | 'series';
 
 export interface Channel {
   id: string;

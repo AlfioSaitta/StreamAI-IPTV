@@ -25,7 +25,7 @@ function App() {
   const [vodCategories, setVodCategories] = useState<Category[]>([]);
   const [seriesCategories, setSeriesCategories] = useState<Category[]>([]);
   
-  const [activeTab, setActiveTab] = useState<StreamType>('live');
+  const [activeTab, setActiveTab] = useState<StreamType>('home');
   const [currentChannel, setCurrentChannel] = useState<Channel | null>(null);
   const [playQueue, setPlayQueue] = useState<Channel[]>([]);
   
@@ -85,7 +85,7 @@ function App() {
             setActiveProfile(updatedProfile);
         }
         
-        setActiveTab('live');
+        setActiveTab('home');
         setCurrentChannel(null);
         setSelectedSeries(null);
         setPlayQueue([]);
@@ -96,6 +96,7 @@ function App() {
 
   const getCurrentCategories = () => {
       switch (activeTab) {
+          case 'home': return []; // La Home gestisce le categorie internamente
           case 'live': return liveCategories;
           case 'movie': return vodCategories;
           case 'series': return seriesCategories;
@@ -350,6 +351,9 @@ function App() {
     return (
         <ChannelList 
             categories={getCurrentCategories()}
+            liveCategories={liveCategories}
+            vodCategories={vodCategories}
+            seriesCategories={seriesCategories}
             onSelectChannel={handleChannelSelect}
             currentChannelId={lastFocusedChannelId}
             isOpen={true}
