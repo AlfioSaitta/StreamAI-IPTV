@@ -9,9 +9,11 @@ import MovieDetail from './components/MovieDetail.tsx';
 import ProfileSelection from './components/ProfileSelection.tsx';
 import ProfileSettings from './components/ProfileSettings.tsx';
 import CodecWarning from './components/CodecWarning.tsx';
+import { LanguageProvider } from './contexts/LanguageContext.tsx';
 import { loginXtream } from './services/xtream.ts';
-import { ProfileService } from './services/profileService.ts';
+import { ProfileService, DEFAULT_PREFERENCES } from './services/profileService.ts';
 import { CacheService } from './services/cacheService.ts';
+import { i18n } from './services/i18n.ts';
 import { Category, Channel, XtreamCredentials, StreamType, Profile } from './types.ts';
 import { Server } from 'lucide-react';
 
@@ -264,11 +266,16 @@ function App() {
 
   // Content rendering logic
   const renderContent = () => {
+    // Get translations for current profile language
+    const lang = activeProfile?.preferences?.language || DEFAULT_PREFERENCES.language;
+    i18n.setLanguage(lang);
+    const t = i18n.t();
+
     if (isLoading) {
         return (
             <div className="flex-1 flex flex-col items-center justify-center bg-[#141414]">
                 <div className="w-16 h-16 border-4 border-red-600/20 border-t-red-600 rounded-full animate-spin mb-4"></div>
-                <p className="text-xl text-gray-400 font-medium animate-pulse">Caricamento Libreria...</p>
+                <p className="text-xl text-gray-400 font-medium animate-pulse">{t.loadingLibrary}</p>
             </div>
         );
     }
@@ -294,7 +301,7 @@ function App() {
                     }}
                     className="absolute top-8 left-8 z-[110] tv-focus bg-black/50 text-white px-6 py-2 rounded-lg backdrop-blur-md border border-white/10 hover:bg-white hover:text-black transition-colors flex items-center gap-2 font-bold"
                  >
-                    &larr; Indietro
+                    &larr; {t.back}
                  </button>
                  <VideoPlayer 
                     channel={currentChannel} 
@@ -328,13 +335,13 @@ function App() {
         return (
             <div className="flex-1 flex flex-col items-center justify-center bg-[#141414] text-gray-400">
                 <Server className="w-24 h-24 mb-6 opacity-20" />
-                <h2 className="text-4xl font-bold text-white mb-4">Benvenuto su StreamAI</h2>
-                <p className="text-xl mb-10 max-w-md text-center font-light">Connetti il tuo account per accedere a migliaia di contenuti.</p>
-                <button 
+                <h2 className="text-4xl font-bold text-white mb-4">{t.welcome}</h2>
+                <p className="text-xl mb-10 max-w-md text-center font-light">{t.welcomeDesc}</p>
+                <button
                     onClick={() => setShowXtreamModal(true)}
                     className="tv-focus bg-red-600 text-white px-10 py-4 rounded font-bold text-xl shadow-lg hover:bg-red-700 transition-colors"
                 >
-                    Connetti Server
+                    {t.connectServer}
                 </button>
             </div>
         );
@@ -364,41 +371,43 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen w-screen bg-[#141414] overflow-x-hidden relative font-sans text-gray-100 flex flex-col">
-      {renderContent()}
+    <LanguageProvider profileLanguage={activeProfile?.preferences?.language || DEFAULT_PREFERENCES.language}>
+      <div className="min-h-screen w-screen bg-[#141414] overflow-x-hidden relative font-sans text-gray-100 flex flex-col">
+        {renderContent()}
 
-      {selectedMovie && (
-        <MovieDetail 
-            movie={selectedMovie} 
-            onClose={() => setSelectedMovie(null)} 
-            onPlay={(ch, opts) => handlePlayMovie(ch, opts)}
-            watchlistIds={activeProfile.watchlist}
-            onToggleWatchlist={handleToggleWatchlist}
-            allChannels={allChannels}
-            onShowDetails={(ch) => setSelectedMovie(ch)}
-            history={activeProfile.history}
-        />
-      )}
-
-      {!currentChannel && !selectedSeries && (liveCategories.length > 0 || vodCategories.length > 0) && (
-          <AIRecommender 
-            channels={getCurrentCategories().flatMap(c => c.channels)} 
-            onPlayChannel={handlePlayRecommended}
-            activeTab={activeTab}
-            history={activeProfile.history}
+        {selectedMovie && (
+          <MovieDetail
+              movie={selectedMovie}
+              onClose={() => setSelectedMovie(null)}
+              onPlay={(ch, opts) => handlePlayMovie(ch, opts)}
+              watchlistIds={activeProfile.watchlist}
+              onToggleWatchlist={handleToggleWatchlist}
+              allChannels={allChannels}
+              onShowDetails={(ch) => setSelectedMovie(ch)}
+              history={activeProfile.history}
           />
-      )}
+        )}
 
-      {showXtreamModal && (
-        <XtreamLogin 
-            onLogin={(creds) => handleXtreamLogin(creds, true)} 
-            onClose={() => setShowXtreamModal(false)} 
-        />
-      )}
+        {!currentChannel && !selectedSeries && (liveCategories.length > 0 || vodCategories.length > 0) && (
+            <AIRecommender
+              channels={getCurrentCategories().flatMap(c => c.channels)}
+              onPlayChannel={handlePlayRecommended}
+              activeTab={activeTab}
+              history={activeProfile.history}
+            />
+        )}
 
-      {/* Avviso codec HEVC - mostrato solo se necessario */}
-      {activeProfile && !currentChannel && <CodecWarning />}
-    </div>
+        {showXtreamModal && (
+          <XtreamLogin
+              onLogin={(creds) => handleXtreamLogin(creds, true)}
+              onClose={() => setShowXtreamModal(false)}
+          />
+        )}
+
+        {/* Avviso codec HEVC - mostrato solo se necessario */}
+        {activeProfile && !currentChannel && <CodecWarning />}
+      </div>
+    </LanguageProvider>
   );
 }
 

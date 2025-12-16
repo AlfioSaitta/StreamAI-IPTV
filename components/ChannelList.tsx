@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { Category, Channel, StreamType, WatchHistoryItem } from '../types.ts';
 import { Search, Play, Info, ChevronRight, LogOut, Clock, RefreshCw, BookmarkPlus, BookmarkCheck, Settings } from 'lucide-react';
 import CachedImage from './CachedImage.tsx';
+import { useLanguage } from '../contexts/LanguageContext.tsx';
 
 interface ChannelListProps {
   categories: Category[];
@@ -133,6 +134,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
   allChannels,
   onShowDetails
 }) => {
+  const { t } = useLanguage();
   const [searchTerm, setSearchTerm] = useState('');
   const [scrolled, setScrolled] = useState(false);
   const [featuredItem, setFeaturedItem] = useState<Channel | null>(null);
@@ -342,7 +344,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
                         className={`tv-focus px-4 py-2 rounded-md transition-all outline-none focus:ring-2 focus:ring-white ${activeTab === tab ? 'bg-white/10 text-white font-bold' : 'hover:text-white hover:bg-white/5'}`}
                         tabIndex={0}
                      >
-                         {tab === 'live' ? 'TV Live' : tab === 'movie' ? 'Film' : 'Serie TV'}
+                         {tab === 'live' ? t.live : tab === 'movie' ? t.movies : t.series}
                      </button>
                  ))}
              </div>
@@ -359,7 +361,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
                  <Search className="w-4 h-4 text-gray-400" />
                  <input 
                     type="text" 
-                    placeholder="Cerca..." 
+                    placeholder={t.search + '...'}
                     className={`tv-focus bg-transparent text-sm outline-none transition-all ${searchTerm ? 'w-full' : 'w-20 focus:w-40'}`}
                     value={searchTerm}
                     onChange={e => setSearchTerm(e.target.value)}
@@ -376,20 +378,20 @@ const ChannelList: React.FC<ChannelListProps> = ({
                  
                  <div className="absolute top-full right-0 mt-3 w-56 bg-[#1a1a1a] border border-white/10 rounded-xl shadow-2xl py-2 opacity-0 invisible group-hover:opacity-100 group-hover:visible focus-within:opacity-100 focus-within:visible transition-all transform origin-top-right">
                     <div className="px-4 py-3 border-b border-white/5 text-xs text-gray-400">
-                        Profilo attivo: <br/>
+                        {t.activeProfile}: <br/>
                         <span className="text-white font-bold text-sm">{profileName}</span>
                     </div>
                     
                     <button onClick={reloadPage} className="tv-focus w-full text-left px-4 py-3 text-sm hover:bg-white/5 flex items-center gap-3 text-blue-400 font-medium outline-none focus:bg-white/10" tabIndex={0}>
-                        <RefreshCw className="w-4 h-4" /> Aggiorna Cache
+                        <RefreshCw className="w-4 h-4" /> {t.refreshCache}
                     </button>
 
                     <button onClick={onOpenSettings} className="tv-focus w-full text-left px-4 py-3 text-sm hover:bg-white/5 flex items-center gap-3 text-gray-300 font-medium outline-none focus:bg-white/10" tabIndex={0}>
-                        <Settings className="w-4 h-4" /> Impostazioni
+                        <Settings className="w-4 h-4" /> {t.settings}
                     </button>
 
                     <button onClick={onLogout} className="tv-focus w-full text-left px-4 py-3 text-sm hover:bg-white/5 flex items-center gap-3 text-red-400 font-medium outline-none focus:bg-white/10" tabIndex={0}>
-                        <LogOut className="w-4 h-4" /> Esci
+                        <LogOut className="w-4 h-4" /> {t.logout}
                     </button>
                  </div>
              </div>
@@ -481,7 +483,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
 
           {!searchTerm && continueWatching.length > 0 && (
               <ContentRow 
-                  title="Continua a guardare" 
+                  title={t.continueWatching}
                   channels={continueWatching}
                   onSelect={onSelectChannel}
                   isPoster={activeTab === 'movie'}
@@ -525,7 +527,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
 
           {filteredCategories.length === 0 && searchTerm && (
               <div className="text-center py-20 text-gray-500 text-xl">
-                  Nessun risultato per "{searchTerm}"
+                  {t.noResults} "{searchTerm}"
               </div>
           )}
       </div>

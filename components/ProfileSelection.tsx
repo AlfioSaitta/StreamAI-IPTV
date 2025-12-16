@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Profile } from '../types.ts';
 import { ProfileService } from '../services/profileService.ts';
 import { Plus, User, Trash2, Tv } from 'lucide-react';
+import { i18n } from '../services/i18n.ts';
 
 interface ProfileSelectionProps {
   onSelectProfile: (profile: Profile) => void;
@@ -27,11 +28,16 @@ const ProfileSelection: React.FC<ProfileSelectionProps> = ({ onSelectProfile }) 
 
   const handleDelete = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    if (confirm('Delete Profile?')) {
+    // Use i18n directly since this component is outside LanguageProvider
+    const t = i18n.t();
+    if (confirm(t.deleteProfile)) {
         ProfileService.delete(id);
         setProfiles(ProfileService.getAll());
     }
   };
+
+  // Use i18n directly since this component is outside LanguageProvider
+  const t = i18n.t();
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-black bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-gray-900 to-black text-white animate-fade-in">
@@ -40,16 +46,16 @@ const ProfileSelection: React.FC<ProfileSelectionProps> = ({ onSelectProfile }) 
             <div className="w-20 h-20 rounded-3xl bg-gradient-to-tr from-purple-600 to-blue-600 flex items-center justify-center shadow-[0_0_50px_rgba(124,58,237,0.4)] mb-4">
                 <Tv className="w-10 h-10 text-white" />
             </div>
-           <h1 className="text-5xl font-light tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-white to-gray-400">Who is watching?</h1>
+           <h1 className="text-5xl font-light tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-white to-gray-400">{t.whoIsWatching}</h1>
        </div>
 
        {isCreating ? (
            <form onSubmit={handleCreate} className="flex flex-col gap-6 w-full max-w-sm animate-slide-up bg-white/5 p-8 rounded-3xl border border-white/10 backdrop-blur-xl">
-               <h3 className="text-xl font-medium text-center">New Profile</h3>
-               <input 
+               <h3 className="text-xl font-medium text-center">{t.newProfile}</h3>
+               <input
                  autoFocus
                  type="text" 
-                 placeholder="Name" 
+                 placeholder={t.profileName}
                  className="bg-black/50 text-white px-6 py-4 rounded-xl text-xl outline-none border border-white/10 focus:border-purple-500 text-center transition-all"
                  value={newName}
                  onChange={e => setNewName(e.target.value)}
@@ -60,14 +66,14 @@ const ProfileSelection: React.FC<ProfileSelectionProps> = ({ onSelectProfile }) 
                     onClick={() => setIsCreating(false)}
                     className="flex-1 py-3 rounded-xl bg-white/10 hover:bg-white/20 transition-colors"
                    >
-                       Cancel
+                       {t.cancel}
                    </button>
                    <button 
                     type="submit"
                     disabled={!newName.trim()}
                     className="flex-1 py-3 rounded-xl bg-purple-600 hover:bg-purple-500 text-white shadow-lg shadow-purple-900/50 transition-all disabled:opacity-50"
                    >
-                       Create
+                       {t.create}
                    </button>
                </div>
            </form>
@@ -104,7 +110,7 @@ const ProfileSelection: React.FC<ProfileSelectionProps> = ({ onSelectProfile }) 
                    >
                        <Plus className="w-12 h-12 text-gray-500 group-hover:text-gray-300" />
                    </button>
-                   <span className="text-xl font-medium text-gray-500">Add Profile</span>
+                   <span className="text-xl font-medium text-gray-500">{t.addProfile}</span>
                </div>
            </div>
        )}

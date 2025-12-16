@@ -3,6 +3,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Channel, XtreamCredentials, WatchHistoryItem } from '../types.ts';
 import { getSeriesInfo } from '../services/xtream.ts';
 import { MetadataService } from '../services/metadata.ts';
+import { useLanguage } from '../contexts/LanguageContext.tsx';
 import { Play, ArrowLeft, Loader2, Film, BookmarkPlus, BookmarkCheck } from 'lucide-react';
 
 interface SeriesDetailProps {
@@ -25,6 +26,7 @@ interface Episode {
 }
 
 const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisode, onBack, history, watchlistIds, onToggleWatchlist }) => {
+  const { language, t } = useLanguage();
   const [loading, setLoading] = useState(true);
   const [info, setInfo] = useState<any>(null);
   const [episodes, setEpisodes] = useState<Record<string, Episode[]>>({});
@@ -59,10 +61,10 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
 
         const fetchTmdb = async () => {
             let result = null;
-            if (series.cleanName) result = await MetadataService.searchTMDB(series.cleanName, 'series', series.year);
-            if (!result && series.name) result = await MetadataService.searchTMDB(series.name, 'series', series.year);
+            if (series.cleanName) result = await MetadataService.searchTMDB(series.cleanName, 'series', series.year, language);
+            if (!result && series.name) result = await MetadataService.searchTMDB(series.name, 'series', series.year, language);
             if (result && result.id) {
-                const fullDetails = await MetadataService.getDetails(result.id, 'series');
+                const fullDetails = await MetadataService.getDetails(result.id, 'series', language);
                 setTmdbData(fullDetails);
             }
         };
@@ -76,7 +78,7 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
       }
     };
     fetchDetails();
-  }, [series, creds]);
+  }, [series, creds, language]);
 
   const createChannelFromEpisode = useCallback((ep: Episode): Channel => {
       let baseUrl = creds.url.trim().replace(/\/$/, '');
@@ -122,7 +124,7 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
     return (
       <div className="flex-1 flex flex-col items-center justify-center bg-[#141414] text-white h-full z-50 fixed inset-0">
         <Loader2 className="w-16 h-16 animate-spin text-red-600 mb-6" />
-        <p className="text-2xl text-gray-400">Loading Series...</p>
+        <p className="text-2xl text-gray-400">{t.loading}</p>
       </div>
     );
   }
@@ -131,7 +133,7 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
     return (
       <div className="flex-1 flex flex-col items-center justify-center bg-[#141414] text-white h-full z-50 fixed inset-0">
         <p className="text-3xl text-red-400 mb-8">{error}</p>
-        <button onClick={onBack} className="tv-focus text-xl bg-gray-800 px-8 py-4 rounded-lg">Go Back</button>
+        <button onClick={onBack} className="tv-focus text-xl bg-gray-800 px-8 py-4 rounded-lg">{t.back}</button>
       </div>
     );
   }
@@ -162,7 +164,7 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
                   onClick={onBack} 
                   className="tv-focus self-start flex items-center gap-2 text-gray-300 hover:text-white mb-8 px-3 py-1.5 rounded transition-colors text-sm font-semibold uppercase tracking-wider border border-white/20 hover:bg-white/10"
               >
-                  <ArrowLeft className="w-4 h-4" /> Back to Browse
+                  <ArrowLeft className="w-4 h-4" /> {t.back}
               </button>
               
               <img src={poster} className="w-2/3 md:w-3/4 rounded-md shadow-2xl mb-8 self-center md:self-start" alt="Cover" />
@@ -181,7 +183,7 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
                     className="tv-focus flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg border border-white/10 transition-colors"
                   >
                       {isInWatchlist ? <BookmarkCheck className="w-4 h-4" /> : <BookmarkPlus className="w-4 h-4" />}
-                      <span className="text-sm font-semibold">{isInWatchlist ? 'Nella mia lista' : 'Aggiungi alla lista'}</span>
+                      <span className="text-sm font-semibold">{isInWatchlist ? t.removeFromList : t.addToList}</span>
                   </button>
               </div>
 
@@ -191,8 +193,8 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
           {/* Right Panel */}
           <div className="flex-1 pb-20">
               <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-2xl font-bold text-white">Episodes</h3>
-                  
+                  <h3 className="text-2xl font-bold text-white">{t.episodes}</h3>
+
                   {/* Seasons */}
                   <div className="flex gap-2 overflow-x-auto pb-2 max-w-full no-scrollbar">
                     {seasons.map(season => (

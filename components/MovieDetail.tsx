@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Channel, WatchHistoryItem } from '../types.ts';
 import { MetadataService } from '../services/metadata.ts';
+import { useLanguage } from '../contexts/LanguageContext.tsx';
 import { Play, X, BookmarkPlus, BookmarkCheck, ThumbsUp, Loader2 } from 'lucide-react';
 
 interface MovieDetailProps {
@@ -15,6 +16,7 @@ interface MovieDetailProps {
 }
 
 const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watchlistIds, onToggleWatchlist, allChannels, onShowDetails, history }) => {
+  const { language, t } = useLanguage();
   const [loading, setLoading] = useState(true);
   const [tmdbData, setTmdbData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
@@ -30,26 +32,26 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
 
         let details = null;
         if (movie.tmdbId) {
-          details = await MetadataService.getDetails(movie.tmdbId, 'movie');
+          details = await MetadataService.getDetails(movie.tmdbId, 'movie', language);
         } else {
           const searchTitle = movie.cleanName || movie.name;
-          const result = await MetadataService.searchTMDB(searchTitle, 'movie', movie.year);
+          const result = await MetadataService.searchTMDB(searchTitle, 'movie', movie.year, language);
           if (result?.id) {
-            details = await MetadataService.getDetails(result.id, 'movie');
+            details = await MetadataService.getDetails(result.id, 'movie', language);
           }
         }
 
         setTmdbData(details);
       } catch (err) {
         console.error(err);
-        setError('Non siamo riusciti a caricare i dettagli del film.');
+        setError(t.loading);
       } finally {
         setLoading(false);
       }
     };
 
     fetchDetails();
-  }, [movie]);
+  }, [movie, language, t]);
 
   const backdrop = useMemo(() => {
     return (
@@ -128,7 +130,7 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
     return (
       <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[90] flex flex-col items-center justify-center text-white">
         <Loader2 className="w-14 h-14 animate-spin text-red-500 mb-4" />
-        <p className="text-lg text-gray-300">Caricamento dettagli film...</p>
+        <p className="text-lg text-gray-300">{t.loading}</p>
       </div>
     );
   }
@@ -137,7 +139,7 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
     return (
       <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[90] flex flex-col items-center justify-center text-white px-8 text-center">
         <p className="text-2xl text-red-400 mb-6">{error}</p>
-        <button onClick={onClose} className="tv-focus px-6 py-3 bg-white/10 rounded-lg hover:bg-white/20 border border-white/10">Chiudi</button>
+        <button onClick={onClose} className="tv-focus px-6 py-3 bg-white/10 rounded-lg hover:bg-white/20 border border-white/10">{t.close}</button>
       </div>
     );
   }
@@ -173,7 +175,7 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
           {/* Details */}
           <div className="flex-1 space-y-6">
             <div className="space-y-3">
-              <p className="text-sm uppercase tracking-[0.3em] text-gray-400">Film</p>
+              <p className="text-sm uppercase tracking-[0.3em] text-gray-400">{t.movies}</p>
               <h1 className="text-4xl md:text-5xl font-extrabold leading-tight drop-shadow-lg">
                 {tmdbData?.title || movie.cleanName || movie.name}
               </h1>
@@ -190,7 +192,7 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
                 onClick={() => { onPlay(movie, hasProgress ? { resetProgress: true } : undefined); onClose(); }}
                 className="tv-focus flex items-center gap-3 bg-white text-black px-6 py-3 rounded-lg font-bold text-lg shadow-lg hover:bg-gray-200"
               >
-                <Play className="w-5 h-5 fill-black" /> {hasProgress ? 'Guarda' : 'Riproduci'}
+                <Play className="w-5 h-5 fill-black" /> {hasProgress ? t.watchNow : t.play}
               </button>
 
               {hasProgress && (
@@ -198,7 +200,7 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
                   onClick={() => { onPlay(movie); onClose(); }}
                   className="tv-focus flex items-center gap-3 bg-red-600 text-white px-6 py-3 rounded-lg font-bold text-lg shadow-lg hover:bg-red-500"
                 >
-                  <Play className="w-5 h-5 fill-white" /> Riprendi
+                  <Play className="w-5 h-5 fill-white" /> {t.resume}
                 </button>
               )}
 
@@ -207,7 +209,7 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
                 className="tv-focus flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white px-5 py-3 rounded-lg border border-white/15 transition-colors"
               >
                 {isInWatchlist ? <BookmarkCheck className="w-5 h-5" /> : <BookmarkPlus className="w-5 h-5" />}
-                <span className="text-sm font-semibold">{isInWatchlist ? 'Nella mia lista' : 'Aggiungi alla lista'}</span>
+                <span className="text-sm font-semibold">{isInWatchlist ? t.removeFromList : t.addToList}</span>
               </button>
 
               <button
@@ -215,20 +217,20 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
                 className={`tv-focus flex items-center gap-2 px-5 py-3 rounded-lg border ${liked ? 'bg-red-600 border-red-500' : 'bg-white/5 border-white/10 hover:bg-white/15'} transition-colors`}
               >
                 <ThumbsUp className="w-5 h-5" />
-                <span className="text-sm font-semibold">{liked ? 'Ti piace' : 'Mi piace'}</span>
+                <span className="text-sm font-semibold">{liked ? '✓' : '👍'}</span>
               </button>
             </div>
 
             <p className="text-lg text-gray-200 leading-relaxed max-w-3xl">{plot}</p>
 
             {hasProgress && (
-              <p className="text-sm text-gray-400">Progresso salvato: {Math.round(progress * 100)}%</p>
+              <p className="text-sm text-gray-400">{Math.round(progress * 100)}%</p>
             )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-300">
-              {cast && <div><span className="text-gray-400">Cast: </span>{cast}</div>}
-              {director && <div><span className="text-gray-400">Regia: </span>{director}</div>}
-              {movie.group && <div><span className="text-gray-400">Categoria: </span>{movie.group}</div>}
+              {cast && <div><span className="text-gray-400">{t.cast}: </span>{cast}</div>}
+              {director && <div><span className="text-gray-400">{t.director}: </span>{director}</div>}
+              {movie.group && <div><span className="text-gray-400">{t.genre}: </span>{movie.group}</div>}
               {movie.url && <div className="text-gray-500">Stream ID: {movie.id}</div>}
             </div>
           </div>
@@ -236,7 +238,7 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
 
         {similarChannels.length > 0 && (
           <div className="mt-12">
-            <h3 className="text-2xl font-bold mb-4">Contenuti simili</h3>
+            <h3 className="text-2xl font-bold mb-4">{t.similarContent}</h3>
             <div className="flex gap-4 overflow-x-auto no-scrollbar pb-4">
               {similarChannels.map(ch => (
                 <button

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Profile, ProfilePreferences } from '../types.ts';
 import { ProfileService, DEFAULT_PREFERENCES } from '../services/profileService.ts';
-import { 
+import { useLanguage } from '../contexts/LanguageContext.tsx';
+import {
   ArrowLeft, 
   User, 
   Globe, 
@@ -56,6 +57,7 @@ const PROFILE_COLORS = [
 ];
 
 const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onBack, onProfileUpdate }) => {
+  const { t } = useLanguage();
   const [preferences, setPreferences] = useState<ProfilePreferences>(
     profile.preferences || DEFAULT_PREFERENCES
   );
@@ -149,7 +151,7 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onBack, onPr
               className="tv-focus flex items-center gap-2 text-gray-400 hover:text-white transition-colors px-4 py-2 rounded-lg hover:bg-white/10"
             >
               <ArrowLeft className="w-5 h-5" />
-              <span className="font-medium">Indietro</span>
+              <span className="font-medium">{t.back}</span>
             </button>
 
             <button
@@ -166,7 +168,7 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onBack, onPr
               ) : (
                 <Check className="w-5 h-5" />
               )}
-              Salva Modifiche
+              {t.saveChanges}
             </button>
           </div>
         </div>
@@ -177,7 +179,7 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onBack, onPr
         <section className="bg-white/5 rounded-2xl p-6 border border-white/10">
           <h2 className="text-xl font-semibold mb-6 flex items-center gap-3">
             <User className="w-6 h-6 text-purple-500" />
-            Profilo
+            {t.profile}
           </h2>
 
           <div className="flex flex-col md:flex-row gap-8 items-start">
@@ -217,13 +219,13 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onBack, onPr
 
             {/* Name input */}
             <div className="flex-1 space-y-2">
-              <label className="text-sm text-gray-400">Nome profilo</label>
+              <label className="text-sm text-gray-400">{t.profileName}</label>
               <input
                 type="text"
                 value={profileName}
                 onChange={(e) => setProfileName(e.target.value)}
                 className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white text-lg focus:border-purple-500 focus:outline-none transition-colors"
-                placeholder="Nome del profilo"
+                placeholder={t.profileName}
               />
             </div>
           </div>
@@ -233,14 +235,14 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onBack, onPr
         <section className="bg-white/5 rounded-2xl p-6 border border-white/10">
           <h2 className="text-xl font-semibold mb-6 flex items-center gap-3">
             <Globe className="w-6 h-6 text-purple-500" />
-            Lingua e Sottotitoli
+            {t.languageAndSubtitles}
           </h2>
 
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="font-medium text-white">Lingua contenuti</h3>
-                <p className="text-sm text-gray-400 mt-1">Lingua preferita per i contenuti audio</p>
+                <h3 className="font-medium text-white">{t.contentLanguage}</h3>
+                <p className="text-sm text-gray-400 mt-1">{t.contentLanguageDesc}</p>
               </div>
               <SelectDropdown
                 value={preferences.language}
@@ -257,8 +259,8 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onBack, onPr
               <div className="flex items-center gap-3">
                 <Subtitles className="w-5 h-5 text-gray-400" />
                 <div>
-                  <h3 className="font-medium text-white">Lingua sottotitoli</h3>
-                  <p className="text-sm text-gray-400 mt-1">Sottotitoli predefiniti quando disponibili</p>
+                  <h3 className="font-medium text-white">{t.subtitleLanguage}</h3>
+                  <p className="text-sm text-gray-400 mt-1">{t.subtitleLanguageDesc}</p>
                 </div>
               </div>
               <SelectDropdown
@@ -276,7 +278,7 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onBack, onPr
         <section className="bg-white/5 rounded-2xl p-6 border border-white/10">
           <h2 className="text-xl font-semibold mb-6 flex items-center gap-3">
             <Play className="w-6 h-6 text-purple-500" />
-            Riproduzione
+            {t.playback}
           </h2>
 
           <div className="space-y-6">
@@ -284,8 +286,8 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onBack, onPr
               <div className="flex items-center gap-3">
                 <Monitor className="w-5 h-5 text-gray-400" />
                 <div>
-                  <h3 className="font-medium text-white">Qualità video</h3>
-                  <p className="text-sm text-gray-400 mt-1">Qualità predefinita per lo streaming</p>
+                  <h3 className="font-medium text-white">{t.videoQuality}</h3>
+                  <p className="text-sm text-gray-400 mt-1">{t.videoQualityDesc}</p>
                 </div>
               </div>
               <SelectDropdown
@@ -301,8 +303,8 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onBack, onPr
               <div className="flex items-center gap-3">
                 <Play className="w-5 h-5 text-gray-400" />
                 <div>
-                  <h3 className="font-medium text-white">Riproduci automaticamente</h3>
-                  <p className="text-sm text-gray-400 mt-1">Passa automaticamente al prossimo episodio</p>
+                  <h3 className="font-medium text-white">{t.autoPlay}</h3>
+                  <p className="text-sm text-gray-400 mt-1">{t.autoPlayDesc}</p>
                 </div>
               </div>
               <ToggleSwitch
@@ -317,8 +319,8 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onBack, onPr
               <div className="flex items-center gap-3">
                 <SkipForward className="w-5 h-5 text-gray-400" />
                 <div>
-                  <h3 className="font-medium text-white">Salta intro</h3>
-                  <p className="text-sm text-gray-400 mt-1">Salta automaticamente le sigle di apertura</p>
+                  <h3 className="font-medium text-white">{t.skipIntro}</h3>
+                  <p className="text-sm text-gray-400 mt-1">{t.skipIntroDesc}</p>
                 </div>
               </div>
               <ToggleSwitch
@@ -333,13 +335,13 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onBack, onPr
         <section className="bg-white/5 rounded-2xl p-6 border border-white/10">
           <h2 className="text-xl font-semibold mb-6 flex items-center gap-3">
             <ShieldCheck className="w-6 h-6 text-purple-500" />
-            Controllo Genitori
+            {t.parentalControls}
           </h2>
 
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="font-medium text-white">Contenuti per adulti</h3>
-              <p className="text-sm text-gray-400 mt-1">Mostra contenuti con classificazione per adulti</p>
+              <h3 className="font-medium text-white">{t.matureContent}</h3>
+              <p className="text-sm text-gray-400 mt-1">{t.matureContentDesc}</p>
             </div>
             <ToggleSwitch
               enabled={preferences.matureContent}

@@ -46,19 +46,19 @@ export const MetadataService = {
   /**
    * Searches TMDB for a movie or series.
    */
-  searchTMDB: async (query: string, type: 'movie' | 'series', year?: string) => {
+  searchTMDB: async (query: string, type: 'movie' | 'series', year?: string, language: string = 'it') => {
     if (!TMDB_API_KEY) return null;
     
     // Normalize query
     const cleanQuery = query.trim();
     if (!cleanQuery) return null;
 
-    const cacheKey = `search_${type}_${cleanQuery}_${year || ''}`;
+    const cacheKey = `search_${type}_${cleanQuery}_${year || ''}_${language}`;
     if (tmdbCache.has(cacheKey)) return tmdbCache.get(cacheKey);
 
     try {
       const searchType = type === 'series' ? 'tv' : 'movie';
-      let url = `${TMDB_BASE_URL}/search/${searchType}?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(cleanQuery)}`;
+      let url = `${TMDB_BASE_URL}/search/${searchType}?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(cleanQuery)}&language=${language}`;
       if (year) url += `&primary_release_year=${year}`;
 
       const res = await fetch(url);
@@ -78,16 +78,16 @@ export const MetadataService = {
   /**
    * Gets full details (images, plot, cast) by TMDB ID.
    */
-  getDetails: async (tmdbId: number, type: 'movie' | 'series') => {
+  getDetails: async (tmdbId: number, type: 'movie' | 'series', language: string = 'it') => {
     if (!TMDB_API_KEY) return null;
 
-    const cacheKey = `details_${type}_${tmdbId}`;
+    const cacheKey = `details_${type}_${tmdbId}_${language}`;
     if (tmdbCache.has(cacheKey)) return tmdbCache.get(cacheKey);
 
     try {
       const searchType = type === 'series' ? 'tv' : 'movie';
-      const url = `${TMDB_BASE_URL}/${searchType}/${tmdbId}?api_key=${TMDB_API_KEY}&append_to_response=credits,images,similar,recommendations`;
-      
+      const url = `${TMDB_BASE_URL}/${searchType}/${tmdbId}?api_key=${TMDB_API_KEY}&append_to_response=credits,images,similar,recommendations&language=${language}`;
+
       const res = await fetch(url);
       if (!res.ok) throw new Error(res.statusText);
       const data = await res.json();
