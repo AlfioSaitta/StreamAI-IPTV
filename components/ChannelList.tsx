@@ -93,9 +93,8 @@ const ChannelList: React.FC<ChannelListProps> = ({
   // Trigger Background Download when categories change (and have content)
   useEffect(() => {
       if (categories.length > 0) {
-          // Flatten first 500 channels to download in background
-          // We prioritize VOD and Series for visual impact
-          const allChannels = categories.flatMap(c => c.channels).slice(0, 300);
+          // Flatten up to 5000 channels to download in background (Massive Cache Update)
+          const allChannels = categories.flatMap(c => c.channels).slice(0, 5000);
           DownloadManager.startBackgroundDownload(allChannels);
       }
   }, [categories]);

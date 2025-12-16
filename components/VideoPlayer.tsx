@@ -2,7 +2,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Channel } from '../types.ts';
 import { MetadataService } from '../services/metadata.ts';
-import { AlertTriangle, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipForward, SkipBack, List, X, FastForward, Rewind } from 'lucide-react';
+import { AlertTriangle, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipForward, SkipBack, List, X, FastForward, Rewind, Settings } from 'lucide-react';
 import Hls from 'hls.js';
 import mpegts from 'mpegts.js';
 
@@ -32,6 +32,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
   
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [buffered, setBuffered] = useState(0);
   const [isSeeking, setIsSeeking] = useState(false);
   const [meta, setMeta] = useState<any>(null);
 
@@ -82,40 +83,110 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
     setShowPlaylist(false); // Close playlist on change
     setCurrentTime(0);
     setDuration(0);
+    setBuffered(0);
 
-    if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
-    if (mpegtsRef.current) { mpegtsRef.current.destroy(); mpegtsRef.current = null; }
+    // Immediate cleanup of previous instances to free resources for zapping
+    if (hlsRef.current) { 
+        hlsRef.current.destroy(); 
+        hlsRef.current = null; 
+    }
+    if (mpegtsRef.current) { 
+        mpegtsRef.current.destroy(); 
+        mpegtsRef.current = null; 
+    }
     
+    // Reset video element state
     video.removeAttribute('src');
-    video.load();
+    video.load(); 
 
     const source = channel.url;
     const isM3U8 = source.toLowerCase().includes('.m3u8');
     const isTS = source.toLowerCase().match(/\.(ts|mpeg|mpg)$/);
+    const isLive = channel.type === 'live';
 
-    if (isM3U8 && Hls.isSupported()) {
-      const hls = new Hls({ capLevelToPlayerSize: true, maxBufferLength: 30 });
+    // Prioritize startup speed
+    video.preload = "auto";
+    video.autoplay = true;
+    video.playsInline = true;
+
+    if (isM3U8 && (Hls as any).isSupported()) {
+      // Zapping-optimized Config
+      const hlsConfig = {
+          debug: false,
+          enableWorker: true,
+          lowLatencyMode: false, // DISABLE Low Latency: Causes stalls on many IPTV providers
+          backBufferLength: isLive ? 0 : 30, // Don't cache back for live zapping
+          
+          // Startup optimization
+          startLevel: -1, // Auto bandwidth
+          startFragPrefetch: true, // Fetch first segment immediately
+          
+          // Resiliency
+          manifestLoadingTimeOut: 20000,
+          fragLoadingTimeOut: 20000,
+          levelLoadingTimeOut: 20000,
+          
+          // Buffer - keep it lean for live to allow fast sync
+          maxBufferLength: isLive ? 10 : 30, 
+          maxMaxBufferLength: isLive ? 20 : 60,
+      };
+
+      const hls = new Hls(hlsConfig as any);
       hlsRef.current = hls;
       hls.loadSource(source);
       hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => setIsPlaying(false)));
-      hls.on(Hls.Events.ERROR, (_e, data) => {
+      
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          // Force play attempt immediately after manifest
+          const promise = video.play();
+          if (promise !== undefined) {
+              promise.catch(error => {
+                  console.debug("Autoplay catch:", error);
+                  setIsPlaying(false);
+              });
+          }
+      });
+
+      hls.on(Hls.Events.ERROR, (_e: any, data: any) => {
          if (data.fatal) {
-             if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
-             else setError("Stream Unavailable");
+             switch (data.type) {
+                 case Hls.ErrorTypes.NETWORK_ERROR:
+                     hls.startLoad();
+                     break;
+                 case Hls.ErrorTypes.MEDIA_ERROR:
+                     hls.recoverMediaError();
+                     break;
+                 default:
+                     setError("Stream Unavailable");
+                     hls.destroy();
+                     break;
+             }
          }
       });
     } else if (isTS && mpegts.isSupported()) {
-        const player = mpegts.createPlayer({ type: 'mpegts', url: source, isLive: channel.type === 'live' });
+        const player = mpegts.createPlayer({ 
+            type: 'mpegts', 
+            url: source, 
+            isLive: isLive 
+        }, {
+            enableWorker: true,
+            lazyLoadMaxDuration: isLive ? 30 : 300, // Reduced from 60
+            stashInitialSize: 128 * 1024, // Fast start
+            liveBufferLatencyChasing: false, // DISABLE chasing: Increases CPU and can cause stutter on zap
+            deferLoadAfterSourceOpen: false
+        });
+        
         mpegtsRef.current = player;
         player.attachMediaElement(video);
         player.load();
+        
         const playPromise = player.play();
-        if (playPromise && typeof playPromise.catch === 'function') {
-             playPromise.catch(() => setIsPlaying(false));
+        if (playPromise !== undefined) {
+             (playPromise as Promise<void>).catch(() => setIsPlaying(false));
         }
         player.on(mpegts.Events.ERROR, () => setError("Stream Error"));
     } else {
+      // Native Player
       video.src = source;
       video.play().catch(() => setIsPlaying(false));
       video.onerror = () => setError("Format Not Supported");
@@ -155,10 +226,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
 
         switch (e.key) {
             case 'ArrowLeft':
+                // Seek logic
                 video.currentTime = Math.max(0, video.currentTime - 10);
                 showOSD(Rewind, "-10s");
                 break;
             case 'ArrowRight':
+                // Seek logic
                 video.currentTime = Math.min(video.duration, video.currentTime + 10);
                 showOSD(FastForward, "+10s");
                 break;
@@ -204,6 +277,20 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
     const video = videoRef.current;
     if (!video) return;
 
+    const updateBuffer = () => {
+        if (video.duration > 0 && video.buffered.length > 0) {
+            let b = 0;
+            // Find the buffer range that covers the current time
+            for(let i=0; i < video.buffered.length; i++) {
+                if (video.buffered.start(i) <= video.currentTime + 0.5 && video.buffered.end(i) >= video.currentTime - 0.5) {
+                    b = video.buffered.end(i);
+                    break;
+                }
+            }
+            setBuffered(b);
+        }
+    };
+
     const onTime = () => { 
         if(!isSeeking) {
             setCurrentTime(video.currentTime);
@@ -215,19 +302,24 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
                 onProgress(video.currentTime / video.duration, video.duration);
             }
         }
+        updateBuffer();
     };
+    
     const onMeta = () => setDuration(video.duration);
+    
     const onEnd = () => { 
         if (onProgress && video.duration > 0) onProgress(1, video.duration); // Mark as fully watched
         if (onNext) onNext(); 
     };
 
     video.addEventListener('timeupdate', onTime);
+    video.addEventListener('progress', updateBuffer); // Also update on download progress
     video.addEventListener('loadedmetadata', onMeta);
     video.addEventListener('ended', onEnd);
     
     return () => {
         video.removeEventListener('timeupdate', onTime);
+        video.removeEventListener('progress', updateBuffer);
         video.removeEventListener('loadedmetadata', onMeta);
         video.removeEventListener('ended', onEnd);
     };
@@ -262,7 +354,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
         onMouseMove={resetControlsTimeout}
         tabIndex={0} 
     >
-      <video ref={videoRef} className="absolute inset-0 w-full h-full object-contain z-10 bg-black" poster={channel.logo} />
+      <video 
+        ref={videoRef} 
+        className="absolute inset-0 w-full h-full object-contain z-10 bg-black" 
+        poster={channel.logo}
+        playsInline
+      />
       
       {backdrop && (
           <div className={`absolute inset-0 z-0 bg-cover bg-center transition-opacity duration-1000 ${(!isPlaying || showControls) ? 'opacity-30 blur-sm' : 'opacity-0'}`} style={{ backgroundImage: `url(${backdrop})` }} />
@@ -314,6 +411,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
           <div className="flex gap-4 text-gray-300 text-sm font-medium tracking-wider">
              {channel.type === 'live' && <span className="bg-red-600 px-2 py-0.5 rounded text-white text-xs font-bold">LIVE</span>}
              {meta?.release_date && <span>{meta.release_date.split('-')[0]}</span>}
+             {channel.type !== 'live' && <span className="bg-gray-800 px-2 py-0.5 rounded border border-gray-600 text-xs text-gray-300">Instant Play</span>}
           </div>
       </div>
 
@@ -328,14 +426,29 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
       `}>
           
           {showSeekBar && (
-            <div className="flex items-center gap-4 text-xs font-mono text-gray-400">
+            <div className="flex items-center gap-4 text-xs font-mono text-gray-400 select-none">
                 <span>{formatTime(currentTime)}</span>
-                <div className="relative flex-1 h-1.5 bg-white/20 rounded-full group/seek">
-                    <div className="absolute h-full bg-purple-500 rounded-full" style={{ width: `${(currentTime / duration) * 100}%` }} />
+                <div className="relative flex-1 h-1.5 bg-white/20 rounded-full group/seek cursor-pointer items-center flex">
+                    
+                    {/* Buffer Bar */}
+                    <div 
+                        className="absolute h-full bg-white/30 rounded-full transition-all duration-300 ease-linear" 
+                        style={{ width: `${Math.min((buffered / duration) * 100, 100)}%` }} 
+                    />
+
+                    {/* Play Progress Bar */}
+                    <div 
+                        className="absolute h-full bg-gradient-to-r from-purple-600 to-indigo-500 rounded-full" 
+                        style={{ width: `${(currentTime / duration) * 100}%` }} 
+                    >
+                        {/* Visual Thumb */}
+                        <div className="absolute right-[-6px] top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-white rounded-full shadow-lg scale-0 group-hover/seek:scale-100 transition-transform duration-200" />
+                    </div>
+
                     <input 
-                        type="range" min={0} max={duration} value={currentTime} onChange={handleSeek}
+                        type="range" min={0} max={duration} step="any" value={currentTime} onChange={handleSeek}
                         onMouseDown={() => setIsSeeking(true)} onMouseUp={() => setIsSeeking(false)}
-                        className="tv-focus absolute inset-0 w-full opacity-0 cursor-pointer z-20"
+                        className="tv-focus absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"
                     />
                 </div>
                 <span>{formatTime(duration)}</span>

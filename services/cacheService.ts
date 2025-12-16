@@ -7,6 +7,26 @@ const STORE_IMAGES = 'images';
 export const CacheService = {
   dbPromise: null as Promise<IDBDatabase> | null,
 
+  init: async () => {
+    if (navigator.storage && navigator.storage.persist) {
+      try {
+        const isPersisted = await navigator.storage.persist();
+        console.log(`[Cache] Storage Persistent Mode: ${isPersisted ? 'Enabled' : 'Disabled/Refused'}`);
+        
+        if (navigator.storage.estimate) {
+            const estimate = await navigator.storage.estimate();
+            if (estimate.usage && estimate.quota) {
+                const usageMB = (estimate.usage / 1024 / 1024).toFixed(2);
+                const quotaMB = (estimate.quota / 1024 / 1024).toFixed(2);
+                console.log(`[Cache] Usage: ${usageMB}MB of ${quotaMB}MB`);
+            }
+        }
+      } catch (e) {
+        console.warn("[Cache] Failed to request persistence", e);
+      }
+    }
+  },
+
   openDB: () => {
     if (CacheService.dbPromise) return CacheService.dbPromise;
 

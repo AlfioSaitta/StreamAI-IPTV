@@ -8,6 +8,7 @@ import SeriesDetail from './components/SeriesDetail.tsx';
 import ProfileSelection from './components/ProfileSelection.tsx';
 import { loginXtream } from './services/xtream.ts';
 import { ProfileService } from './services/profileService.ts';
+import { CacheService } from './services/cacheService.ts';
 import { Category, Channel, XtreamCredentials, StreamType, Profile } from './types.ts';
 import { Server } from 'lucide-react';
 
@@ -32,6 +33,11 @@ function App() {
 
   // Focus Restoration State
   const [lastFocusedChannelId, setLastFocusedChannelId] = useState<string | null>(null);
+
+  // Initialize Cache Persistence
+  useEffect(() => {
+    CacheService.init();
+  }, []);
 
   // When profile changes, load their data
   useEffect(() => {
