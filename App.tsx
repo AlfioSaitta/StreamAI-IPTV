@@ -7,6 +7,7 @@ import XtreamLogin from './components/XtreamLogin.tsx';
 import SeriesDetail from './components/SeriesDetail.tsx';
 import MovieDetail from './components/MovieDetail.tsx';
 import ProfileSelection from './components/ProfileSelection.tsx';
+import ProfileSettings from './components/ProfileSettings.tsx';
 import CodecWarning from './components/CodecWarning.tsx';
 import { loginXtream } from './services/xtream.ts';
 import { ProfileService } from './services/profileService.ts';
@@ -33,6 +34,7 @@ function App() {
 
   const [isLoading, setIsLoading] = useState(false);
   const [showXtreamModal, setShowXtreamModal] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   // Focus Restoration State
   const [lastFocusedChannelId, setLastFocusedChannelId] = useState<string | null>(null);
@@ -271,6 +273,16 @@ function App() {
         );
     }
 
+    if (showSettings) {
+        return (
+            <ProfileSettings
+                profile={activeProfile}
+                onBack={() => setShowSettings(false)}
+                onProfileUpdate={(updatedProfile) => setActiveProfile(updatedProfile)}
+            />
+        );
+    }
+
     if (currentChannel) {
         return (
             <div className="fixed inset-0 z-[100] bg-black">
@@ -341,6 +353,7 @@ function App() {
             profileColor={activeProfile.color}
             onLogout={handleLogoutProfile}
             onOpenServer={() => setShowXtreamModal(true)}
+            onOpenSettings={() => setShowSettings(true)}
             history={activeProfile.history}
             watchlistIds={activeProfile.watchlist}
             onToggleWatchlist={handleToggleWatchlist}

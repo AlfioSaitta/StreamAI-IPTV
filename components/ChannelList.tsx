@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Category, Channel, StreamType, WatchHistoryItem } from '../types.ts';
-import { Search, Play, Info, ChevronRight, LogOut, Clock, RefreshCw, BookmarkPlus, BookmarkCheck } from 'lucide-react';
+import { Search, Play, Info, ChevronRight, LogOut, Clock, RefreshCw, BookmarkPlus, BookmarkCheck, Settings } from 'lucide-react';
 import CachedImage from './CachedImage.tsx';
 
 interface ChannelListProps {
@@ -16,6 +16,7 @@ interface ChannelListProps {
   profileColor: string;
   onLogout: () => void;
   onOpenServer: () => void;
+  onOpenSettings: () => void;
   history: WatchHistoryItem[];
   watchlistIds: string[];
   onToggleWatchlist: (channelId: string) => void;
@@ -125,6 +126,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
   profileColor,
   onLogout,
   onOpenServer,
+  onOpenSettings,
   history,
   watchlistIds,
   onToggleWatchlist,
@@ -380,6 +382,10 @@ const ChannelList: React.FC<ChannelListProps> = ({
                     
                     <button onClick={reloadPage} className="tv-focus w-full text-left px-4 py-3 text-sm hover:bg-white/5 flex items-center gap-3 text-blue-400 font-medium outline-none focus:bg-white/10" tabIndex={0}>
                         <RefreshCw className="w-4 h-4" /> Aggiorna Cache
+                    </button>
+
+                    <button onClick={onOpenSettings} className="tv-focus w-full text-left px-4 py-3 text-sm hover:bg-white/5 flex items-center gap-3 text-gray-300 font-medium outline-none focus:bg-white/10" tabIndex={0}>
+                        <Settings className="w-4 h-4" /> Impostazioni
                     </button>
 
                     <button onClick={onLogout} className="tv-focus w-full text-left px-4 py-3 text-sm hover:bg-white/5 flex items-center gap-3 text-red-400 font-medium outline-none focus:bg-white/10" tabIndex={0}>

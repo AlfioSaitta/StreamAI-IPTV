@@ -1,7 +1,16 @@
 
-import { Profile, XtreamCredentials, WatchHistoryItem } from '../types.ts';
+import { Profile, XtreamCredentials, WatchHistoryItem, ProfilePreferences } from '../types.ts';
 
 const STORAGE_KEY = 'streamai_profiles';
+
+export const DEFAULT_PREFERENCES: ProfilePreferences = {
+  language: 'it',
+  subtitleLanguage: 'it',
+  autoPlayNext: true,
+  defaultQuality: 'auto',
+  matureContent: false,
+  skipIntro: false
+};
 
 export const ProfileService = {
   getAll: (): Profile[] => {
@@ -33,7 +42,8 @@ export const ProfileService = {
       color: colors[profiles.length % colors.length],
       xtreamCreds: null,
       history: [],
-      watchlist: []
+      watchlist: [],
+      preferences: { ...DEFAULT_PREFERENCES }
     };
     profiles.push(newProfile);
     ProfileService.saveAll(profiles);
@@ -125,5 +135,38 @@ export const ProfileService = {
       const profiles = ProfileService.getAll();
       const profile = profiles.find(p => p.id === profileId);
       return profile ? profile.history : [];
+  },
+
+  updatePreferences: (profileId: string, preferences: Partial<ProfilePreferences>): Profile | null => {
+      const profiles = ProfileService.getAll();
+      const index = profiles.findIndex(p => p.id === profileId);
+      if (index !== -1) {
+          profiles[index].preferences = {
+              ...DEFAULT_PREFERENCES,
+              ...(profiles[index].preferences || {}),
+              ...preferences
+          };
+          ProfileService.saveAll(profiles);
+          return profiles[index];
+      }
+      return null;
+  },
+
+  getPreferences: (profileId: string): ProfilePreferences => {
+      const profiles = ProfileService.getAll();
+      const profile = profiles.find(p => p.id === profileId);
+      return profile?.preferences || DEFAULT_PREFERENCES;
+  },
+
+  updateProfile: (profileId: string, updates: { name?: string; color?: string }): Profile | null => {
+      const profiles = ProfileService.getAll();
+      const index = profiles.findIndex(p => p.id === profileId);
+      if (index !== -1) {
+          if (updates.name) profiles[index].name = updates.name;
+          if (updates.color) profiles[index].color = updates.color;
+          ProfileService.saveAll(profiles);
+          return profiles[index];
+      }
+      return null;
   }
 };

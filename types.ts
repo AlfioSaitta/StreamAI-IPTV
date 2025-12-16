@@ -50,6 +50,15 @@ export interface WatchHistoryItem {
   duration?: number; // Saved duration in seconds
 }
 
+export interface ProfilePreferences {
+  language: string; // ISO 639-1 code (e.g., 'it', 'en', 'es')
+  subtitleLanguage: string; // Preferred subtitle language
+  autoPlayNext: boolean; // Auto-play next episode/video
+  defaultQuality: 'auto' | '4k' | '1080p' | '720p' | '480p';
+  matureContent: boolean; // Allow mature content
+  skipIntro: boolean; // Auto-skip intro
+}
+
 export interface Profile {
   id: string;
   name: string;
@@ -57,4 +66,5 @@ export interface Profile {
   xtreamCreds: XtreamCredentials | null;
   history: WatchHistoryItem[];
   watchlist: string[];
+  preferences?: ProfilePreferences;
 }
