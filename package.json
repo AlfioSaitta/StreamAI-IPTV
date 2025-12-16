@@ -32,6 +32,7 @@
     "@ffmpeg/util": "^0.12.1",
     "@google/genai": "*",
     "@google/generative-ai": "^0.24.1",
+    "castv2-client": "^1.2.0",
     "hls.js": "^1.5.7",
     "jmuxer": "^2.0.5",
     "lucide-react": "^0.344.0",

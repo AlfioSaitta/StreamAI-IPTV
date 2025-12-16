@@ -47,13 +47,29 @@ export interface Translations {
   exitFullscreen: string;
   mute: string;
   unmute: string;
-  
+  cast: string;
+  castConnected: string;
+  castDisconnected: string;
+  casting: string;
+  castTo: string;
+  chromecast: string;
+  chromecastDesc: string;
+  airplay: string;
+  airplayDesc: string;
+  externalPlayer: string;
+  externalPlayerDesc: string;
+  shareLink: string;
+  shareLinkDesc: string;
+  copyUrl: string;
+  copyUrlDesc: string;
+  urlCopied: string;
+
   // Movie/Series Details
   watchNow: string;
   addToList: string;
   removeFromList: string;
   moreInfo: string;
-  cast: string;
+  castActors: string;
   director: string;
   genre: string;
   year: string;
@@ -155,13 +171,29 @@ const translations: Record<SupportedLanguage, Translations> = {
     exitFullscreen: 'Esci da schermo intero',
     mute: 'Silenzia',
     unmute: 'Attiva audio',
-    
+    cast: 'Trasmetti',
+    castConnected: 'Trasmissione in corso',
+    castDisconnected: 'Cast disconnesso',
+    casting: 'Trasmissione...',
+    castTo: 'Trasmetti su',
+    chromecast: 'Chromecast / Smart TV',
+    chromecastDesc: 'Google Cast, Android TV',
+    airplay: 'AirPlay',
+    airplayDesc: 'Apple TV, dispositivi iOS',
+    externalPlayer: 'Player esterno',
+    externalPlayerDesc: 'VLC, MX Player, Kodi',
+    shareLink: 'Condividi',
+    shareLinkDesc: 'Invia link ad altre app',
+    copyUrl: 'Copia URL',
+    copyUrlDesc: 'Incolla in altro player',
+    urlCopied: 'URL copiato!',
+
     // Movie/Series Details
     watchNow: 'Guarda ora',
     addToList: 'Aggiungi alla lista',
     removeFromList: 'Rimuovi dalla lista',
     moreInfo: 'Altre info',
-    cast: 'Cast',
+    castActors: 'Cast',
     director: 'Regia',
     genre: 'Genere',
     year: 'Anno',
@@ -262,13 +294,29 @@ const translations: Record<SupportedLanguage, Translations> = {
     exitFullscreen: 'Exit fullscreen',
     mute: 'Mute',
     unmute: 'Unmute',
-    
+    cast: 'Cast',
+    castConnected: 'Casting',
+    castDisconnected: 'Cast disconnected',
+    casting: 'Casting...',
+    castTo: 'Cast to',
+    chromecast: 'Chromecast / Smart TV',
+    chromecastDesc: 'Google Cast, Android TV',
+    airplay: 'AirPlay',
+    airplayDesc: 'Apple TV, iOS devices',
+    externalPlayer: 'External Player',
+    externalPlayerDesc: 'VLC, MX Player, Kodi',
+    shareLink: 'Share',
+    shareLinkDesc: 'Send link to other apps',
+    copyUrl: 'Copy URL',
+    copyUrlDesc: 'Paste in another player',
+    urlCopied: 'URL copied!',
+
     // Movie/Series Details
     watchNow: 'Watch Now',
     addToList: 'Add to List',
     removeFromList: 'Remove from List',
     moreInfo: 'More Info',
-    cast: 'Cast',
+    castActors: 'Cast',
     director: 'Director',
     genre: 'Genre',
     year: 'Year',
@@ -369,13 +417,29 @@ const translations: Record<SupportedLanguage, Translations> = {
     exitFullscreen: 'Salir de pantalla completa',
     mute: 'Silenciar',
     unmute: 'Activar sonido',
-    
+    cast: 'Transmitir',
+    castConnected: 'Transmitiendo',
+    castDisconnected: 'Cast desconectado',
+    casting: 'Transmitiendo...',
+    castTo: 'Transmitir a',
+    chromecast: 'Chromecast / Smart TV',
+    chromecastDesc: 'Google Cast, Android TV',
+    airplay: 'AirPlay',
+    airplayDesc: 'Apple TV, dispositivos iOS',
+    externalPlayer: 'Reproductor externo',
+    externalPlayerDesc: 'VLC, MX Player, Kodi',
+    shareLink: 'Compartir',
+    shareLinkDesc: 'Enviar enlace a otras apps',
+    copyUrl: 'Copiar URL',
+    copyUrlDesc: 'Pegar en otro reproductor',
+    urlCopied: '¡URL copiada!',
+
     // Movie/Series Details
     watchNow: 'Ver ahora',
     addToList: 'Añadir a la lista',
     removeFromList: 'Quitar de la lista',
     moreInfo: 'Más información',
-    cast: 'Reparto',
+    castActors: 'Reparto',
     director: 'Director',
     genre: 'Género',
     year: 'Año',
@@ -476,13 +540,29 @@ const translations: Record<SupportedLanguage, Translations> = {
     exitFullscreen: 'Quitter le plein écran',
     mute: 'Couper le son',
     unmute: 'Activer le son',
-    
+    cast: 'Diffuser',
+    castConnected: 'Diffusion en cours',
+    castDisconnected: 'Cast déconnecté',
+    casting: 'Diffusion...',
+    castTo: 'Diffuser sur',
+    chromecast: 'Chromecast / Smart TV',
+    chromecastDesc: 'Google Cast, Android TV',
+    airplay: 'AirPlay',
+    airplayDesc: 'Apple TV, appareils iOS',
+    externalPlayer: 'Lecteur externe',
+    externalPlayerDesc: 'VLC, MX Player, Kodi',
+    shareLink: 'Partager',
+    shareLinkDesc: 'Envoyer le lien à d\'autres apps',
+    copyUrl: 'Copier l\'URL',
+    copyUrlDesc: 'Coller dans un autre lecteur',
+    urlCopied: 'URL copiée!',
+
     // Movie/Series Details
     watchNow: 'Regarder',
     addToList: 'Ajouter à la liste',
     removeFromList: 'Retirer de la liste',
     moreInfo: 'Plus d\'infos',
-    cast: 'Distribution',
+    castActors: 'Distribution',
     director: 'Réalisateur',
     genre: 'Genre',
     year: 'Année',
@@ -583,13 +663,29 @@ const translations: Record<SupportedLanguage, Translations> = {
     exitFullscreen: 'Vollbild beenden',
     mute: 'Stumm',
     unmute: 'Ton an',
-    
+    cast: 'Streamen',
+    castConnected: 'Wird gestreamt',
+    castDisconnected: 'Cast getrennt',
+    casting: 'Streaming...',
+    castTo: 'Streamen auf',
+    chromecast: 'Chromecast / Smart TV',
+    chromecastDesc: 'Google Cast, Android TV',
+    airplay: 'AirPlay',
+    airplayDesc: 'Apple TV, iOS-Geräte',
+    externalPlayer: 'Externer Player',
+    externalPlayerDesc: 'VLC, MX Player, Kodi',
+    shareLink: 'Teilen',
+    shareLinkDesc: 'Link an andere Apps senden',
+    copyUrl: 'URL kopieren',
+    copyUrlDesc: 'In anderen Player einfügen',
+    urlCopied: 'URL kopiert!',
+
     // Movie/Series Details
     watchNow: 'Jetzt ansehen',
     addToList: 'Zur Liste hinzufügen',
     removeFromList: 'Von Liste entfernen',
     moreInfo: 'Mehr Infos',
-    cast: 'Besetzung',
+    castActors: 'Besetzung',
     director: 'Regie',
     genre: 'Genre',
     year: 'Jahr',
@@ -690,13 +786,29 @@ const translations: Record<SupportedLanguage, Translations> = {
     exitFullscreen: 'Sair da tela cheia',
     mute: 'Mudo',
     unmute: 'Ativar som',
-    
+    cast: 'Transmitir',
+    castConnected: 'Transmitindo',
+    castDisconnected: 'Cast desconectado',
+    casting: 'Transmitindo...',
+    castTo: 'Transmitir para',
+    chromecast: 'Chromecast / Smart TV',
+    chromecastDesc: 'Google Cast, Android TV',
+    airplay: 'AirPlay',
+    airplayDesc: 'Apple TV, dispositivos iOS',
+    externalPlayer: 'Player externo',
+    externalPlayerDesc: 'VLC, MX Player, Kodi',
+    shareLink: 'Compartilhar',
+    shareLinkDesc: 'Enviar link para outros apps',
+    copyUrl: 'Copiar URL',
+    copyUrlDesc: 'Colar em outro player',
+    urlCopied: 'URL copiada!',
+
     // Movie/Series Details
     watchNow: 'Assistir agora',
     addToList: 'Adicionar à lista',
     removeFromList: 'Remover da lista',
     moreInfo: 'Mais informações',
-    cast: 'Elenco',
+    castActors: 'Elenco',
     director: 'Diretor',
     genre: 'Gênero',
     year: 'Ano',
@@ -797,13 +909,29 @@ const translations: Record<SupportedLanguage, Translations> = {
     exitFullscreen: 'Выйти из полноэкранного режима',
     mute: 'Выключить звук',
     unmute: 'Включить звук',
-    
+    cast: 'Транслировать',
+    castConnected: 'Трансляция',
+    castDisconnected: 'Cast отключен',
+    casting: 'Трансляция...',
+    castTo: 'Транслировать на',
+    chromecast: 'Chromecast / Smart TV',
+    chromecastDesc: 'Google Cast, Android TV',
+    airplay: 'AirPlay',
+    airplayDesc: 'Apple TV, устройства iOS',
+    externalPlayer: 'Внешний плеер',
+    externalPlayerDesc: 'VLC, MX Player, Kodi',
+    shareLink: 'Поделиться',
+    shareLinkDesc: 'Отправить ссылку в другие приложения',
+    copyUrl: 'Копировать URL',
+    copyUrlDesc: 'Вставить в другой плеер',
+    urlCopied: 'URL скопирован!',
+
     // Movie/Series Details
     watchNow: 'Смотреть сейчас',
     addToList: 'Добавить в список',
     removeFromList: 'Удалить из списка',
     moreInfo: 'Подробнее',
-    cast: 'В ролях',
+    castActors: 'В ролях',
     director: 'Режиссёр',
     genre: 'Жанр',
     year: 'Год',
@@ -904,13 +1032,29 @@ const translations: Record<SupportedLanguage, Translations> = {
     exitFullscreen: '全画面を終了',
     mute: 'ミュート',
     unmute: 'ミュート解除',
-    
+    cast: 'キャスト',
+    castConnected: 'キャスト中',
+    castDisconnected: 'キャスト切断',
+    casting: 'キャスト中...',
+    castTo: 'キャスト先',
+    chromecast: 'Chromecast / スマートTV',
+    chromecastDesc: 'Google Cast、Android TV',
+    airplay: 'AirPlay',
+    airplayDesc: 'Apple TV、iOSデバイス',
+    externalPlayer: '外部プレーヤー',
+    externalPlayerDesc: 'VLC、MX Player、Kodi',
+    shareLink: '共有',
+    shareLinkDesc: '他のアプリにリンクを送信',
+    copyUrl: 'URLをコピー',
+    copyUrlDesc: '他のプレーヤーに貼り付け',
+    urlCopied: 'URLをコピーしました！',
+
     // Movie/Series Details
     watchNow: '今すぐ視聴',
     addToList: 'リストに追加',
     removeFromList: 'リストから削除',
     moreInfo: '詳細',
-    cast: 'キャスト',
+    castActors: 'キャスト',
     director: '監督',
     genre: 'ジャンル',
     year: '年',
@@ -1011,13 +1155,29 @@ const translations: Record<SupportedLanguage, Translations> = {
     exitFullscreen: '전체화면 종료',
     mute: '음소거',
     unmute: '음소거 해제',
-    
+    cast: '전송',
+    castConnected: '전송 중',
+    castDisconnected: '전송 연결 해제',
+    casting: '전송 중...',
+    castTo: '전송 대상',
+    chromecast: 'Chromecast / 스마트 TV',
+    chromecastDesc: 'Google Cast, Android TV',
+    airplay: 'AirPlay',
+    airplayDesc: 'Apple TV, iOS 기기',
+    externalPlayer: '외부 플레이어',
+    externalPlayerDesc: 'VLC, MX Player, Kodi',
+    shareLink: '공유',
+    shareLinkDesc: '다른 앱으로 링크 보내기',
+    copyUrl: 'URL 복사',
+    copyUrlDesc: '다른 플레이어에 붙여넣기',
+    urlCopied: 'URL 복사됨!',
+
     // Movie/Series Details
     watchNow: '지금 시청',
     addToList: '목록에 추가',
     removeFromList: '목록에서 제거',
     moreInfo: '상세정보',
-    cast: '출연',
+    castActors: '출연',
     director: '감독',
     genre: '장르',
     year: '년도',
@@ -1118,13 +1278,29 @@ const translations: Record<SupportedLanguage, Translations> = {
     exitFullscreen: '退出全屏',
     mute: '静音',
     unmute: '取消静音',
-    
+    cast: '投屏',
+    castConnected: '正在投屏',
+    castDisconnected: '投屏已断开',
+    casting: '投屏中...',
+    castTo: '投屏到',
+    chromecast: 'Chromecast / 智能电视',
+    chromecastDesc: 'Google Cast、Android TV',
+    airplay: 'AirPlay',
+    airplayDesc: 'Apple TV、iOS设备',
+    externalPlayer: '外部播放器',
+    externalPlayerDesc: 'VLC、MX Player、Kodi',
+    shareLink: '分享',
+    shareLinkDesc: '发送链接到其他应用',
+    copyUrl: '复制链接',
+    copyUrlDesc: '粘贴到其他播放器',
+    urlCopied: '链接已复制！',
+
     // Movie/Series Details
     watchNow: '立即观看',
     addToList: '添加到列表',
     removeFromList: '从列表移除',
     moreInfo: '更多信息',
-    cast: '演员',
+    castActors: '演员',
     director: '导演',
     genre: '类型',
     year: '年份',
@@ -1225,13 +1401,29 @@ const translations: Record<SupportedLanguage, Translations> = {
     exitFullscreen: 'الخروج من ملء الشاشة',
     mute: 'كتم الصوت',
     unmute: 'إلغاء كتم الصوت',
-    
+    cast: 'بث',
+    castConnected: 'جارٍ البث',
+    castDisconnected: 'تم قطع البث',
+    casting: 'جارٍ البث...',
+    castTo: 'بث إلى',
+    chromecast: 'Chromecast / تلفزيون ذكي',
+    chromecastDesc: 'Google Cast، Android TV',
+    airplay: 'AirPlay',
+    airplayDesc: 'Apple TV، أجهزة iOS',
+    externalPlayer: 'مشغل خارجي',
+    externalPlayerDesc: 'VLC، MX Player، Kodi',
+    shareLink: 'مشاركة',
+    shareLinkDesc: 'إرسال الرابط إلى تطبيقات أخرى',
+    copyUrl: 'نسخ الرابط',
+    copyUrlDesc: 'لصق في مشغل آخر',
+    urlCopied: 'تم نسخ الرابط!',
+
     // Movie/Series Details
     watchNow: 'شاهد الآن',
     addToList: 'إضافة إلى القائمة',
     removeFromList: 'إزالة من القائمة',
     moreInfo: 'مزيد من المعلومات',
-    cast: 'طاقم التمثيل',
+    castActors: 'طاقم التمثيل',
     director: 'المخرج',
     genre: 'النوع',
     year: 'السنة',

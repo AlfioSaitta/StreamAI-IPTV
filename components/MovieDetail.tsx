@@ -241,7 +241,7 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
             )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-300">
-              {cast && <div><span className="text-gray-400">{t.cast}: </span>{cast}</div>}
+              {cast && <div><span className="text-gray-400">{t.castActors}: </span>{cast}</div>}
               {director && <div><span className="text-gray-400">{t.director}: </span>{director}</div>}
               {movie.group && <div><span className="text-gray-400">{t.genre}: </span>{movie.group}</div>}
               {movie.url && <div className="text-gray-500">Stream ID: {movie.id}</div>}

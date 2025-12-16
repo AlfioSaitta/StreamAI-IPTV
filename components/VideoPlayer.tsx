@@ -1,9 +1,11 @@
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Channel } from '../types.ts';
 import { MetadataService } from '../services/metadata.ts';
 import { DownloadManager } from '../services/downloadManager.ts';
-import { AlertTriangle, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipForward, SkipBack, List, X, FastForward, Rewind, RotateCcw, PictureInPicture2 } from 'lucide-react';
+import { useCast } from '../hooks/useCast.ts';
+import CastDevicePicker from './CastDevicePicker.tsx';
+import { AlertTriangle, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipForward, SkipBack, List, X, FastForward, Rewind, RotateCcw, PictureInPicture2, Cast, Loader2 } from 'lucide-react';
 import Hls from 'hls.js';
 import mpegts from 'mpegts.js';
 
@@ -120,6 +122,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
   const [showPlaylist, setShowPlaylist] = useState(false);
   const playlistRef = useRef<HTMLDivElement>(null);
 
+  // Cast State
+  const cast = useCast();
+  const [isCastLoading, setIsCastLoading] = useState(false);
+  const [showDevicePicker, setShowDevicePicker] = useState(false);
+  const [castMessage, setCastMessage] = useState<string | null>(null);
+
   // OSD State
   const [osdMessage, setOsdMessage] = useState<{icon: React.ElementType, text?: string} | null>(null);
   const osdTimeoutRef = useRef<number | null>(null);
@@ -134,6 +142,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
       osdTimeoutRef.current = window.setTimeout(() => setOsdMessage(null), 1000);
   };
 
+
   const resetControlsTimeout = () => {
       setShowControls(true);
       if (controlsTimeoutRef.current) window.clearTimeout(controlsTimeoutRef.current);
@@ -141,7 +150,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
       if (showPlaylist) return; // Don't hide if playlist is open
 
       controlsTimeoutRef.current = window.setTimeout(() => {
-          if (isPlaying && !isSeeking && !showPlaylist) setShowControls(false);
+          if (isPlaying && !isSeeking && !showPlaylist) {
+              setShowControls(false);
+          }
       }, 4000);
   };
 
@@ -1012,12 +1023,17 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
             case 'p':
                 togglePiP();
                 break;
+            case 'c':
+                if (cast.isAvailable) {
+                    toggleCast();
+                }
+                break;
         }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [channel, isFullscreen, isPlaying, isMuted, isPiP, showPlaylist]);
+  }, [channel, isFullscreen, isPlaying, isMuted, isPiP, showPlaylist, cast.isAvailable, cast.isConnected]);
 
   // Video Events
   useEffect(() => {
@@ -1314,6 +1330,16 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
       };
   }, [channel]);
 
+
+  // Sincronizza stato cast con video locale
+  useEffect(() => {
+      if (cast.isConnected && videoRef.current) {
+          // Quando il cast è connesso, pausa il video locale
+          videoRef.current.pause();
+          setIsPlaying(false);
+      }
+  }, [cast.isConnected]);
+
   // Seeking ottimizzato per VOD
   const seekDebounceRef = useRef<number | null>(null);
   const pendingSeekRef = useRef<number | null>(null);
@@ -1416,11 +1442,35 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
       )}
 
       {/* Buffering Spinner */}
-      {isBuffering && !error && (
+      {isBuffering && !error && !cast.isConnected && (
           <div className="absolute inset-0 z-40 flex items-center justify-center pointer-events-none">
               <div className="flex flex-col items-center gap-3">
                   <div className="w-14 h-14 border-4 border-white/20 border-t-white rounded-full animate-spin"></div>
                   <span className="text-white/80 text-sm font-medium">Buffering...</span>
+              </div>
+          </div>
+      )}
+
+      {/* Cast Overlay - mostra quando si sta trasmettendo */}
+      {cast.isConnected && (
+          <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/80 pointer-events-none">
+              <div className="flex flex-col items-center gap-6 text-center px-8">
+                  <Cast className="w-20 h-20 text-blue-400 animate-pulse" />
+                  <div className="space-y-2">
+                      <h3 className="text-2xl font-bold text-white">Trasmissione in corso</h3>
+                      <p className="text-lg text-gray-300">
+                          Stai guardando su <span className="text-blue-400 font-semibold">{cast.deviceName}</span>
+                      </p>
+                      <p className="text-sm text-gray-500 mt-4">
+                          {channel?.cleanName || channel?.name}
+                      </p>
+                  </div>
+                  <button
+                      onClick={toggleCast}
+                      className="mt-4 px-6 py-3 bg-red-600 hover:bg-red-500 text-white rounded-lg font-semibold transition-colors pointer-events-auto"
+                  >
+                      Interrompi trasmissione
+                  </button>
               </div>
           </div>
       )}
@@ -1562,6 +1612,19 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
               </div>
 
               <div className="flex items-center gap-4">
+                  {/* Pulsante Cast - apre direttamente il picker dispositivi */}
+                  <button
+                      onClick={() => setShowDevicePicker(true)}
+                      disabled={isCastLoading}
+                      className={`tv-focus p-2 rounded-full hover:bg-white/10 transition-colors ${cast.isConnected ? 'text-blue-400' : 'text-gray-300 hover:text-white'} ${isCastLoading ? 'opacity-50' : ''}`}
+                      title={cast.isConnected ? `Casting su ${cast.deviceName}` : 'Trasmetti su dispositivo'}
+                  >
+                      {isCastLoading ? (
+                          <Loader2 className="w-6 h-6 animate-spin" />
+                      ) : (
+                          <Cast className="w-6 h-6" />
+                      )}
+                  </button>
                   {/* Pulsante PiP - disponibile se supportato */}
                   {document.pictureInPictureEnabled && (
                       <button onClick={togglePiP} className={`tv-focus p-2 rounded-full hover:bg-white/10 transition-colors ${isPiP ? 'text-purple-400' : 'text-gray-300 hover:text-white'}`} title="Picture-in-Picture">
@@ -1574,6 +1637,42 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
               </div>
           </div>
       </div>
+
+      {/* Cast Device Picker Modal */}
+      {channel && (
+        <CastDevicePicker
+          isOpen={showDevicePicker}
+          onClose={() => setShowDevicePicker(false)}
+          mediaUrl={channel.url}
+          mediaTitle={channel.cleanName || channel.name}
+          mediaPoster={channel.logo}
+          onCastStart={(device) => {
+            console.log('[VideoPlayer] Cast starting to:', device);
+            setIsCastLoading(true);
+          }}
+          onCastSuccess={(device) => {
+            console.log('[VideoPlayer] Cast success to:', device);
+            setIsCastLoading(false);
+            showOSD(Cast, `Trasmissione su ${device.name}`);
+            // Pausa video locale
+            if (videoRef.current) {
+              videoRef.current.pause();
+            }
+          }}
+          onCastError={(error) => {
+            console.log('[VideoPlayer] Cast message:', error);
+            setIsCastLoading(false);
+            showOSD(Cast, error);
+          }}
+        />
+      )}
+
+      {/* Cast message toast */}
+      {castMessage && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[101] bg-black/90 text-white px-4 py-2 rounded-lg text-sm animate-fade-in">
+          {castMessage}
+        </div>
+      )}
     </div>
   );
 };
