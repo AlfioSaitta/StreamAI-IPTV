@@ -865,14 +865,45 @@ class CastSession {
   }
 
   close() {
-    console.log('[CastSession] Closing session');
+    console.log('[CastSession] Closing session and stopping app on device');
     this.connected = false;
+
+    // Prima ferma il player
     if (this.player) {
-      try { this.player.stop(); } catch {}
+      try {
+        this.player.stop();
+        console.log('[CastSession] Player stopped');
+      } catch (e) {
+        console.log('[CastSession] Player stop error:', e.message);
+      }
     }
+
+    // Poi chiudi l'applicazione Cast sul dispositivo (questo chiude l'app remota)
     if (this.client) {
-      try { this.client.close(); } catch {}
+      try {
+        // stop() sull'app per chiuderla completamente sul dispositivo
+        this.client.stop(this.player, (err) => {
+          if (err) {
+            console.log('[CastSession] Client stop app error:', err.message);
+          } else {
+            console.log('[CastSession] Cast app closed on device');
+          }
+
+          // Chiudi la connessione
+          try {
+            this.client.close();
+            console.log('[CastSession] Connection closed');
+          } catch (e) {
+            console.log('[CastSession] Client close error:', e.message);
+          }
+        });
+      } catch (e) {
+        console.log('[CastSession] Error stopping app:', e.message);
+        // Fallback: chiudi comunque la connessione
+        try { this.client.close(); } catch {}
+      }
     }
+
     this.player = null;
     this.notifyStatus({ connected: false });
   }
