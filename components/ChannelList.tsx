@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Category, Channel, StreamType, WatchHistoryItem } from '../types.ts';
-import { Search, Play, Info, ChevronRight, LogOut, Clock, RefreshCw, BookmarkPlus, BookmarkCheck, Settings } from 'lucide-react';
+import { Search, Play, Info, ChevronRight, LogOut, Clock, RefreshCw, BookmarkPlus, BookmarkCheck, Settings, X } from 'lucide-react';
 import CachedImage from './CachedImage.tsx';
 import { useLanguage } from '../contexts/LanguageContext.tsx';
 
@@ -142,9 +142,18 @@ const ChannelList: React.FC<ChannelListProps> = ({
 }) => {
   const { t } = useLanguage();
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [scrolled, setScrolled] = useState(false);
   const [featuredItem, setFeaturedItem] = useState<Channel | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
+
+  // Debounce search term per performance
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
 
   // Performance: Lazy Loading Rows
   const [visibleRows, setVisibleRows] = useState(5);
@@ -203,41 +212,66 @@ const ChannelList: React.FC<ChannelListProps> = ({
         });
   }, [watchlistIds, allChannels]);
 
-  // Home page categories - mix di contenuti
+  // Home page categories - mix di contenuti ottimizzato
   const homeCategories = useMemo(() => {
       if (activeTab !== 'home') return [];
 
       const homeCats: Category[] = [];
 
-      // Film popolari (prime 20)
-      const popularMovies = vodCategories.flatMap(c => c.channels).slice(0, 20);
-      if (popularMovies.length > 0) {
-          homeCats.push({ name: t.movies + ' - ' + t.popular, channels: popularMovies });
+      // Raccogli tutti i canali
+      const allLive = liveCategories.flatMap(c => c.channels);
+      const allMovies = vodCategories.flatMap(c => c.channels);
+      const allSeries = seriesCategories.flatMap(c => c.channels);
+
+      // 1. Film in primo piano (con rating alto se disponibile)
+      if (allMovies.length > 0) {
+          const topMovies = [...allMovies]
+            .sort((a, b) => (Number(b.rating) || 0) - (Number(a.rating) || 0))
+            .slice(0, 20);
+          homeCats.push({ name: '🎬 ' + t.movies + ' - Top Rated', channels: topMovies });
       }
 
-      // Serie popolari (prime 20)
-      const popularSeries = seriesCategories.flatMap(c => c.channels).slice(0, 20);
-      if (popularSeries.length > 0) {
-          homeCats.push({ name: t.series + ' - ' + t.popular, channels: popularSeries });
+      // 2. Serie TV in evidenza
+      if (allSeries.length > 0) {
+          const topSeries = [...allSeries]
+            .sort((a, b) => (Number(b.rating) || 0) - (Number(a.rating) || 0))
+            .slice(0, 20);
+          homeCats.push({ name: '📺 ' + t.series + ' - Top Rated', channels: topSeries });
       }
 
-      // Canali live popolari (primi 20)
-      const popularLive = liveCategories.flatMap(c => c.channels).slice(0, 20);
-      if (popularLive.length > 0) {
-          homeCats.push({ name: t.live + ' - ' + t.popular, channels: popularLive });
+      // 3. Canali Live - In diretta
+      if (allLive.length > 0) {
+          homeCats.push({ name: '📡 ' + t.live + ' - ' + t.popular, channels: allLive.slice(0, 20) });
       }
 
-      // Aggiungi alcune categorie specifiche dai film
-      vodCategories.slice(0, 3).forEach(cat => {
-          if (cat.channels.length > 0) {
-              homeCats.push({ name: t.movies + ' - ' + cat.name, channels: cat.channels.slice(0, 20) });
+      // 4. Film recenti (ultimi aggiunti)
+      if (allMovies.length > 0) {
+          homeCats.push({ name: '🆕 ' + t.movies + ' - Novità', channels: allMovies.slice(0, 20) });
+      }
+
+      // 5. Serie recenti
+      if (allSeries.length > 0) {
+          homeCats.push({ name: '🆕 ' + t.series + ' - Novità', channels: allSeries.slice(0, 20) });
+      }
+
+      // 6. Aggiungi categorie specifiche di film (max 4)
+      vodCategories.slice(0, 4).forEach(cat => {
+          if (cat.channels.length >= 5) {
+              homeCats.push({ name: '🎬 ' + cat.name, channels: cat.channels.slice(0, 15) });
           }
       });
 
-      // Aggiungi alcune categorie specifiche dalle serie
-      seriesCategories.slice(0, 3).forEach(cat => {
-          if (cat.channels.length > 0) {
-              homeCats.push({ name: t.series + ' - ' + cat.name, channels: cat.channels.slice(0, 20) });
+      // 7. Aggiungi categorie specifiche di serie (max 4)
+      seriesCategories.slice(0, 4).forEach(cat => {
+          if (cat.channels.length >= 5) {
+              homeCats.push({ name: '📺 ' + cat.name, channels: cat.channels.slice(0, 15) });
+          }
+      });
+
+      // 8. Categorie Live (max 2)
+      liveCategories.slice(0, 2).forEach(cat => {
+          if (cat.channels.length >= 5) {
+              homeCats.push({ name: '📡 ' + cat.name, channels: cat.channels.slice(0, 15) });
           }
       });
 
@@ -258,18 +292,33 @@ const ChannelList: React.FC<ChannelListProps> = ({
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  // Featured Item
+  // Featured Item - Seleziona contenuto di qualità per l'Hero
   useEffect(() => {
-    if (categories.length > 0) {
-      const allItems = categories.flatMap(c => c.channels).filter(c => c.logo && (c.description || c.rating));
-      if (allItems.length > 0) {
-        const random = allItems[Math.floor(Math.random() * Math.min(allItems.length, 50))];
+    // Per la Home, usa contenuti da tutte le categorie
+    const sourceChannels = activeTab === 'home'
+      ? [...vodCategories.flatMap(c => c.channels), ...seriesCategories.flatMap(c => c.channels)]
+      : categories.flatMap(c => c.channels);
+
+    if (sourceChannels.length > 0) {
+      // Filtra per contenuti con immagine e preferibilmente con descrizione/rating
+      const qualityItems = sourceChannels.filter(c =>
+        c.logo && (c.description || c.rating)
+      );
+
+      // Ordina per rating (decrescente) e prendi i migliori
+      const topItems = qualityItems.length > 0
+        ? [...qualityItems].sort((a, b) => (Number(b.rating) || 0) - (Number(a.rating) || 0)).slice(0, 10)
+        : sourceChannels.filter(c => c.logo).slice(0, 10);
+
+      if (topItems.length > 0) {
+        // Seleziona random tra i top 10
+        const random = topItems[Math.floor(Math.random() * topItems.length)];
         setFeaturedItem(random);
-      } else if (categories[0]?.channels[0]) {
-        setFeaturedItem(categories[0].channels[0]);
+      } else if (sourceChannels[0]) {
+        setFeaturedItem(sourceChannels[0]);
       }
     }
-  }, [categories, activeTab]);
+  }, [categories, activeTab, vodCategories, seriesCategories]);
 
   // Focus Restoration
   useEffect(() => {
@@ -375,16 +424,43 @@ const ChannelList: React.FC<ChannelListProps> = ({
   }, [activeTab, homeCategories, categories]);
 
   const filteredCategories = useMemo(() => {
-    if (!searchTerm) return activeCategories;
-    // Durante la ricerca, cerca in tutti i canali
-    const searchChannels = allChannels.filter(ch =>
-        ch.name.toLowerCase().includes(searchTerm.toLowerCase())
+    if (!debouncedSearchTerm) return activeCategories;
+
+    // Ottimizza la ricerca: cerca solo se il termine ha almeno 2 caratteri
+    if (debouncedSearchTerm.length < 2) return activeCategories;
+
+    const lowerSearch = debouncedSearchTerm.toLowerCase();
+
+    // Determina quali canali cercare in base alla tab attiva
+    let channelsToSearch: Channel[];
+    switch (activeTab) {
+      case 'movie':
+        channelsToSearch = vodCategories.flatMap(c => c.channels);
+        break;
+      case 'series':
+        channelsToSearch = seriesCategories.flatMap(c => c.channels);
+        break;
+      case 'live':
+        channelsToSearch = liveCategories.flatMap(c => c.channels);
+        break;
+      case 'home':
+      default:
+        channelsToSearch = allChannels;
+        break;
+    }
+
+    // Cerca nei canali appropriati
+    const searchChannels = channelsToSearch.filter(ch =>
+        ch.name.toLowerCase().includes(lowerSearch) ||
+        (ch.cleanName && ch.cleanName.toLowerCase().includes(lowerSearch))
     );
+
     if (searchChannels.length > 0) {
-        return [{ name: t.search, channels: searchChannels }];
+        // Limita i risultati per performance
+        return [{ name: t.search + ` (${searchChannels.length})`, channels: searchChannels.slice(0, 100) }];
     }
     return [];
-  }, [activeCategories, searchTerm, allChannels, t]);
+  }, [activeCategories, debouncedSearchTerm, allChannels, activeTab, vodCategories, seriesCategories, liveCategories, t]);
 
   const displayedCategories = filteredCategories.slice(0, visibleRows);
 
@@ -419,16 +495,24 @@ const ChannelList: React.FC<ChannelListProps> = ({
                  <span>{currentTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
              </div>
 
-             <div className={`flex items-center gap-2 bg-black/40 border border-white/20 rounded-full px-3 py-1.5 transition-all ${searchTerm ? 'w-64 bg-black/80 ring-1 ring-white/30' : 'w-auto'}`}>
-                 <Search className="w-4 h-4 text-gray-400" />
-                 <input 
+             <div className={`flex items-center gap-2 bg-black/50 border border-white/30 rounded-full px-4 py-2 transition-all duration-300 ${searchTerm ? 'w-72 bg-black/90 ring-2 ring-red-500/50 border-red-500/50' : 'w-48 hover:w-56 hover:bg-black/70'}`}>
+                 <Search className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                 <input
                     type="text" 
                     placeholder={t.search + '...'}
-                    className={`tv-focus bg-transparent text-sm outline-none transition-all ${searchTerm ? 'w-full' : 'w-20 focus:w-40'}`}
+                    className="tv-focus bg-transparent text-sm text-white placeholder-gray-400 outline-none w-full"
                     value={searchTerm}
                     onChange={e => setSearchTerm(e.target.value)}
                     tabIndex={0}
                  />
+{searchTerm && (
+                    <button
+                      onClick={() => setSearchTerm('')}
+                      className="text-gray-400 hover:text-white transition-colors"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                 )}
              </div>
              
              <button onClick={onOpenServer} className="hidden md:block tv-focus text-xs font-bold border border-white/30 px-3 py-1.5 rounded hover:bg-white/10 tracking-wide uppercase outline-none focus:ring-2 focus:ring-white" tabIndex={0}>SERVER</button>
@@ -591,9 +675,9 @@ const ChannelList: React.FC<ChannelListProps> = ({
           {/* Load More Trigger */}
           <div ref={loadMoreRef} className="h-20 w-full" />
 
-          {filteredCategories.length === 0 && searchTerm && (
+          {filteredCategories.length === 0 && debouncedSearchTerm && (
               <div className="text-center py-20 text-gray-500 text-xl">
-                  {t.noResults} "{searchTerm}"
+                  {t.noResults} "{debouncedSearchTerm}"
               </div>
           )}
       </div>
