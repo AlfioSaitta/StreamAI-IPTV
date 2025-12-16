@@ -15,28 +15,22 @@
     <meta name="apple-mobile-web-app-title" content="StreamAI" />
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2964/2964063.png" />
     
-    <!-- Google Cast SDK -->
-    <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
+    <!-- Google Cast SDK (opzionale, può essere rimosso se non usato) -->
+    <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1" async></script>
 
-  <script type="importmap">
-{
-  "imports": {
-    "react": "https://esm.sh/react@^19.2.3",
-    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
-    "react/": "https://esm.sh/react@^19.2.3/",
-    "@google/genai": "https://esm.sh/@google/genai@^1.33.0",
-    "lucide-react": "https://esm.sh/lucide-react@^0.561.0",
-    "hls.js": "https://esm.sh/hls.js@^1.6.15",
-    "vite": "https://esm.sh/vite@^7.2.7",
-    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2",
-    "mpegts.js": "https://esm.sh/mpegts.js@^1.8.0"
-  }
-}
-</script>
-</head>
+    <link rel="stylesheet" href="/index.css">
+  </head>
   <body class="bg-gray-900 text-white overflow-hidden selection:bg-purple-500 selection:text-white">
-    <div id="root"></div>
-    
+    <div id="root">
+      <!-- Loading fallback - verrà sostituito da React -->
+      <div style="display: flex; justify-content: center; align-items: center; height: 100vh; background: #141414;">
+        <div style="text-align: center; color: white;">
+          <div style="font-size: 24px; margin-bottom: 16px;">StreamAI</div>
+          <div style="font-size: 14px; opacity: 0.7;">Caricamento...</div>
+        </div>
+      </div>
+    </div>
+
     <!-- Vite Entry Point -->
     <script type="module" src="/index.tsx"></script>
   </body>

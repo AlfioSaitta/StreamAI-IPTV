@@ -1,11 +1,13 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import ChannelList from './components/ChannelList.tsx';
 import VideoPlayer from './components/VideoPlayer.tsx';
 import AIRecommender from './components/AIRecommender.tsx';
 import XtreamLogin from './components/XtreamLogin.tsx';
 import SeriesDetail from './components/SeriesDetail.tsx';
+import MovieDetail from './components/MovieDetail.tsx';
 import ProfileSelection from './components/ProfileSelection.tsx';
+import CodecWarning from './components/CodecWarning.tsx';
 import { loginXtream } from './services/xtream.ts';
 import { ProfileService } from './services/profileService.ts';
 import { CacheService } from './services/cacheService.ts';
@@ -26,6 +28,7 @@ function App() {
   
   // State for Series Handling
   const [selectedSeries, setSelectedSeries] = useState<Channel | null>(null);
+  const [selectedMovie, setSelectedMovie] = useState<Channel | null>(null);
   const [xtreamCreds, setXtreamCreds] = useState<XtreamCredentials | null>(null);
 
   const [isLoading, setIsLoading] = useState(false);
@@ -34,10 +37,12 @@ function App() {
   // Focus Restoration State
   const [lastFocusedChannelId, setLastFocusedChannelId] = useState<string | null>(null);
 
+
   // Initialize Cache Persistence
   useEffect(() => {
     CacheService.init();
   }, []);
+
 
   // When profile changes, load their data
   useEffect(() => {
@@ -97,6 +102,7 @@ function App() {
   const handleChannelSelect = (channel: Channel) => {
       // Save the ID to restore focus later
       setLastFocusedChannelId(channel.id);
+      setSelectedMovie(null);
 
       // Record History for AI
       if (activeProfile && (channel.type === 'movie' || channel.type === 'series' || channel.type === 'live')) {
@@ -126,6 +132,30 @@ function App() {
       }
   };
 
+  const handleShowDetails = (channel: Channel) => {
+      setLastFocusedChannelId(channel.id);
+
+      if (channel.type === 'series') {
+          if (xtreamCreds && channel.seriesId) {
+              setSelectedSeries(channel);
+              setSelectedMovie(null);
+              setCurrentChannel(null);
+          } else {
+              handleChannelSelect(channel);
+          }
+          return;
+      }
+
+      if (channel.type === 'movie') {
+          setSelectedMovie(channel);
+          setCurrentChannel(null);
+          setSelectedSeries(null);
+          return;
+      }
+
+      handleChannelSelect(channel);
+  };
+
   const handleEpisodePlay = (episodeChannel: Channel, playlist: Channel[] = []) => {
       if (activeProfile) {
           ProfileService.addToHistory(activeProfile.id, {
@@ -138,15 +168,42 @@ function App() {
 
       setPlayQueue(playlist);
       setCurrentChannel(episodeChannel);
-      setSelectedSeries(null); 
+      setSelectedSeries(null);
   };
 
   const handleVideoProgress = (progress: number, duration: number) => {
       if (activeProfile && currentChannel) {
           ProfileService.updateProgress(activeProfile.id, currentChannel.id, progress, duration);
-          // We don't necessarily need to trigger a full re-render of App here for performance,
-          // but if we want the UI to reflect it immediately when going back:
-          // setActiveProfile(prev => prev ? ({...prev, history: ProfileService.getHistory(prev.id)}) : null);
+      }
+  };
+
+  const handleToggleWatchlist = (channelId: string) => {
+      if (!activeProfile) return;
+      const updated = ProfileService.toggleWatchlist(activeProfile.id, channelId);
+      if (updated) {
+          setActiveProfile(updated);
+      }
+  };
+
+  const allChannels = useMemo(() => {
+      return [
+          ...liveCategories.flatMap(c => c.channels),
+          ...vodCategories.flatMap(c => c.channels),
+          ...seriesCategories.flatMap(c => c.channels)
+      ];
+  }, [liveCategories, vodCategories, seriesCategories]);
+
+  // Ottieni il progresso salvato per il canale corrente
+  const getInitialProgress = (): number => {
+      if (!activeProfile || !currentChannel) return 0;
+      const historyItem = activeProfile.history.find(h => h.channelId === currentChannel.id);
+      return historyItem?.progress || 0;
+  };
+
+  // Reset del progresso quando l'utente clicca "Riparti dall'inizio"
+  const handleResetProgress = () => {
+      if (activeProfile && currentChannel) {
+          ProfileService.updateProgress(activeProfile.id, currentChannel.id, 0, 0);
       }
   };
 
@@ -173,6 +230,18 @@ function App() {
       if (!found) found = allCurrent.find(c => c.name.toLowerCase().includes(name.toLowerCase()));
       
       if (found) handleChannelSelect(found);
+  };
+
+  const handlePlayMovie = (channel: Channel, options?: { resetProgress?: boolean }) => {
+      if (activeProfile && options?.resetProgress) {
+          const updated = ProfileService.updateProgress(activeProfile.id, channel.id, 0, 0);
+          if (updated) {
+              setActiveProfile(updated);
+          }
+      }
+
+      handleChannelSelect(channel);
+      setSelectedMovie(null);
   };
 
   const handleLogoutProfile = () => {
@@ -222,6 +291,8 @@ function App() {
                     onNext={playQueue.length > 0 ? playNext : undefined}
                     onPrev={playQueue.length > 0 ? playPrev : undefined}
                     onProgress={handleVideoProgress}
+                    initialProgress={getInitialProgress()}
+                    onResetProgress={handleResetProgress}
                 />
             </div>
         );
@@ -235,6 +306,8 @@ function App() {
                 onPlayEpisode={handleEpisodePlay}
                 onBack={() => setSelectedSeries(null)}
                 history={activeProfile.history}
+                watchlistIds={activeProfile.watchlist}
+                onToggleWatchlist={handleToggleWatchlist}
             />
         );
     }
@@ -268,6 +341,11 @@ function App() {
             profileColor={activeProfile.color}
             onLogout={handleLogoutProfile}
             onOpenServer={() => setShowXtreamModal(true)}
+            history={activeProfile.history}
+            watchlistIds={activeProfile.watchlist}
+            onToggleWatchlist={handleToggleWatchlist}
+            allChannels={allChannels}
+            onShowDetails={handleShowDetails}
         />
     );
   };
@@ -275,6 +353,19 @@ function App() {
   return (
     <div className="min-h-screen w-screen bg-[#141414] overflow-x-hidden relative font-sans text-gray-100 flex flex-col">
       {renderContent()}
+
+      {selectedMovie && (
+        <MovieDetail 
+            movie={selectedMovie} 
+            onClose={() => setSelectedMovie(null)} 
+            onPlay={(ch, opts) => handlePlayMovie(ch, opts)}
+            watchlistIds={activeProfile.watchlist}
+            onToggleWatchlist={handleToggleWatchlist}
+            allChannels={allChannels}
+            onShowDetails={(ch) => setSelectedMovie(ch)}
+            history={activeProfile.history}
+        />
+      )}
 
       {!currentChannel && !selectedSeries && (liveCategories.length > 0 || vodCategories.length > 0) && (
           <AIRecommender 
@@ -291,6 +382,9 @@ function App() {
             onClose={() => setShowXtreamModal(false)} 
         />
       )}
+
+      {/* Avviso codec HEVC - mostrato solo se necessario */}
+      {activeProfile && !currentChannel && <CodecWarning />}
     </div>
   );
 }

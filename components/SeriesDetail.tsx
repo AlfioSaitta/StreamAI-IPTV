@@ -3,7 +3,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Channel, XtreamCredentials, WatchHistoryItem } from '../types.ts';
 import { getSeriesInfo } from '../services/xtream.ts';
 import { MetadataService } from '../services/metadata.ts';
-import { Play, ArrowLeft, Loader2, Film } from 'lucide-react';
+import { Play, ArrowLeft, Loader2, Film, BookmarkPlus, BookmarkCheck } from 'lucide-react';
 
 interface SeriesDetailProps {
   series: Channel;
@@ -11,6 +11,8 @@ interface SeriesDetailProps {
   onPlayEpisode: (channel: Channel, playlist?: Channel[]) => void;
   onBack: () => void;
   history: WatchHistoryItem[];
+  watchlistIds: string[];
+  onToggleWatchlist: (channelId: string) => void;
 }
 
 interface Episode {
@@ -22,7 +24,7 @@ interface Episode {
   season: number;
 }
 
-const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisode, onBack, history }) => {
+const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisode, onBack, history, watchlistIds, onToggleWatchlist }) => {
   const [loading, setLoading] = useState(true);
   const [info, setInfo] = useState<any>(null);
   const [episodes, setEpisodes] = useState<Record<string, Episode[]>>({});
@@ -136,6 +138,7 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
 
   const seasons = Object.keys(episodes).sort((a, b) => Number(a) - Number(b));
   const currentEpisodes = episodes[activeSeason] || [];
+  const isInWatchlist = watchlistIds.includes(series.id);
 
   const backdrop = MetadataService.getImageUrl(tmdbData?.backdrop_path, 'original') || info?.backdrop_path?.[0] || info?.cover || series.logo;
   const poster = MetadataService.getImageUrl(tmdbData?.poster_path) || info?.cover || series.logo;
@@ -171,7 +174,17 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
                 {series.year && <span>{series.year}</span>}
                 <span className="border border-gray-600 px-1 text-xs">HD</span>
               </div>
-              
+
+              <div className="flex items-center gap-3 mb-8">
+                  <button
+                    onClick={() => onToggleWatchlist(series.id)}
+                    className="tv-focus flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg border border-white/10 transition-colors"
+                  >
+                      {isInWatchlist ? <BookmarkCheck className="w-4 h-4" /> : <BookmarkPlus className="w-4 h-4" />}
+                      <span className="text-sm font-semibold">{isInWatchlist ? 'Nella mia lista' : 'Aggiungi alla lista'}</span>
+                  </button>
+              </div>
+
               <p className="text-lg text-gray-300 leading-relaxed font-light mb-8">{plot}</p>
           </div>
 

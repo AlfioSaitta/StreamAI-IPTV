@@ -3,10 +3,18 @@ import { Category, Channel, XtreamCredentials, XtreamContent } from '../types.ts
 import { MetadataService } from './metadata.ts';
 import { CacheService } from './cacheService.ts';
 
-// Helper for direct fetching
+// User-Agent per tutte le richieste IPTV
+const IPTV_USER_AGENT = 'StreamAI IPTV';
+
+// Helper for direct fetching con User-Agent IPTV
 const fetchDirect = async (url: string) => {
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': IPTV_USER_AGENT,
+        'Accept': '*/*',
+      }
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch (err) {
@@ -97,7 +105,8 @@ export const loginXtream = async (creds: XtreamCredentials, forceRefresh = false
           let streamUrl = '';
 
           if (type === 'live') {
-             streamUrl = `${baseUrl}/live/${creds.username}/${creds.password}/${stream.stream_id}.m3u8`;
+             // Usa .ts invece di .m3u8 per evitare problemi con redirect HLS
+             streamUrl = `${baseUrl}/live/${creds.username}/${creds.password}/${stream.stream_id}.ts`;
           } else if (type === 'movie') {
              const ext = stream.container_extension || 'mp4';
              streamUrl = `${baseUrl}/movie/${creds.username}/${creds.password}/${stream.stream_id}.${ext}`;

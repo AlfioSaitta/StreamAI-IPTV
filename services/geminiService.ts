@@ -1,8 +1,30 @@
-import { GoogleGenAI, Type } from "@google/genai";
 import { Channel, Recommendation, StreamType, WatchHistoryItem } from "../types.ts";
 
-const apiKey = process.env.API_KEY || 'AIzaSyDqvYuOecmgDNi2sVm3jvgM9bl-oKdUPck'; 
-const ai = new GoogleGenAI({ apiKey });
+// API Key - usa variabile d'ambiente o fallback
+const getApiKey = (): string => {
+  // Vite env
+  if (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_GEMINI_API_KEY) {
+    return (import.meta as any).env.VITE_GEMINI_API_KEY;
+  }
+  // Fallback
+  return 'AIzaSyDqvYuOecmgDNi2sVm3jvgM9bl-oKdUPck';
+};
+
+const apiKey = getApiKey();
+
+// Lazy load del modulo Gemini
+let aiInstance: any = null;
+const getAI = async () => {
+  if (aiInstance) return aiInstance;
+  try {
+    const { GoogleGenerativeAI } = await import("@google/generative-ai");
+    aiInstance = new GoogleGenerativeAI(apiKey);
+    return aiInstance;
+  } catch (e) {
+    console.warn("Impossibile caricare Gemini AI:", e);
+    return null;
+  }
+};
 
 export const getRecommendations = async (
   channels: Channel[], 
@@ -10,9 +32,11 @@ export const getRecommendations = async (
   context: StreamType = 'live',
   history: WatchHistoryItem[] = []
 ): Promise<Recommendation[]> => {
-  if (!apiKey) {
+  const ai = await getAI();
+
+  if (!ai || !apiKey) {
     return [
-      { channelName: "Error", reason: "API Key mancante. Verifica la configurazione." }
+      { channelName: "Errore", reason: "Servizio AI non disponibile." }
     ];
   }
 
@@ -25,78 +49,63 @@ export const getRecommendations = async (
   let pool = richItems.length > 20 ? richItems : channels;
   
   if (isRecencyRequested) {
-      pool = pool.sort((a, b) => {
+      pool = [...pool].sort((a, b) => {
           const yearA = parseInt(a.year || '0') || 0;
           const yearB = parseInt(b.year || '0') || 0;
           return yearB - yearA;
       });
   } else {
-      pool = pool.sort(() => 0.5 - Math.random());
+      pool = [...pool].sort(() => 0.5 - Math.random());
   }
   
   // Take top N items
-  const selectedItems = pool.slice(0, 60).map(c => ({
-    name: c.cleanName || c.name, 
+  const selectedItems = pool.slice(0, 50).map(c => ({
+    name: c.cleanName || c.name,
     originalName: c.name,
-    info: `[${c.genre || 'Genere N/A'}] [${c.year || 'Anno N/A'}] [Rating: ${c.rating || 'N/A'}]`,
-    plot: c.description ? c.description.substring(0, 150) + "..." : "No description"
+    genre: c.genre || 'N/A',
+    year: c.year || 'N/A',
+    rating: c.rating || 'N/A',
+    plot: c.description ? c.description.substring(0, 100) : ""
   }));
 
   // Format History for Prompt
-  const recentHistory = history.slice(0, 10).map(h => h.name).join(", ");
-  const historyContext = recentHistory 
-    ? `L'utente ha recentemente guardato: ${recentHistory}. Usa questa informazione per capire i gusti dell'utente (es. se guarda molti film d'azione, privilegia quel genere se la richiesta è vaga).`
-    : "L'utente non ha una cronologia recente.";
+  const recentHistory = history.slice(0, 5).map(h => h.name).join(", ");
+  const historyContext = recentHistory
+    ? `Cronologia utente: ${recentHistory}.`
+    : "";
 
-  const todayStr = new Date().toLocaleDateString('it-IT', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  const prompt = `Sei un assistente per IPTV. Trova 3 contenuti dal catalogo.
 
-  const systemInstruction = `Sei un esperto curatore di media per una piattaforma IPTV. 
-  
-  DATA CORRENTE: ${todayStr}.
-  
-  CRONOLOGIA UTENTE:
-  ${historyContext}
-  
-  Contesto attuale: ${context.toUpperCase()}.
-  
-  Richiesta Utente: "${userPreference}".
-  
-  Analizza la lista fornita. Scegli 3 contenuti.
-  
-  Regole:
-  1. Se l'utente chiede qualcosa "in base ai miei gusti", basati pesantemente sulla cronologia.
-  2. Se la richiesta è specifica (es. "film horror"), ignora la cronologia se non pertinente.
-  3. Il campo 'channelName' DEVE corrispondere esattamente a 'originalName' del JSON input.
-  4. 'reason' deve essere in Italiano, accattivante e, se rilevante, citare perché piace in base alla cronologia (es. "Visto che ti è piaciuto X...").`;
+Tipo: ${context.toUpperCase()}
+Richiesta: "${userPreference}"
+${historyContext}
+
+CATALOGO:
+${JSON.stringify(selectedItems)}
+
+Rispondi SOLO con JSON array:
+[{"channelName":"nome_esatto_da_originalName","reason":"motivo breve in italiano"}]`;
 
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: JSON.stringify(selectedItems),
-      config: {
-        systemInstruction: systemInstruction,
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              channelName: { type: Type.STRING },
-              reason: { type: Type.STRING }
-            }
-          }
-        }
-      }
-    });
+    const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const result = await model.generateContent(prompt);
+    const text = result.response.text();
 
-    if (response.text) {
-        return JSON.parse(response.text) as Recommendation[];
+    // Estrai JSON dalla risposta
+    const jsonMatch = text.match(/\[[\s\S]*?\]/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]) as Recommendation[];
+      // Verifica che i canali esistano nel catalogo
+      return parsed.filter(rec =>
+        channels.some(c => c.name === rec.channelName)
+      ).slice(0, 3);
     }
-    return [];
+
+    return [{ channelName: "Nessun risultato", reason: "Prova con una ricerca diversa." }];
   } catch (error) {
     console.error("Gemini API Error:", error);
     return [
-        { channelName: "Errore AI", reason: "Non sono riuscito a elaborare la richiesta al momento." }
+      { channelName: "Errore AI", reason: "Richiesta fallita. Riprova tra poco." }
     ];
   }
 };

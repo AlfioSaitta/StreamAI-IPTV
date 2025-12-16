@@ -56,4 +56,5 @@ export interface Profile {
   color: string; // Hex color for avatar
   xtreamCreds: XtreamCredentials | null;
   history: WatchHistoryItem[];
+  watchlist: string[];
 }

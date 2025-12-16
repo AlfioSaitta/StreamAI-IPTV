@@ -2,7 +2,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Channel } from '../types.ts';
 import { MetadataService } from '../services/metadata.ts';
-import { AlertTriangle, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipForward, SkipBack, List, X, FastForward, Rewind, Settings } from 'lucide-react';
+import { DownloadManager } from '../services/downloadManager.ts';
+import { AlertTriangle, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipForward, SkipBack, List, X, FastForward, Rewind, RotateCcw, PictureInPicture2 } from 'lucide-react';
 import Hls from 'hls.js';
 import mpegts from 'mpegts.js';
 
@@ -13,21 +14,100 @@ interface VideoPlayerProps {
   onNext?: () => void;
   onPrev?: () => void;
   onProgress?: (progress: number, duration: number) => void;
+  initialProgress?: number; // Progresso iniziale (0-1) per riprendere
+  onResetProgress?: () => void; // Callback per resettare il progresso
 }
 
-const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onChannelSelect, onNext, onPrev, onProgress }) => {
+const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onChannelSelect, onNext, onPrev, onProgress, initialProgress, onResetProgress }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const controlsRef = useRef<HTMLDivElement>(null);
   
   const hlsRef = useRef<Hls | null>(null); 
   const mpegtsRef = useRef<mpegts.Player | null>(null);
+  const lastHostRef = useRef<string | null>(null);
+  const loadTokenRef = useRef(0);
+  const debounceTimerRef = useRef<number | null>(null);
+
+
+  // Warm cache per prebuffer canali adiacenti (LRU max 4 per zapping veloce)
+  const warmCacheRef = useRef<Map<string, Hls>>(new Map());
+
+  // Pool di connessioni prewarmed per ridurre latenza DNS/TLS
+  const connectionPoolRef = useRef<Set<string>>(new Set());
+
+  // Prewarm HTTP (DNS/TLS warmup) - più aggressivo
+  const prewarm = (url: string) => {
+    if (connectionPoolRef.current.has(url)) return;
+    connectionPoolRef.current.add(url);
+    // Mantieni pool size limitato
+    if (connectionPoolRef.current.size > 10) {
+      const first = connectionPoolRef.current.values().next().value;
+      if (first) connectionPoolRef.current.delete(first);
+    }
+    try {
+      // Usa fetch con keepalive per mantenere connessione calda
+      fetch(url, {
+        method: 'HEAD',
+        mode: 'no-cors',
+        cache: 'no-store',
+        keepalive: true,
+        headers: {
+          'User-Agent': 'StreamAI IPTV',
+        }
+      } as any).catch(() => {});
+    } catch {}
+  };
+
+  // Crea istanza Hls ottimizzata per pre-caricamento rapido
+  const warmHls = (url: string, isLive: boolean) => {
+    const h = new Hls({
+      enableWorker: true,
+      autoStartLoad: false,
+      lowLatencyMode: isLive,
+      backBufferLength: 0,
+      // Live: buffer MINIMO, VOD: un po' di più
+      maxBufferLength: isLive ? 1 : 10,
+      maxMaxBufferLength: isLive ? 2 : 20,
+      startLevel: 0, // Sempre dal livello più basso per velocità
+      testBandwidth: false,
+      initialLiveManifestSize: 1, // Solo 1 segmento
+      // Timeout minimi per prewarm
+      manifestLoadingTimeOut: isLive ? 2000 : 8000,
+      fragLoadingTimeOut: isLive ? 2000 : 10000,
+    } as any);
+    try {
+      h.loadSource(url);
+      h.on(Hls.Events.MANIFEST_PARSED, () => {
+        try { h.startLoad(0); } catch {}
+        // Pre-buffer brevissimo per live
+        const preloadTime = isLive ? 300 : 1500;
+        setTimeout(() => { try { h.stopLoad(); } catch {} }, preloadTime);
+      });
+    } catch { /* ignore */ }
+    return h as Hls;
+  };
+
+  // LRU cache size aumentato a 4 per zapping più fluido
+  const cachePut = (key: string, val: Hls) => {
+    const cache = warmCacheRef.current;
+    if (cache.has(key)) cache.delete(key);
+    cache.set(key, val);
+    while (cache.size > 4) {
+      const firstKey = cache.keys().next().value as string | undefined;
+      if (!firstKey) break;
+      try { cache.get(firstKey)?.destroy(); } catch {}
+      cache.delete(firstKey);
+    }
+  };
   
   const [error, setError] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [volume, setVolume] = useState(1);
+  const [isBuffering, setIsBuffering] = useState(false); // Nuovo: feedback buffering
+  const [, setVolume] = useState(1); // Volume state (UI display handled via video.volume)
   const [isMuted, setIsMuted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isPiP, setIsPiP] = useState(false); // Picture-in-Picture
   const [showControls, setShowControls] = useState(true);
   
   const [currentTime, setCurrentTime] = useState(0);
@@ -74,138 +154,794 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
       };
   }, [channel, isPlaying, isSeeking, showPlaylist]);
 
+  // Pausa download immagini durante streaming live per non interferire con la banda
+  useEffect(() => {
+    if (!channel) return;
+
+    if (channel.type === 'live') {
+      // Pausa tutti i download per i live
+      DownloadManager.pause();
+    }
+
+    return () => {
+      // Riprendi download quando si esce dal player
+      DownloadManager.resume();
+    };
+  }, [channel]);
+
   // Load Stream
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !channel) return;
     setError(null);
     setIsPlaying(true); 
-    setShowPlaylist(false); // Close playlist on change
+    setIsBuffering(true);
+    setShowPlaylist(false);
     setCurrentTime(0);
     setDuration(0);
     setBuffered(0);
 
-    // Immediate cleanup of previous instances to free resources for zapping
-    if (hlsRef.current) { 
-        hlsRef.current.destroy(); 
-        hlsRef.current = null; 
-    }
-    if (mpegtsRef.current) { 
-        mpegtsRef.current.destroy(); 
-        mpegtsRef.current = null; 
-    }
-    
-    // Reset video element state
-    video.removeAttribute('src');
-    video.load(); 
-
-    const source = channel.url;
-    const isM3U8 = source.toLowerCase().includes('.m3u8');
-    const isTS = source.toLowerCase().match(/\.(ts|mpeg|mpg)$/);
+    const localToken = ++loadTokenRef.current;
     const isLive = channel.type === 'live';
 
-    // Prioritize startup speed
-    video.preload = "auto";
-    video.autoplay = true;
-    video.playsInline = true;
+    // Telemetria: tempi
+    const t0 = performance.now();
 
-    if (isM3U8 && (Hls as any).isSupported()) {
-      // Zapping-optimized Config
-      const hlsConfig = {
-          debug: false,
-          enableWorker: true,
-          lowLatencyMode: false, // DISABLE Low Latency: Causes stalls on many IPTV providers
-          backBufferLength: isLive ? 0 : 30, // Don't cache back for live zapping
-          
-          // Startup optimization
-          startLevel: -1, // Auto bandwidth
-          startFragPrefetch: true, // Fetch first segment immediately
-          
-          // Resiliency
-          manifestLoadingTimeOut: 20000,
-          fragLoadingTimeOut: 20000,
-          levelLoadingTimeOut: 20000,
-          
-          // Buffer - keep it lean for live to allow fast sync
-          maxBufferLength: isLive ? 10 : 30, 
-          maxMaxBufferLength: isLive ? 20 : 60,
+    // Per i LIVE: NESSUN DEBOUNCE, avvio immediato
+    // Per VOD: piccolo debounce per evitare rimbalzi
+    const loadStream = () => {
+      if (localToken !== loadTokenRef.current) return;
+
+      // ============================================
+      // CLEANUP AGGRESSIVO: ferma tutti i download PRIMA di distruggere
+      // per evitare leak di banda durante lo zapping
+      // ============================================
+
+      // 1. Ferma il video element immediatamente
+      video.pause();
+
+      // 2. HLS.js: stopLoad() ferma tutti i download in corso
+      if (hlsRef.current) {
+        try {
+          hlsRef.current.stopLoad(); // Ferma download frammenti
+          hlsRef.current.detachMedia(); // Scollega dal video
+          hlsRef.current.destroy(); // Distruggi istanza
+        } catch {}
+        hlsRef.current = null;
+      }
+
+      // 3. MPEGTS: unload ferma i download
+      if (mpegtsRef.current) {
+        try {
+          mpegtsRef.current.pause();
+          mpegtsRef.current.unload();
+          mpegtsRef.current.detachMediaElement();
+          mpegtsRef.current.destroy();
+        } catch {}
+        mpegtsRef.current = null;
+      }
+
+      // 4. Pulisci warm cache (connessioni HLS pre-caricate)
+      warmCacheRef.current.forEach(h => {
+        try {
+          h.stopLoad();
+          h.destroy();
+        } catch {}
+      });
+      warmCacheRef.current.clear();
+
+      // 5. Resetta il video element
+      video.removeAttribute('src');
+      // Per live: non chiamare load() che è lento
+      if (!isLive) {
+        video.load();
+      }
+
+      video.preload = isLive ? "none" : "auto";
+      video.autoplay = true;
+      video.playsInline = true;
+      (video as any).disableRemotePlayback = true;
+
+      // Debug: log eventi video element per live
+      if (isLive) {
+        const logEvent = (name: string) => () => {
+          console.log(`[VIDEO] ${name}`, Math.round(performance.now() - t0), 'ms',
+            'readyState:', video.readyState,
+            'paused:', video.paused,
+            'buffered:', video.buffered.length > 0 ? video.buffered.end(0).toFixed(2) + 's' : '0s'
+          );
+        };
+        video.addEventListener('loadstart', logEvent('loadstart'), { once: true });
+        video.addEventListener('loadedmetadata', logEvent('loadedmetadata'), { once: true });
+        video.addEventListener('loadeddata', logEvent('loadeddata'), { once: true });
+        video.addEventListener('canplay', logEvent('canplay'), { once: true });
+        video.addEventListener('canplaythrough', logEvent('canplaythrough'), { once: true });
+        video.addEventListener('playing', logEvent('playing'), { once: true });
+        video.addEventListener('waiting', logEvent('waiting'), { once: true });
+        video.addEventListener('stalled', logEvent('stalled'), { once: true });
+        video.addEventListener('error', () => {
+          console.error('[VIDEO] error', video.error?.code, video.error?.message);
+        }, { once: true });
+      }
+
+      // First-frame telemetry
+      const onFirstFrame = () => {
+        console.log('first-frame', Math.round(performance.now() - t0), 'ms');
+        video.removeEventListener('canplay', onFirstFrame);
+      };
+      video.addEventListener('canplay', onFirstFrame, { once: true } as any);
+
+      const source = channel.url;
+      const isM3U8 = source.toLowerCase().includes('.m3u8');
+      const isTS = source.toLowerCase().match(/\.(ts|mpeg|mpg)$/);
+
+      const getHost = (u: string) => {
+        try { const { host, protocol } = new URL(u); return protocol + '//' + host; } catch { return null; }
+      };
+      const host = getHost(source);
+
+
+      // Funzione per tentare riproduzione nativa del m3u8
+      const tryNativeHls = () => {
+        console.log('[NATIVE-HLS] Trying native HLS playback');
+        video.src = source;
+        video.play().catch((e) => {
+          console.error('[NATIVE-HLS] Failed:', e);
+          setError('Impossibile riprodurre lo stream');
+          setIsBuffering(false);
+        });
       };
 
-      const hls = new Hls(hlsConfig as any);
-      hlsRef.current = hls;
-      hls.loadSource(source);
-      hls.attachMedia(video);
-      
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          // Force play attempt immediately after manifest
-          const promise = video.play();
-          if (promise !== undefined) {
-              promise.catch(error => {
-                  console.debug("Autoplay catch:", error);
-                  setIsPlaying(false);
-              });
-          }
-      });
+      // HLS con hls.js
+      if (isM3U8 && (Hls as any).isSupported()) {
+        // ============================================
+        // CONFIGURAZIONE LIVE: AVVIO ISTANTANEO
+        // Priorità: partire il prima possibile
+        // ============================================
+        const hlsConfigLive: any = {
+          debug: false,
+          enableWorker: true,
+          // === LOW LATENCY MODE per avvio rapido ===
+          lowLatencyMode: true,
+          // === AVVIO ISTANTANEO ===
+          startLevel: 0, // Parti dal livello più basso
+          startFragPrefetch: true,
+          progressive: true,
+          // === BUFFER MINIMO per partenza rapida ===
+          backBufferLength: 0,
+          maxBufferLength: 10,
+          maxMaxBufferLength: 20,
+          maxBufferHole: 1.5,
+          // === LIVE SYNC AGGRESSIVO ===
+          liveSyncDurationCount: 2, // Solo 2 segmenti di ritardo
+          liveMaxLatencyDurationCount: 4,
+          liveDurationInfinity: true,
+          liveBackBufferLength: 0,
+          // === AVVIO RAPIDO ===
+          maxStarvationDelay: 2, // Ridotto per partire prima
+          maxLoadingDelay: 4,
+          highBufferWatchdogPeriod: 2,
+          nudgeOffset: 0.5,
+          nudgeMaxRetry: 5,
+          // === ABR DISABILITATO per velocità ===
+          abrEwmaFastLive: 1.0,
+          abrEwmaSlowLive: 2.0,
+          abrEwmaDefaultEstimate: 1000000,
+          abrBandWidthFactor: 0.7,
+          abrBandWidthUpFactor: 0.5,
+          // === TIMEOUT ALTI per server lenti ===
+          manifestLoadingTimeOut: 30000,
+          levelLoadingTimeOut: 60000,
+          fragLoadingTimeOut: 60000,
+          // === RETRY ===
+          manifestLoadingMaxRetry: 3,
+          levelLoadingMaxRetry: 4,
+          fragLoadingMaxRetry: 4,
+          manifestLoadingRetryDelay: 1000,
+          levelLoadingRetryDelay: 1000,
+          fragLoadingRetryDelay: 1000,
+          // === OTTIMIZZAZIONI ===
+          capLevelOnFPSDrop: false,
+          capLevelToPlayerSize: false,
+          testBandwidth: false,
+          // === LOADER POLICY ===
+          enableSoftwareAES: true,
+          // === XHR SETUP per server IPTV ===
+          xhrSetup: (xhr: XMLHttpRequest, _url: string) => {
+            xhr.withCredentials = false;
+            xhr.timeout = 120000; // 2 minuti timeout XHR
+            try {
+              xhr.setRequestHeader('User-Agent', 'StreamAI IPTV');
+              xhr.setRequestHeader('Accept', '*/*');
+              xhr.setRequestHeader('Connection', 'keep-alive');
+            } catch (e) {}
+          },
+        };
 
-      hls.on(Hls.Events.ERROR, (_e: any, data: any) => {
-         if (data.fatal) {
-             switch (data.type) {
-                 case Hls.ErrorTypes.NETWORK_ERROR:
-                     hls.startLoad();
-                     break;
-                 case Hls.ErrorTypes.MEDIA_ERROR:
-                     hls.recoverMediaError();
-                     break;
-                 default:
-                     setError("Stream Unavailable");
-                     hls.destroy();
-                     break;
-             }
-         }
-      });
-    } else if (isTS && mpegts.isSupported()) {
-        const player = mpegts.createPlayer({ 
-            type: 'mpegts', 
-            url: source, 
-            isLive: isLive 
-        }, {
-            enableWorker: true,
-            lazyLoadMaxDuration: isLive ? 30 : 300, // Reduced from 60
-            stashInitialSize: 128 * 1024, // Fast start
-            liveBufferLatencyChasing: false, // DISABLE chasing: Increases CPU and can cause stutter on zap
-            deferLoadAfterSourceOpen: false
+        // ============================================
+        // CONFIGURAZIONE VOD (Movies): QUALITÀ E SEEKING
+        // ============================================
+        const hlsConfigMovie: any = {
+          debug: false,
+          enableWorker: true,
+          lowLatencyMode: false,
+          // === AVVIO VELOCE MA CON QUALITÀ ===
+          startLevel: -1, // ABR automatico
+          startFragPrefetch: true,
+          progressive: true,
+          // === BUFFER AMPIO PER FILM ===
+          backBufferLength: 90, // 90s di backbuffer per seek indietro
+          maxBufferLength: 90, // 90 secondi avanti
+          maxMaxBufferLength: 180, // Fino a 3 minuti
+          maxBufferHole: 0.5,
+          // === GUARDIE RILASSATE ===
+          maxStarvationDelay: 4,
+          maxLoadingDelay: 8,
+          nudgeOffset: 0.2,
+          nudgeMaxRetry: 5,
+          // === ABR CONSERVATIVO (qualità stabile) ===
+          abrEwmaFastVod: 3.0,
+          abrEwmaSlowVod: 9.0,
+          abrBandWidthFactor: 0.95, // Usa quasi tutta la bandwidth
+          abrBandWidthUpFactor: 0.8, // Switch up più generoso
+          // === TIMEOUT GENEROSI ===
+          manifestLoadingTimeOut: 15000,
+          levelLoadingTimeOut: 15000,
+          fragLoadingTimeOut: 25000,
+          manifestLoadingMaxRetry: 3,
+          levelLoadingMaxRetry: 3,
+          fragLoadingMaxRetry: 4,
+          manifestLoadingRetryDelay: 500,
+          levelLoadingRetryDelay: 500,
+          fragLoadingRetryDelay: 400,
+          // === NO CAP PER QUALITÀ MASSIMA ===
+          capLevelOnFPSDrop: false,
+          capLevelToPlayerSize: false,
+          // === XHR SETUP per server IPTV ===
+          xhrSetup: (xhr: XMLHttpRequest, _url: string) => {
+            xhr.withCredentials = false;
+            xhr.setRequestHeader('User-Agent', 'StreamAI IPTV');
+            xhr.setRequestHeader('Accept', '*/*');
+          },
+        };
+
+        // ============================================
+        // CONFIGURAZIONE SERIES: VIA DI MEZZO
+        // ============================================
+        // Episodi più corti, seeking frequente, ma qualità importante
+        const hlsConfigSeries: any = {
+          debug: false,
+          enableWorker: true,
+          lowLatencyMode: false,
+          // === AVVIO RAPIDO ===
+          startLevel: 0, // Parti basso poi sale
+          startFragPrefetch: true,
+          progressive: true,
+          // === BUFFER MEDIO ===
+          backBufferLength: 60, // 60s backbuffer
+          maxBufferLength: 45, // 45 secondi avanti
+          maxMaxBufferLength: 90, // Max 90 secondi
+          maxBufferHole: 0.3,
+          // === GUARDIE MODERATE ===
+          maxStarvationDelay: 2,
+          maxLoadingDelay: 4,
+          nudgeOffset: 0.15,
+          nudgeMaxRetry: 4,
+          // === ABR BILANCIATO ===
+          abrEwmaFastVod: 2.0,
+          abrEwmaSlowVod: 6.0,
+          abrBandWidthFactor: 0.9,
+          abrBandWidthUpFactor: 0.7,
+          // === TIMEOUT BILANCIATI ===
+          manifestLoadingTimeOut: 10000,
+          levelLoadingTimeOut: 10000,
+          fragLoadingTimeOut: 15000,
+          manifestLoadingMaxRetry: 2,
+          levelLoadingMaxRetry: 2,
+          fragLoadingMaxRetry: 3,
+          manifestLoadingRetryDelay: 400,
+          levelLoadingRetryDelay: 400,
+          fragLoadingRetryDelay: 300,
+          // === CAP MODERATO ===
+          capLevelOnFPSDrop: true,
+          capLevelToPlayerSize: false,
+          // === XHR SETUP per server IPTV ===
+          xhrSetup: (xhr: XMLHttpRequest, _url: string) => {
+            xhr.withCredentials = false;
+            xhr.setRequestHeader('User-Agent', 'StreamAI IPTV');
+            xhr.setRequestHeader('Accept', '*/*');
+          },
+        };
+
+        // Selezione configurazione basata sul tipo
+        let hlsConfig: any;
+        if (isLive) {
+          hlsConfig = hlsConfigLive;
+        } else if (channel.type === 'series') {
+          hlsConfig = hlsConfigSeries;
+        } else {
+          hlsConfig = hlsConfigMovie;
+        }
+
+        // Per LIVE: sempre nuova istanza HLS per evitare stalli
+        // Per VOD: riusa se possibile
+        let hls: Hls | null = null;
+
+        if (isLive) {
+          // LIVE: crea sempre nuova istanza
+          hls = new Hls(hlsConfig);
+          hlsRef.current = hls;
+        } else {
+          // VOD: prova a riusare dalla cache
+          const cached = warmCacheRef.current.get(channel.id);
+          if (cached) {
+            hls = cached;
+            warmCacheRef.current.delete(channel.id);
+            hlsRef.current = hls;
+          } else {
+            hls = new Hls(hlsConfig);
+            hlsRef.current = hls;
+          }
+        }
+
+        lastHostRef.current = host;
+        hls!.attachMedia(video);
+
+        console.log('[HLS] Loading source:', source.substring(0, 80) + '...');
+        hls!.loadSource(source);
+
+        // Flag per evitare play multipli
+        let playStarted = false;
+        const tryPlay = (reason: string) => {
+          if (playStarted) return;
+          playStarted = true;
+          console.log(`[HLS] tryPlay (${reason})`, Math.round(performance.now() - t0), 'ms',
+            'buffered:', video.buffered.length > 0 ? video.buffered.end(0).toFixed(2) + 's' : '0s',
+            'readyState:', video.readyState);
+          setIsBuffering(false);
+          video.play().catch((e) => {
+            console.debug('[HLS] Autoplay failed:', e);
+            setIsPlaying(false);
+            playStarted = false;
+          });
+        };
+
+        // Per LIVE: avvia subito il caricamento
+        if (isLive) {
+          hls!.startLoad(-1);
+
+          // LIVE: Avvia play quando ci sono dati
+          hls!.on(Hls.Events.FRAG_BUFFERED, () => {
+            tryPlay('FRAG_BUFFERED');
+          });
+
+          video.addEventListener('canplay', () => {
+            tryPlay('canplay');
+          }, { once: true });
+
+          video.addEventListener('loadeddata', () => {
+            tryPlay('loadeddata');
+          }, { once: true });
+
+          // loadedmetadata - se c'è QUALSIASI buffer, proviamo subito
+          video.addEventListener('loadedmetadata', () => {
+            if (video.buffered.length > 0 && video.buffered.end(0) > 0.5) {
+              console.log('[HLS] loadedmetadata with buffer, trying play immediately');
+              tryPlay('loadedmetadata-buffer');
+            }
+          }, { once: true });
+
+          // STRATEGIA ULTRA-AGGRESSIVA per LIVE:
+          // Buffer check molto frequente - basta 1s di buffer
+          const bufferCheckInterval = setInterval(() => {
+            if (playStarted) {
+              clearInterval(bufferCheckInterval);
+              return;
+            }
+
+            const hasBuffer = video.buffered.length > 0;
+            const bufferAmount = hasBuffer ? video.buffered.end(0) : 0;
+
+            // Per LIVE: se c'è almeno 1s di buffer, prova a partire SUBITO
+            if (bufferAmount > 1) {
+              console.log('[HLS] Buffer check: buffer=' + bufferAmount.toFixed(1) + 's, starting playback');
+              clearInterval(bufferCheckInterval);
+              tryPlay('buffer-check');
+            }
+          }, 100); // Check MOLTO frequente (100ms)
+
+          // Timeout di sicurezza CORTO: dopo 1.5s forza il play se c'è qualsiasi buffer
+          const forcePlayTimeout = setTimeout(() => {
+            if (playStarted) return;
+            clearInterval(bufferCheckInterval);
+
+            if (video.buffered.length > 0) {
+              const bufferAmount = video.buffered.end(0);
+              console.log('[HLS] Force play timeout: buffer=' + bufferAmount.toFixed(1) + 's');
+              tryPlay('timeout-force');
+            }
+          }, 1500);
+
+          // Cleanup
+          const cleanupBufferCheck = () => {
+            clearInterval(bufferCheckInterval);
+            clearTimeout(forcePlayTimeout);
+          };
+
+          // Pulisci quando parte o dopo 2 minuti
+          video.addEventListener('playing', cleanupBufferCheck, { once: true });
+          setTimeout(cleanupBufferCheck, 120000);
+        }
+
+        hls!.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
+          console.log('[HLS] MANIFEST_PARSED', Math.round(performance.now() - t0), 'ms', 'levels:', data.levels?.length);
+          if (!isLive) {
+            video.play().catch(err => {
+              console.debug('Autoplay catch:', err);
+              setIsPlaying(false);
+            });
+          }
         });
-        
+
+        // Flag per evitare seek multipli
+        let resumeDone = false;
+
+        // Log eventi per debug
+        hls!.on(Hls.Events.LEVEL_LOADED, (_, data) => {
+          console.log('[HLS] LEVEL_LOADED', Math.round(performance.now() - t0), 'ms', 'live:', data.details.live);
+
+          // Per VOD/Series: seek alla posizione salvata quando abbiamo la durata
+          if (!isLive && !resumeDone && initialProgress && initialProgress > 0 && initialProgress < 0.95) {
+            const totalDuration = data.details.totalduration;
+            if (totalDuration > 0) {
+              const resumeTime = totalDuration * initialProgress;
+              // Riprendi solo se significativo (> 30s) e non quasi alla fine
+              if (resumeTime > 30 && resumeTime < totalDuration - 60) {
+                resumeDone = true;
+                console.log(`[HLS] Ripresa VOD dalla posizione: ${Math.round(resumeTime)}s (${Math.round(initialProgress * 100)}%)`);
+                // Ferma il caricamento corrente e ricarica dalla posizione desiderata
+                hls!.stopLoad();
+                hls!.startLoad(resumeTime);
+                video.currentTime = resumeTime;
+                showOSD(FastForward, `Ripresa da ${formatTime(resumeTime)}`);
+              }
+            }
+          }
+        });
+
+        hls!.on(Hls.Events.FRAG_LOADING, (_, data) => {
+          console.log('[HLS] FRAG_LOADING', Math.round(performance.now() - t0), 'ms', 'sn:', data.frag.sn, 'url:', data.frag.url?.substring(0, 60));
+        });
+
+        hls!.on(Hls.Events.FRAG_LOADED, (_, data) => {
+          console.log('[HLS] FRAG_LOADED', Math.round(performance.now() - t0), 'ms', 'sn:', data.frag.sn);
+        });
+
+        hls!.on(Hls.Events.ERROR, (_e: any, data: any) => {
+          console.warn('[HLS] ERROR:', data.type, data.details, data.fatal ? 'FATAL' : '', 'response:', data.response?.code);
+
+          // Per i LIVE: ignora bufferStalledError - è normale durante il buffering iniziale
+          if (isLive && data.details === 'bufferStalledError') {
+            console.log('[HLS] Ignoring bufferStalledError for live stream (normal during initial buffering)');
+            return;
+          }
+
+          if (!data?.fatal) return;
+
+          console.warn('HLS Fatal Error:', data.type, data.details);
+
+          // Distruggi HLS per evitare retry infiniti
+          try { hls!.destroy(); } catch {}
+          hlsRef.current = null;
+
+          switch (data.type) {
+            case Hls.ErrorTypes.NETWORK_ERROR:
+              // Errori di rete - prova fallback
+              if (data.details === 'manifestLoadError' || data.details === 'manifestLoadTimeOut') {
+                console.log('[HLS] Manifest load failed, trying native playback...');
+                tryNativeHls();
+              } else if (data.details === 'levelLoadError' || data.details === 'levelLoadTimeOut') {
+                // Errore caricamento level (spesso 509 Bandwidth Exceeded)
+                // Prova con URL TS diretto se disponibile
+                console.log('[HLS] Level load failed (possibly 509), trying TS direct or native...');
+                // Costruisci URL TS diretto dal manifest
+                const tsUrl = source.replace('.m3u8', '.ts');
+                if (mpegts.isSupported()) {
+                  // Prova MPEG-TS diretto
+                  const player = mpegts.createPlayer({
+                    type: 'mpegts',
+                    url: tsUrl,
+                    isLive: true
+                  }, {
+                    enableWorker: true,
+                    stashInitialSize: 128 * 1024,
+                    liveBufferLatencyChasing: true,
+                  });
+                  mpegtsRef.current = player;
+                  player.attachMediaElement(video);
+                  player.load();
+                  player.play();
+                  player.on(mpegts.Events.ERROR, () => {
+                    // Se anche TS fallisce, prova nativo
+                    try { player.destroy(); } catch {}
+                    mpegtsRef.current = null;
+                    tryNativeHls();
+                  });
+                } else {
+                  tryNativeHls();
+                }
+              } else {
+                // Altri errori di rete
+                tryNativeHls();
+              }
+              break;
+            case Hls.ErrorTypes.MEDIA_ERROR:
+              if (data.details === 'bufferAppendError' ||
+                  data.details === 'bufferAppendingError' ||
+                  data.details === 'fragParsingError') {
+                console.warn('Possible codec issue, trying native fallback...');
+                tryNativePlayback(video, source);
+              } else {
+                tryNativeHls();
+              }
+              break;
+            default:
+              console.warn('HLS error, trying native fallback...');
+              tryNativePlayback(video, source);
+              break;
+          }
+        });
+      } else if (isTS && mpegts.isSupported()) {
+        // MPEG-TS - configurazioni differenziate per live/movies/series
+        // (cleanup già fatto all'inizio di loadStream)
+
+        // ============================================
+        // MPEG-TS LIVE: RIPRODUZIONE ISTANTANEA
+        // ============================================
+        const mpegtsConfigLive = {
+          enableWorker: true,
+          // Buffer MINIMO per partenza immediata
+          stashInitialSize: 32 * 1024, // 32KB - minimo assoluto
+          lazyLoad: false, // Carica tutto subito
+          lazyLoadMaxDuration: 3,
+          deferLoadAfterSourceOpen: false,
+          autoCleanupSourceBuffer: true,
+          autoCleanupMaxBackwardDuration: 2, // Solo 2s backbuffer
+          autoCleanupMinBackwardDuration: 1,
+          fixAudioTimestampGap: true,
+          // Inseguimento latenza ISTANTANEO
+          liveBufferLatencyChasing: true,
+          liveBufferLatencyMaxLatency: 0.8, // Max 800ms di ritardo
+          liveBufferLatencyMinRemain: 0.2, // Min 200ms buffer
+          seekType: 'range' as const,
+        };
+
+        // ============================================
+        // MPEG-TS MOVIE: BUFFER AMPIO, SEEKING FLUIDO
+        // ============================================
+        const mpegtsConfigMovie = {
+          enableWorker: true,
+          stashInitialSize: 512 * 1024, // 512KB per avvio veloce con qualità
+          lazyLoad: true,
+          lazyLoadMaxDuration: 900, // 15 minuti
+          lazyLoadRecoverDuration: 90,
+          deferLoadAfterSourceOpen: false,
+          autoCleanupSourceBuffer: true,
+          autoCleanupMaxBackwardDuration: 180, // 3 minuti backbuffer
+          autoCleanupMinBackwardDuration: 90,
+          fixAudioTimestampGap: true,
+          liveBufferLatencyChasing: false,
+          seekType: 'range' as const,
+          accurateSeek: true,
+        };
+
+        // ============================================
+        // MPEG-TS SERIES: VIA DI MEZZO
+        // ============================================
+        const mpegtsConfigSeries = {
+          enableWorker: true,
+          stashInitialSize: 256 * 1024, // 256KB
+          lazyLoad: true,
+          lazyLoadMaxDuration: 600, // 10 minuti
+          lazyLoadRecoverDuration: 60,
+          deferLoadAfterSourceOpen: false,
+          autoCleanupSourceBuffer: true,
+          autoCleanupMaxBackwardDuration: 90, // 90s backbuffer
+          autoCleanupMinBackwardDuration: 45,
+          fixAudioTimestampGap: true,
+          liveBufferLatencyChasing: false,
+          seekType: 'range' as const,
+          accurateSeek: true,
+        };
+
+        // Selezione configurazione
+        let mpegtsConfig;
+        if (isLive) {
+          mpegtsConfig = mpegtsConfigLive;
+        } else if (channel.type === 'series') {
+          mpegtsConfig = mpegtsConfigSeries;
+        } else {
+          mpegtsConfig = mpegtsConfigMovie;
+        }
+
+        const player = mpegts.createPlayer({
+          type: 'mpegts', url: source, isLive
+        }, mpegtsConfig);
+
         mpegtsRef.current = player;
         player.attachMediaElement(video);
         player.load();
-        
         const playPromise = player.play();
-        if (playPromise !== undefined) {
-             (playPromise as Promise<void>).catch(() => setIsPlaying(false));
-        }
-        player.on(mpegts.Events.ERROR, () => setError("Stream Error"));
-    } else {
-      // Native Player
-      video.src = source;
-      video.play().catch(() => setIsPlaying(false));
-      video.onerror = () => setError("Format Not Supported");
-    }
+        if (playPromise) (playPromise as Promise<void>).catch(() => setIsPlaying(false));
+        player.on(mpegts.Events.ERROR, () => {
+          // Tenta fallback nativo
+          console.warn('MPEGTS error, trying native fallback...');
+          try { player.destroy(); } catch {}
+          mpegtsRef.current = null;
+          tryNativePlayback(video, source);
+        });
+      } else {
+        // Native playback (MP4, MKV, etc.)
+        // (cleanup già fatto all'inizio di loadStream)
+        tryNativePlayback(video, source);
+      }
 
-    // Metadata Fetch
-    setMeta(null);
-    if (channel && channel.type === 'movie') {
+      // Funzione helper per tentare riproduzione nativa con gestione errori avanzata
+      function tryNativePlayback(videoEl: HTMLVideoElement, url: string) {
+        videoEl.src = url;
+
+        const handleError = () => {
+          const mediaError = videoEl.error;
+          let errorMsg = 'Formato Non Supportato';
+
+          if (mediaError) {
+            switch (mediaError.code) {
+              case MediaError.MEDIA_ERR_ABORTED:
+                errorMsg = 'Riproduzione Interrotta';
+                break;
+              case MediaError.MEDIA_ERR_NETWORK:
+                errorMsg = 'Errore di Rete';
+                break;
+              case MediaError.MEDIA_ERR_DECODE:
+                // Questo è spesso il caso per HEVC/4K non supportato
+                errorMsg = 'Codec Non Supportato (HEVC/4K)';
+                console.warn('Decode error - likely unsupported codec:', mediaError.message);
+                break;
+              case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
+                errorMsg = 'Formato Video Non Supportato';
+                break;
+            }
+          }
+
+          setError(errorMsg);
+          setIsBuffering(false);
+        };
+
+        videoEl.onerror = handleError;
+
+        // Gestione eventi per rilevare problemi di codec durante la riproduzione
+        const handleStalled = () => {
+          console.warn('Video stalled - possible codec issue');
+        };
+
+        videoEl.addEventListener('stalled', handleStalled, { once: true });
+
+        videoEl.play().catch((err) => {
+          console.warn('Native playback failed:', err);
+          // Se il play fallisce ma non c'è già un errore, potrebbe essere un problema di codec
+          if (!videoEl.error) {
+            // Attendi un attimo per vedere se arriva un errore più specifico
+            setTimeout(() => {
+              if (!videoEl.error && videoEl.readyState < 2) {
+                setError('Impossibile Riprodurre - Codec Non Supportato');
+                setIsBuffering(false);
+              }
+            }, 2000);
+          }
+          setIsPlaying(false);
+        });
+      }
+
+      // Metadata solo per movie
+      setMeta(null);
+      if (channel && channel.type === 'movie') {
         const query = channel.cleanName || channel.name;
         MetadataService.searchTMDB(query, 'movie', channel.year).then(res => {
-            if (res?.id) MetadataService.getDetails(res.id, 'movie').then(setMeta);
+          if (res?.id) MetadataService.getDetails(res.id, 'movie').then(setMeta);
         });
+      }
+    };
+
+    // LIVE: avvio IMMEDIATO senza debounce
+    // VOD: piccolo debounce per evitare rimbalzi durante navigazione
+    if (isLive) {
+      // Cancella eventuali timer precedenti
+      if (debounceTimerRef.current) {
+        window.clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
+      // Avvia SUBITO
+      loadStream();
+    } else {
+      // VOD: debounce di 50ms
+      if (debounceTimerRef.current) window.clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = window.setTimeout(loadStream, 50);
     }
 
     return () => {
-      if (hlsRef.current) hlsRef.current.destroy();
-      if (mpegtsRef.current) mpegtsRef.current.destroy();
+      if (debounceTimerRef.current) window.clearTimeout(debounceTimerRef.current);
     };
   }, [channel]);
+
+  // Prewarm/Persistenza cache per canali adiacenti - SOLO per VOD/Series, NON per Live
+  useEffect(() => {
+    if (!channel || !playlist?.length) return;
+
+    // DISABILITA PREWARM PER LIVE - interferisce con lo streaming
+    if (channel.type === 'live') return;
+
+    const idx = playlist.findIndex(c => c.id === channel.id);
+
+    // Prewarm più canali: prev, next, next+1 per zapping fluido (solo VOD/Series)
+    const neighbors: Channel[] = [];
+    if (idx > 0) neighbors.push(playlist[idx - 1]);
+    if (idx < playlist.length - 1) neighbors.push(playlist[idx + 1]);
+    if (idx < playlist.length - 2) neighbors.push(playlist[idx + 2]);
+
+    // Prewarm in parallelo (solo per VOD/Series)
+    neighbors.forEach(c => {
+      if (!c?.url) return;
+
+      // DNS/TLS warmup
+      prewarm(c.url);
+
+      // HLS prewarm solo per m3u8 VOD/Series
+      const isM3U8 = c.url.toLowerCase().includes('.m3u8');
+      if (isM3U8 && (Hls as any).isSupported() && !warmCacheRef.current.has(c.id)) {
+        const doWarm = () => {
+          try {
+            const h = warmHls(c.url, false); // false = non è live
+            cachePut(c.id, h);
+          } catch { /* ignore */ }
+        };
+
+        if ('requestIdleCallback' in window) {
+          (window as any).requestIdleCallback(doWarm, { timeout: 1000 });
+        } else {
+          setTimeout(doWarm, 100);
+        }
+      }
+    });
+
+    return () => {
+      // nessuna azione: LRU gestisce la dimensione automaticamente
+    };
+  }, [channel, playlist]);
+
+  // Cleanup su unmount
+  useEffect(() => {
+    return () => {
+      // Ferma tutti i download prima di distruggere
+      try {
+        hlsRef.current?.stopLoad();
+        hlsRef.current?.detachMedia();
+        hlsRef.current?.destroy();
+      } catch {}
+      try {
+        mpegtsRef.current?.pause();
+        mpegtsRef.current?.unload();
+        mpegtsRef.current?.detachMediaElement();
+        mpegtsRef.current?.destroy();
+      } catch {}
+      warmCacheRef.current.forEach(h => {
+        try {
+          h.stopLoad();
+          h.destroy();
+        } catch {}
+      });
+      warmCacheRef.current.clear();
+    };
+  }, []);
 
   // Keyboard Handler
   useEffect(() => {
@@ -224,25 +960,33 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
             return; 
         }
 
+        const isLive = channel.type === 'live';
         switch (e.key) {
             case 'ArrowLeft':
-                // Seek logic
-                video.currentTime = Math.max(0, video.currentTime - 10);
-                showOSD(Rewind, "-10s");
+                if (isLive) { if (onPrev) { onPrev(); showOSD(SkipBack, 'Prev'); } }
+                else { video.currentTime = Math.max(0, video.currentTime - 10); showOSD(Rewind, "-10s"); }
                 break;
             case 'ArrowRight':
-                // Seek logic
-                video.currentTime = Math.min(video.duration, video.currentTime + 10);
-                showOSD(FastForward, "+10s");
+                if (isLive) { if (onNext) { onNext(); showOSD(SkipForward, 'Next'); } }
+                else { video.currentTime = Math.min(video.duration, video.currentTime + 10); showOSD(FastForward, "+10s"); }
                 break;
             case 'ArrowUp':
-                e.preventDefault();
-                setShowPlaylist(true);
-                setTimeout(() => {
-                    const el = document.getElementById(`plist-${channel.id}`);
-                    el?.scrollIntoView({block: 'center'});
-                    el?.focus();
-                }, 100);
+                // Playlist solo per series, non per live e movies
+                if (channel.type === 'series') {
+                    e.preventDefault();
+                    setShowPlaylist(true);
+                    setTimeout(() => {
+                        const el = document.getElementById(`plist-${channel.id}`);
+                        el?.scrollIntoView({block: 'center'});
+                        el?.focus();
+                    }, 100);
+                } else {
+                    // Per live e movies: aumenta volume
+                    const newVolUp = Math.min(1, video.volume + 0.1);
+                    video.volume = newVolUp;
+                    setVolume(newVolUp);
+                    showOSD(Volume2, `${Math.round(newVolUp * 100)}%`);
+                }
                 break;
             case 'ArrowDown':
                 const newVolDown = Math.max(0, video.volume - 0.1);
@@ -265,12 +1009,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
             case 'f':
                 toggleFull();
                 break;
+            case 'p':
+                togglePiP();
+                break;
         }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [channel, isFullscreen, isPlaying, isMuted, showPlaylist]);
+  }, [channel, isFullscreen, isPlaying, isMuted, isPiP, showPlaylist]);
 
   // Video Events
   useEffect(() => {
@@ -280,11 +1027,25 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
     const updateBuffer = () => {
         if (video.duration > 0 && video.buffered.length > 0) {
             let b = 0;
-            // Find the buffer range that covers the current time
-            for(let i=0; i < video.buffered.length; i++) {
-                if (video.buffered.start(i) <= video.currentTime + 0.5 && video.buffered.end(i) >= video.currentTime - 0.5) {
-                    b = video.buffered.end(i);
-                    break;
+            // Per VOD: trova il punto bufferizzato più avanti dopo la posizione corrente
+            // Per Live: trova il buffer che copre la posizione corrente
+            const isVOD = channel?.type === 'movie' || channel?.type === 'series';
+
+            for(let i = 0; i < video.buffered.length; i++) {
+                const start = video.buffered.start(i);
+                const end = video.buffered.end(i);
+
+                if (isVOD) {
+                    // VOD: mostra tutto il buffer disponibile dopo la posizione corrente
+                    if (end > video.currentTime && start <= video.currentTime + 1) {
+                        b = Math.max(b, end);
+                    }
+                } else {
+                    // Live: buffer che contiene la posizione corrente
+                    if (start <= video.currentTime + 0.5 && end >= video.currentTime - 0.5) {
+                        b = end;
+                        break;
+                    }
                 }
             }
             setBuffered(b);
@@ -295,7 +1056,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
         if(!isSeeking) {
             setCurrentTime(video.currentTime);
             
-            // Update progress every 5 seconds or if > 1% change to save writes
+            // Update progress ogni 5 secondi o se > 1% change
             const now = Date.now();
             if (onProgress && video.duration > 0 && (now - lastProgressUpdate.current > 5000)) {
                 lastProgressUpdate.current = now;
@@ -305,42 +1066,331 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
         updateBuffer();
     };
     
-    const onMeta = () => setDuration(video.duration);
-    
+    const onMeta = () => {
+        setDuration(video.duration);
+
+        // Riprendi dalla posizione salvata per playback NATIVO (non HLS)
+        // Per HLS il seek è già fatto in MANIFEST_PARSED
+        const isHlsActive = hlsRef.current !== null;
+        if (!isHlsActive && initialProgress && initialProgress > 0 && initialProgress < 0.95 && channel?.type !== 'live') {
+            const resumeTime = video.duration * initialProgress;
+            // Riprendi solo se il progresso è significativo (> 30 secondi) e non quasi alla fine
+            if (resumeTime > 30 && resumeTime < video.duration - 60) {
+                console.log(`[VideoPlayer] Ripresa nativa dalla posizione: ${Math.round(resumeTime)}s (${Math.round(initialProgress * 100)}%)`);
+                video.currentTime = resumeTime;
+                showOSD(FastForward, `Ripresa da ${formatTime(resumeTime)}`);
+            }
+        }
+    };
+
     const onEnd = () => { 
-        if (onProgress && video.duration > 0) onProgress(1, video.duration); // Mark as fully watched
-        if (onNext) onNext(); 
+        if (onProgress && video.duration > 0) onProgress(1, video.duration);
+        if (onNext) onNext();
+    };
+
+    // Eventi aggiuntivi per gestione buffering VOD
+    const onWaiting = () => {
+        // Video in attesa di dati - mostra spinner
+        setIsBuffering(true);
+        updateBuffer();
+    };
+
+    const onCanPlay = () => {
+        // Pronto a riprodurre - nascondi spinner
+        setIsBuffering(false);
+        updateBuffer();
+    };
+
+    const onPlaying = () => {
+        // In riproduzione attiva
+        setIsBuffering(false);
+    };
+
+    const onSeeked = () => {
+        // Dopo seek completato, aggiorna buffer
+        updateBuffer();
+        setIsSeeking(false);
     };
 
     video.addEventListener('timeupdate', onTime);
-    video.addEventListener('progress', updateBuffer); // Also update on download progress
+    video.addEventListener('progress', updateBuffer);
     video.addEventListener('loadedmetadata', onMeta);
     video.addEventListener('ended', onEnd);
-    
+    video.addEventListener('waiting', onWaiting);
+    video.addEventListener('canplay', onCanPlay);
+    video.addEventListener('playing', onPlaying);
+    video.addEventListener('seeked', onSeeked);
+
     return () => {
         video.removeEventListener('timeupdate', onTime);
         video.removeEventListener('progress', updateBuffer);
         video.removeEventListener('loadedmetadata', onMeta);
         video.removeEventListener('ended', onEnd);
+        video.removeEventListener('waiting', onWaiting);
+        video.removeEventListener('canplay', onCanPlay);
+        video.removeEventListener('playing', onPlaying);
+        video.removeEventListener('seeked', onSeeked);
     };
-  }, [isSeeking, onNext, onProgress]);
+  }, [isSeeking, onNext, onProgress, channel]);
 
-  const togglePlay = () => { if (videoRef.current) isPlaying ? videoRef.current.pause() : videoRef.current.play(); setIsPlaying(!isPlaying); };
+  // Watchdog anti-stallo: tenta recupero automatico se il tempo non avanza o readyState basso
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    let lastTime = -1;
+    let attempts = 0;
+    let stallStart = 0;
+    let firstPlayTime = 0; // Traccia quando è iniziata la riproduzione
+
+    const reset = () => { attempts = 0; lastTime = video.currentTime; stallStart = 0; };
+
+    // Listener per tracciare quando inizia effettivamente la riproduzione
+    const onPlaying = () => { firstPlayTime = Date.now(); };
+    video.addEventListener('playing', onPlaying);
+
+    const tick = () => {
+      if (!channel) return;
+      // Evita falsi positivi quando in pausa o durante seek
+      if (video.paused || video.seeking) { reset(); return; }
+
+      const advancing = video.currentTime > (lastTime + 0.05);
+      const readyOk = video.readyState >= 3; // HAVE_FUTURE_DATA
+
+      if (!advancing || !readyOk) {
+        if (stallStart === 0) stallStart = Date.now();
+        attempts++;
+
+        const isLive = channel.type === 'live';
+        const isSeries = channel.type === 'series';
+        const hls = hlsRef.current;
+        const ts = mpegtsRef.current;
+        const stallDuration = Date.now() - stallStart;
+        const timeSincePlay = firstPlayTime > 0 ? Date.now() - firstPlayTime : 0;
+
+        // Per LIVE: non fare recovery durante i primi 10 secondi di riproduzione
+        // perché il buffer potrebbe essere ancora in fase di riempimento
+        if (isLive && timeSincePlay < 10000 && attempts < 5) {
+          // Solo aspetta, non fare recovery aggressivo
+          lastTime = video.currentTime;
+          return;
+        }
+
+        // Soglie diverse per tipo di contenuto (più alte per live)
+        const stallThreshold = isLive ? 3000 : isSeries ? 2000 : 3000;
+
+        if (hls) {
+          try {
+            if (attempts === 1 && !isLive) {
+              // recoverMediaError solo per VOD/Series, non per live
+              hls.recoverMediaError();
+            } else if (attempts === 2) {
+              hls.startLoad();
+            } else if (attempts >= 3 && stallDuration > stallThreshold) {
+              if (isLive) {
+                // Live: salto più aggressivo per uscire da buchi
+                video.currentTime = video.currentTime + 0.3;
+                attempts = 0;
+              } else {
+                // VOD/Series: cerca il punto bufferizzato più vicino
+                let foundBuffered = false;
+                for (let i = 0; i < video.buffered.length; i++) {
+                  const start = video.buffered.start(i);
+                  const end = video.buffered.end(i);
+                  if (video.currentTime < start && start - video.currentTime < 10) {
+                    video.currentTime = start + 0.1;
+                    foundBuffered = true;
+                    break;
+                  }
+                  if (video.currentTime >= start && video.currentTime <= end) {
+                    video.currentTime = video.currentTime + 0.2;
+                    foundBuffered = true;
+                    break;
+                  }
+                }
+                if (!foundBuffered) {
+                  hls.startLoad(video.currentTime);
+                }
+                attempts = 0;
+                stallStart = 0;
+              }
+            }
+          } catch {}
+        } else if (ts) {
+          try {
+            if (attempts === 1 && !isLive) {
+              ts.unload();
+              ts.load();
+            } else if (attempts >= 2 && stallDuration > stallThreshold) {
+              if (isLive) {
+                video.currentTime = video.currentTime + 0.3;
+              } else {
+                const targetTime = video.currentTime + 0.3;
+                ts.unload();
+                ts.load();
+                setTimeout(() => {
+                  try { video.currentTime = targetTime; } catch {}
+                }, 100);
+              }
+              attempts = 0;
+              stallStart = 0;
+            }
+          } catch {}
+        }
+      } else {
+        attempts = 0;
+        stallStart = 0;
+      }
+
+      lastTime = video.currentTime;
+    };
+
+    // Intervallo differenziato: più frequente per live
+    const isLive = channel?.type === 'live';
+    const interval = isLive ? 500 : 1000; // 500ms per live, 1s per VOD
+    const id = window.setInterval(tick, interval);
+    video.addEventListener('canplay', reset);
+    video.addEventListener('playing', reset);
+    return () => {
+      window.clearInterval(id);
+      video.removeEventListener('canplay', reset);
+      video.removeEventListener('playing', reset);
+      video.removeEventListener('playing', onPlaying);
+    };
+  }, [channel]);
+
+  const togglePlay = () => {
+    if (videoRef.current) {
+      if (isPlaying) {
+        videoRef.current.pause();
+        // I download rimangono in pausa - sono già fermati quando il player è a schermo
+      } else {
+        videoRef.current.play();
+      }
+      setIsPlaying(!isPlaying);
+    }
+  };
   const toggleMute = () => { if (videoRef.current) { videoRef.current.muted = !isMuted; setIsMuted(!isMuted); }};
   const toggleFull = () => { 
       if (!containerRef.current) return; 
       if (!document.fullscreenElement) containerRef.current.requestFullscreen().then(() => setIsFullscreen(true));
       else document.exitFullscreen().then(() => setIsFullscreen(false));
   };
+
+  // Picture-in-Picture
+  const togglePiP = async () => {
+      const video = videoRef.current;
+      if (!video) return;
+
+      try {
+          if (document.pictureInPictureElement) {
+              await document.exitPictureInPicture();
+              setIsPiP(false);
+              showOSD(PictureInPicture2, 'PiP disattivato');
+          } else if (document.pictureInPictureEnabled) {
+              await video.requestPictureInPicture();
+              setIsPiP(true);
+              showOSD(PictureInPicture2, 'PiP attivato');
+          }
+      } catch (err) {
+          console.warn('PiP error:', err);
+      }
+  };
+
+  // Ascolta eventi PiP per sincronizzare lo stato
+  useEffect(() => {
+      const video = videoRef.current;
+      if (!video) return;
+
+      const onEnterPiP = () => setIsPiP(true);
+      const onLeavePiP = () => setIsPiP(false);
+
+      video.addEventListener('enterpictureinpicture', onEnterPiP);
+      video.addEventListener('leavepictureinpicture', onLeavePiP);
+
+      return () => {
+          video.removeEventListener('enterpictureinpicture', onEnterPiP);
+          video.removeEventListener('leavepictureinpicture', onLeavePiP);
+      };
+  }, [channel]);
+
+  // Seeking ottimizzato per VOD
+  const seekDebounceRef = useRef<number | null>(null);
+  const pendingSeekRef = useRef<number | null>(null);
+
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
       const t = parseFloat(e.target.value);
-      setCurrentTime(t);
-      if (videoRef.current) videoRef.current.currentTime = t;
+      setCurrentTime(t); // Aggiorna UI immediatamente per feedback visivo
+      pendingSeekRef.current = t;
+
+      // Debounce il seek effettivo per evitare troppi seek durante il drag
+      if (seekDebounceRef.current) window.clearTimeout(seekDebounceRef.current);
+      seekDebounceRef.current = window.setTimeout(() => {
+          if (pendingSeekRef.current !== null && videoRef.current) {
+              const targetTime = pendingSeekRef.current;
+              setIsBuffering(true);
+
+              // Pre-load il segmento target per HLS
+              if (hlsRef.current) {
+                  try {
+                      hlsRef.current.startLoad(targetTime);
+                  } catch {}
+              }
+
+              // Usa fastSeek se disponibile per seeking più fluido
+              if ('fastSeek' in videoRef.current && typeof (videoRef.current as any).fastSeek === 'function') {
+                  (videoRef.current as any).fastSeek(targetTime);
+              } else {
+                  videoRef.current.currentTime = targetTime;
+              }
+              pendingSeekRef.current = null;
+          }
+      }, 150); // 150ms debounce per bilanciare reattività e performance
   };
+
+  const handleSeekStart = () => {
+      setIsSeeking(true);
+      // Pausa temporanea durante seeking per VOD per ridurre carico
+      if (videoRef.current && (channel?.type === 'movie' || channel?.type === 'series')) {
+          videoRef.current.pause();
+      }
+  };
+
+  const handleSeekEnd = () => {
+      setIsSeeking(false);
+      // Riprendi riproduzione dopo seek
+      if (videoRef.current && (channel?.type === 'movie' || channel?.type === 'series')) {
+          videoRef.current.play().catch(() => {});
+      }
+      // Forza seek finale se c'è un valore pending
+      if (pendingSeekRef.current !== null && videoRef.current) {
+          if (seekDebounceRef.current) window.clearTimeout(seekDebounceRef.current);
+          videoRef.current.currentTime = pendingSeekRef.current;
+          pendingSeekRef.current = null;
+      }
+  };
+
   const formatTime = (s: number) => {
       if (!s || isNaN(s)) return "0:00";
       const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = Math.floor(s%60);
       return h > 0 ? `${h}:${m.toString().padStart(2,'0')}:${sec.toString().padStart(2,'0')}` : `${m}:${sec.toString().padStart(2,'0')}`;
+  };
+
+  // Riparti dall'inizio
+  const restartFromBeginning = () => {
+      if (videoRef.current) {
+          videoRef.current.currentTime = 0;
+          videoRef.current.play().catch(() => {});
+          showOSD(RotateCcw, 'Dall\'inizio');
+          // Notifica il reset del progresso
+          if (onResetProgress) {
+              onResetProgress();
+          }
+          // Aggiorna anche immediatamente il progresso a 0
+          if (onProgress) {
+              onProgress(0, duration);
+          }
+      }
   };
 
   if (!channel) return null;
@@ -357,12 +1407,22 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
       <video 
         ref={videoRef} 
         className="absolute inset-0 w-full h-full object-contain z-10 bg-black" 
-        poster={channel.logo}
+        poster={channel.type === 'movie' ? (channel.logo || undefined) : undefined}
         playsInline
       />
       
       {backdrop && (
           <div className={`absolute inset-0 z-0 bg-cover bg-center transition-opacity duration-1000 ${(!isPlaying || showControls) ? 'opacity-30 blur-sm' : 'opacity-0'}`} style={{ backgroundImage: `url(${backdrop})` }} />
+      )}
+
+      {/* Buffering Spinner */}
+      {isBuffering && !error && (
+          <div className="absolute inset-0 z-40 flex items-center justify-center pointer-events-none">
+              <div className="flex flex-col items-center gap-3">
+                  <div className="w-14 h-14 border-4 border-white/20 border-t-white rounded-full animate-spin"></div>
+                  <span className="text-white/80 text-sm font-medium">Buffering...</span>
+              </div>
+          </div>
       )}
 
       {/* OSD */}
@@ -389,7 +1449,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
                     onClick={() => onChannelSelect && onChannelSelect(c)}
                     className={`tv-focus w-full text-left p-3 rounded-lg flex items-center gap-3 transition-colors ${c.id === channel.id ? 'bg-red-600 text-white' : 'hover:bg-white/10 text-gray-300'}`}
                   >
-                      {c.logo ? <img src={c.logo} className="w-8 h-8 object-contain bg-black rounded" /> : <div className="w-8 h-8 bg-gray-700 rounded flex items-center justify-center text-xs">TV</div>}
+                      {/* Non caricare immagini durante live per risparmiare banda */}
+                      {channel.type !== 'live' && c.logo ? (
+                        <img src={c.logo} alt={c.name} className="w-8 h-8 object-contain bg-black rounded" loading="lazy" />
+                      ) : (
+                        <div className="w-8 h-8 bg-gray-700 rounded flex items-center justify-center text-xs">TV</div>
+                      )}
                       <span className="truncate text-sm font-medium">{c.cleanName || c.name}</span>
                   </button>
               ))}
@@ -398,9 +1463,18 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
 
       {error && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80">
-            <div className="bg-red-900/50 backdrop-blur border border-red-500/50 px-8 py-6 rounded-2xl flex flex-col items-center gap-2">
-                <AlertTriangle className="w-10 h-10 text-red-400" />
+            <div className="bg-red-900/50 backdrop-blur border border-red-500/50 px-8 py-6 rounded-2xl flex flex-col items-center gap-3 max-w-md text-center">
+                <AlertTriangle className="w-12 h-12 text-red-400" />
                 <p className="text-xl font-medium text-white">{error}</p>
+                {(error.includes('Codec') || error.includes('HEVC') || error.includes('4K') || error.includes('Formato')) && (
+                    <p className="text-sm text-gray-300">
+                        Questo contenuto potrebbe utilizzare un codec video (HEVC/H.265) non supportato dal browser.
+                        Prova a riprodurre il contenuto con un player esterno.
+                    </p>
+                )}
+                <p className="text-xs text-gray-400 mt-2">
+                    Usa il pulsante "Indietro" in alto a sinistra per tornare alla lista.
+                </p>
             </div>
         </div>
       )}
@@ -447,7 +1521,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
 
                     <input 
                         type="range" min={0} max={duration} step="any" value={currentTime} onChange={handleSeek}
-                        onMouseDown={() => setIsSeeking(true)} onMouseUp={() => setIsSeeking(false)}
+                        onMouseDown={handleSeekStart} onMouseUp={handleSeekEnd}
+                        onTouchStart={handleSeekStart} onTouchEnd={handleSeekEnd}
                         className="tv-focus absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"
                     />
                 </div>
@@ -457,9 +1532,18 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
 
           <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
-                  <button onClick={() => setShowPlaylist(!showPlaylist)} className="tv-focus p-2 rounded-full hover:bg-white/10 text-gray-300 hover:text-white" title="Channel List (Up Arrow)">
-                      <List className="w-6 h-6" />
-                  </button>
+                  {/* Pulsante lista canali: solo per series, non per live e movies */}
+                  {channel.type === 'series' && (
+                      <button onClick={() => setShowPlaylist(!showPlaylist)} className="tv-focus p-2 rounded-full hover:bg-white/10 text-gray-300 hover:text-white" title="Lista episodi">
+                          <List className="w-6 h-6" />
+                      </button>
+                  )}
+                  {/* Pulsante riparti dall'inizio: solo per movie e series */}
+                  {(channel.type === 'movie' || channel.type === 'series') && currentTime > 30 && (
+                      <button onClick={restartFromBeginning} className="tv-focus p-2 rounded-full hover:bg-white/10 text-gray-300 hover:text-white" title="Riparti dall'inizio">
+                          <RotateCcw className="w-6 h-6" />
+                      </button>
+                  )}
               </div>
 
               <div className="flex items-center gap-6">
@@ -478,7 +1562,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
               </div>
 
               <div className="flex items-center gap-4">
-                  <button onClick={toggleFull} className="tv-focus p-2 rounded-full hover:bg-white/10 text-gray-300 hover:text-white">
+                  {/* Pulsante PiP - disponibile se supportato */}
+                  {document.pictureInPictureEnabled && (
+                      <button onClick={togglePiP} className={`tv-focus p-2 rounded-full hover:bg-white/10 transition-colors ${isPiP ? 'text-purple-400' : 'text-gray-300 hover:text-white'}`} title="Picture-in-Picture">
+                          <PictureInPicture2 className="w-6 h-6" />
+                      </button>
+                  )}
+                  <button onClick={toggleFull} className="tv-focus p-2 rounded-full hover:bg-white/10 text-gray-300 hover:text-white" title={isFullscreen ? 'Esci da schermo intero' : 'Schermo intero'}>
                       {isFullscreen ? <Minimize className="w-6 h-6" /> : <Maximize className="w-6 h-6" />}
                   </button>
               </div>

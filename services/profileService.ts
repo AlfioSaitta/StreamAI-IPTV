@@ -7,7 +7,14 @@ export const ProfileService = {
   getAll: (): Profile[] => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
-      return stored ? JSON.parse(stored) : [];
+      const parsed = stored ? JSON.parse(stored) : [];
+      return Array.isArray(parsed) 
+        ? parsed.map((p: Profile) => ({
+            ...p,
+            history: p.history || [],
+            watchlist: p.watchlist || []
+        }))
+        : [];
     } catch (e) {
       return [];
     }
@@ -25,7 +32,8 @@ export const ProfileService = {
       name,
       color: colors[profiles.length % colors.length],
       xtreamCreds: null,
-      history: []
+      history: [],
+      watchlist: []
     };
     profiles.push(newProfile);
     ProfileService.saveAll(profiles);
@@ -35,6 +43,28 @@ export const ProfileService = {
   delete: (id: string) => {
     const profiles = ProfileService.getAll().filter(p => p.id !== id);
     ProfileService.saveAll(profiles);
+  },
+
+  getWatchlist: (profileId: string): string[] => {
+    const profiles = ProfileService.getAll();
+    const profile = profiles.find(p => p.id === profileId);
+    return profile?.watchlist || [];
+  },
+
+  toggleWatchlist: (profileId: string, channelId: string) => {
+    const profiles = ProfileService.getAll();
+    const index = profiles.findIndex(p => p.id === profileId);
+    if (index !== -1) {
+      const watchlist = profiles[index].watchlist || [];
+      const exists = watchlist.includes(channelId);
+      const updated = exists 
+        ? watchlist.filter(id => id !== channelId)
+        : [channelId, ...watchlist].slice(0, 200);
+      profiles[index].watchlist = updated;
+      ProfileService.saveAll(profiles);
+      return profiles[index];
+    }
+    return null;
   },
 
   updateCredentials: (profileId: string, creds: XtreamCredentials | null) => {

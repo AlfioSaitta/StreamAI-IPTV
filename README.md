@@ -1,68 +1,166 @@
 # 📺 StreamAI IPTV Player
 
-**StreamAI** è un player IPTV di nuova generazione sviluppato con **React 19**, **TypeScript** e **Tailwind CSS**. 
-Si distingue per l'integrazione con **Google Gemini AI**, che offre raccomandazioni intelligenti sui canali basate sul mood dell'utente.
+**StreamAI** è un player IPTV di nuova generazione sviluppato con **React 19**, **TypeScript**, **Electron** e **Tailwind CSS**. 
+Si distingue per l'integrazione con **Google Gemini AI**, che offre raccomandazioni intelligenti sui contenuti basate sulle preferenze dell'utente.
+
+---
+
+## ✨ Funzionalità Principali
+
+### 🎬 Riproduzione
+- **Live TV**: Streaming live con zapping veloce e buffering ottimizzato
+- **Movies (VOD)**: Film on-demand con seeking fluido e qualità adattiva
+- **Series**: Episodi con navigazione tra stagioni e puntate
+- **Codec HEVC/H.265**: Supporto nativo per video 4K con codec proprietari (via BranchBit)
+
+### 🎮 Controlli Player
+- **Picture-in-Picture (PiP)**: Guarda i contenuti in una finestra flottante (`P`)
+- **Fullscreen**: Schermo intero (`F`)
+- **Seeking**: Avanti/indietro 10 secondi con frecce (`←` `→`)
+- **Volume**: Controllo volume con frecce (`↑` `↓`) e mute (`M`)
+- **Riprendi da dove eri rimasto**: Salvataggio automatico della posizione per VOD/Series
+- **Riparti dall'inizio**: Pulsante per ricominciare la riproduzione
+
+### 🤖 AI Assistant
+- **Ricerca intelligente**: Chiedi all'AI cosa vuoi guardare
+- **Raccomandazioni personalizzate**: Basate sulla cronologia di visione
+- **Suggerimenti contestuali**: Diversi per Live, Movies e Series
+
+### 👤 Profili Utente
+- **Multi-profilo**: Supporto per più utenti
+- **Cronologia separata**: Ogni profilo ha la sua cronologia
+- **Progresso salvato**: Riprendi da dove avevi interrotto
+
+### 🔧 Ottimizzazioni
+- **Buffering differenziato**: Configurazioni separate per Live/VOD/Series
+- **Cache immagini**: Download intelligente delle copertine
+- **Avvio rapido**: Streaming ottimizzato per partenza immediata
 
 ---
 
 ## 🚀 Requisiti
 
-*   **IDE**: [JetBrains WebStorm](https://www.jetbrains.com/webstorm/) (consigliato).
-*   **Node.js**: Richiesto solo per pacchettizzare l'app desktop (Electron).
-*   **Browser**: Chrome, Edge, Safari o Firefox (versione recente) per uso web.
+- **Node.js**: v18+ (per build e sviluppo)
+- **npm**: v9+
+- **Sistema Operativo**: Linux (testato), Windows, macOS
 
 ---
 
-## 🛠 Configurazione in WebStorm
+## 🛠 Installazione
 
-Il progetto include la cartella `.idea` configurata.
+```bash
+# Clona il repository
+git clone <repository-url>
+cd streamai-iptv
 
-1.  Apri WebStorm e seleziona **Open** sulla cartella del progetto.
-2.  WebStorm indicizzerà automaticamente i file.
-3.  Apri il terminale integrato di WebStorm (`Alt+F12`).
-4.  Esegui `npm install` per scaricare le dipendenze necessarie per la versione Desktop/Linux (Electron).
+# Installa le dipendenze (include patch automatica per codec HEVC)
+npm install
+```
 
----
-
-## ▶️ Come Avviare (Modalità Sviluppo)
-
-### Opzione A: Solo Web (Veloce)
-1.  Fai tasto destro su `index.html`.
-2.  Seleziona **Run 'index.html'**.
-
-### Opzione B: Client Desktop (Electron)
-Se vuoi testare l'esperienza nativa Linux/Desktop:
-1.  Esegui nel terminale:
-    ```bash
-    npm start
-    ```
-    Si aprirà una finestra applicativa dedicata.
+Il comando `npm install` esegue automaticamente lo script `patch-ffmpeg.js` che:
+- Scarica la distribuzione Electron con codec HEVC da BranchBit
+- Applica la patch solo se necessario (non riscarica se già installata)
 
 ---
 
-## 🐧 Creare l'Eseguibile per Linux
+## ▶️ Avvio
 
-Per creare un pacchetto portabile (`.tar.gz`) che non richiede installazione:
+### Modalità Sviluppo
+```bash
+# Avvia con Electron (hot reload)
+npm run dev
 
-1.  Assicurati di aver eseguito `npm install`.
-2.  Esegui il comando di build:
-    ```bash
-    npm run dist:linux
-    ```
-3.  Troverai l'archivio compilato nella cartella `dist/`.
-    *   Estrai il file `.tar.gz`.
-    *   Esegui il file eseguibile `streamai-iptv` contenuto nella cartella estratta.
+# Oppure con build prima
+npm start
+```
+
+### Build Produzione
+```bash
+# Solo build Vite
+npm run build
+
+# Build + pacchetto Linux (.tar.gz)
+npm run dist:linux
+```
+
+L'archivio sarà disponibile in `dist/streamai-iptv-X.X.X.tar.gz`
 
 ---
 
-## 📱 Web & PWA
+## ⌨️ Scorciatoie da Tastiera
 
-L'app rimane compatibile al 100% come PWA per Android/iOS.
-Poiché l'app utilizza **Babel Standalone**, non è necessario alcun processo di build per la versione web. Copia semplicemente tutti i file (eccetto `node_modules`, `.idea` e `dist`) sul tuo server web.
+| Tasto | Azione |
+|-------|--------|
+| `Spazio` / `Enter` | Play/Pausa |
+| `←` | -10s (VOD) / Canale precedente (Live) |
+| `→` | +10s (VOD) / Canale successivo (Live) |
+| `↑` | Volume + / Lista episodi (Series) |
+| `↓` | Volume - |
+| `M` | Mute/Unmute |
+| `F` | Fullscreen |
+| `P` | Picture-in-Picture |
+| `Esc` | Chiudi lista/menu |
 
 ---
 
-## 🤖 Configurazione API Key Gemini
+## 🔐 Configurazione API Gemini
 
-Per le raccomandazioni AI, imposta la tua chiave API. 
-*Nota*: In ambiente desktop, le variabili d'ambiente di sistema possono essere lette se configurate nel processo Electron, ma per questa demo assicurati di gestire la chiave in `services/geminiService.ts`.
+Per le raccomandazioni AI, configura la chiave API in uno dei seguenti modi:
+
+1. **Variabile d'ambiente** (consigliato):
+   ```bash
+   export VITE_GEMINI_API_KEY="tua-chiave-api"
+   ```
+
+2. **Direttamente nel codice** (solo sviluppo):
+   Modifica `services/geminiService.ts`
+
+---
+
+## 📁 Struttura Progetto
+
+```
+streamai-iptv/
+├── components/          # Componenti React
+│   ├── VideoPlayer.tsx  # Player principale
+│   ├── AIRecommender.tsx # Assistente AI
+│   ├── ChannelList.tsx  # Lista canali
+│   ├── SeriesDetail.tsx # Dettaglio serie
+│   └── ...
+├── services/            # Servizi
+│   ├── geminiService.ts # Integrazione Gemini AI
+│   ├── profileService.ts # Gestione profili
+│   ├── xtream.ts        # API Xtream Codes
+│   └── ...
+├── scripts/             # Script di build
+│   └── patch-ffmpeg.js  # Patch codec HEVC
+├── main.js              # Entry point Electron
+├── App.tsx              # Componente principale
+└── package.json
+```
+
+---
+
+## 🐧 Note Linux
+
+### Codec HEVC
+Il supporto HEVC viene aggiunto automaticamente tramite la distribuzione BranchBit di Electron.
+Se riscontri problemi, puoi installare i codec di sistema:
+
+```bash
+# Ubuntu/Debian
+sudo apt install ubuntu-restricted-extras gstreamer1.0-libav
+
+# Fedora
+sudo dnf install gstreamer1-libav gstreamer1-plugins-bad-freeworld
+
+# Arch
+sudo pacman -S gst-libav gst-plugins-bad
+```
+
+---
+
+## 📝 Licenza
+
+MIT License - Vedi file LICENSE per dettagli.
+
