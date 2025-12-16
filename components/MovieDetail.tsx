@@ -55,44 +55,57 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
 
   const backdrop = useMemo(() => {
     return (
+      movie.logo ||
       MetadataService.getImageUrl(tmdbData?.backdrop_path, 'original') ||
-      tmdbData?.images?.backdrops?.[0]?.file_path && MetadataService.getImageUrl(tmdbData.images.backdrops[0].file_path, 'original') ||
-      movie.logo
+      tmdbData?.images?.backdrops?.[0]?.file_path && MetadataService.getImageUrl(tmdbData.images.backdrops[0].file_path, 'original')
     );
   }, [tmdbData, movie.logo]);
 
   const poster = useMemo(() => {
     return (
+      movie.logo ||
       MetadataService.getImageUrl(tmdbData?.poster_path) ||
-      tmdbData?.images?.posters?.[0]?.file_path && MetadataService.getImageUrl(tmdbData.images.posters[0].file_path) ||
-      movie.logo
+      tmdbData?.images?.posters?.[0]?.file_path && MetadataService.getImageUrl(tmdbData.images.posters[0].file_path)
     );
   }, [tmdbData, movie.logo]);
 
-  const plot = tmdbData?.overview || movie.description || 'Nessuna descrizione disponibile.';
+  // Priorità ai dati del server Xtream, TMDB come fallback
+  const plot = movie.description || tmdbData?.overview || '';
 
   const cast = useMemo(() => {
+    // Prima usa i dati del server
+    if (movie.cast) return movie.cast;
+    // Fallback a TMDB
     const castList = tmdbData?.credits?.cast?.slice(0, 6).map((c: any) => c.name) || [];
     return castList.join(', ');
-  }, [tmdbData]);
+  }, [tmdbData, movie.cast]);
 
   const director = useMemo(() => {
+    // Prima usa i dati del server
+    if (movie.director) return movie.director;
+    // Fallback a TMDB
     const crew = tmdbData?.credits?.crew || [];
     const dir = crew.find((c: any) => c.job === 'Director');
-    return dir?.name || movie.director;
+    return dir?.name;
   }, [tmdbData, movie.director]);
 
   const genre = useMemo(() => {
+    // Prima usa i dati del server
+    if (movie.genre) return movie.genre;
+    // Fallback a TMDB
     if (tmdbData?.genres?.length) return tmdbData.genres.map((g: any) => g.name).join(' • ');
-    return movie.genre;
+    return null;
   }, [tmdbData, movie.genre]);
 
   const rating = useMemo(() => {
+    // Prima usa i dati del server
+    if (movie.rating) return movie.rating;
+    // Fallback a TMDB
     if (tmdbData?.vote_average) return (Number(tmdbData.vote_average).toFixed(1));
-    return movie.rating;
+    return null;
   }, [tmdbData, movie.rating]);
 
-  const year = tmdbData?.release_date?.split('-')[0] || movie.year;
+  const year = movie.year || tmdbData?.release_date?.split('-')[0];
 
   const findMatchingChannel = useCallback((title: string) => {
     if (!title) return null;
@@ -177,7 +190,7 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
             <div className="space-y-3">
               <p className="text-sm uppercase tracking-[0.3em] text-gray-400">{t.movies}</p>
               <h1 className="text-4xl md:text-5xl font-extrabold leading-tight drop-shadow-lg">
-                {tmdbData?.title || movie.cleanName || movie.name}
+                {movie.cleanName || movie.name || tmdbData?.title}
               </h1>
               <div className="flex flex-wrap items-center gap-3 text-gray-300 text-sm font-medium">
                 {rating && <span className="bg-green-600/90 text-white px-2 py-1 rounded-full text-xs font-bold">Match {Math.min(100, Math.round(Number(rating) * 10))}%</span>}

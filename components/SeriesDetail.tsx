@@ -143,9 +143,10 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
   const isInWatchlist = watchlistIds.includes(series.id);
 
   const backdrop = MetadataService.getImageUrl(tmdbData?.backdrop_path, 'original') || info?.backdrop_path?.[0] || info?.cover || series.logo;
-  const poster = MetadataService.getImageUrl(tmdbData?.poster_path) || info?.cover || series.logo;
-  const plot = tmdbData?.overview || info?.plot || series.description;
-  const rating = tmdbData?.vote_average ? String(tmdbData.vote_average).substring(0,3) : (info?.rating || info?.rating_5based);
+  const poster = info?.cover || MetadataService.getImageUrl(tmdbData?.poster_path) || series.logo;
+  const plot = info?.plot || series.description || tmdbData?.overview;
+  const rating = info?.rating || info?.rating_5based || (tmdbData?.vote_average ? String(tmdbData.vote_average).substring(0,3) : null);
+  const seriesName = info?.name || series.name || tmdbData?.name;
 
   return (
     <div ref={containerRef} className="fixed inset-0 bg-[#141414] text-white overflow-y-auto z-40 outline-none" tabIndex={-1}>
@@ -169,8 +170,8 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
               
               <img src={poster} className="w-2/3 md:w-3/4 rounded-md shadow-2xl mb-8 self-center md:self-start" alt="Cover" />
 
-              <h1 className="text-4xl md:text-5xl font-bold text-white mb-4 leading-tight">{tmdbData?.name || info?.name || series.name}</h1>
-              
+              <h1 className="text-4xl md:text-5xl font-bold text-white mb-4 leading-tight">{seriesName}</h1>
+
               <div className="flex flex-wrap items-center gap-4 text-base text-gray-300 mb-6 font-medium">
                 {rating && <span className="text-green-400 font-bold">Match {Number(rating) * 10}%</span>}
                 {series.year && <span>{series.year}</span>}
