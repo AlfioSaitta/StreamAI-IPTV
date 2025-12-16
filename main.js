@@ -607,92 +607,429 @@ ipcMain.handle('get-local-ips', () => {
   return getLocalIPs();
 });
 
-// Cast media to a Chromecast device using Cast V2 protocol
-ipcMain.handle('cast-to-device', async (event, { ip, port, mediaUrl, title, contentType }) => {
-  console.log('[Cast] Casting to device:', ip, mediaUrl);
+// ============================================
+// CAST SESSION MANAGER - Gestione sessione persistente
+// ============================================
 
-  return new Promise((resolve) => {
-    const client = new Client();
-    let timeout;
+let activeCastSession = null;
 
-    const cleanup = () => {
-      clearTimeout(timeout);
-      try { client.close(); } catch {}
-    };
+/**
+ * Cast Session Manager
+ * Mantiene la connessione attiva per permettere i controlli
+ */
+class CastSession {
+  constructor(ip) {
+    this.ip = ip;
+    this.client = new Client();
+    this.player = null;
+    this.connected = false;
+    this.currentStatus = null;
+    this.statusCallbacks = [];
+    this.mainWindow = null;
+  }
 
-    timeout = setTimeout(() => {
-      console.log('[Cast] Connection timeout');
-      cleanup();
-      resolve({ success: false, error: 'Connection timeout' });
-    }, 15000);
+  async connect() {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Connection timeout'));
+      }, 15000);
 
-    client.on('error', (err) => {
-      console.log('[Cast] Client error:', err.message);
-      cleanup();
-      resolve({ success: false, error: err.message });
+      this.client.on('error', (err) => {
+        console.log('[CastSession] Client error:', err.message);
+        this.connected = false;
+        this.notifyStatus({ connected: false, error: err.message });
+      });
+
+      this.client.connect(this.ip, () => {
+        clearTimeout(timeout);
+        console.log('[CastSession] Connected to:', this.ip);
+        this.connected = true;
+        resolve();
+      });
     });
+  }
 
-    client.connect(ip, () => {
-      console.log('[Cast] Connected to device');
-
-      client.launch(DefaultMediaReceiver, (err, player) => {
+  async launch() {
+    return new Promise((resolve, reject) => {
+      this.client.launch(DefaultMediaReceiver, (err, player) => {
         if (err) {
-          console.log('[Cast] Launch error:', err.message);
-          cleanup();
-          resolve({ success: false, error: err.message });
+          reject(err);
           return;
         }
 
-        console.log('[Cast] Launched DefaultMediaReceiver');
+        this.player = player;
+        console.log('[CastSession] DefaultMediaReceiver launched');
 
-        // Determine content type
-        let mimeType = contentType || 'video/mp4';
-        if (mediaUrl.includes('.m3u8')) {
-          mimeType = 'application/x-mpegURL';
-        } else if (mediaUrl.includes('.ts')) {
-          mimeType = 'video/mp2t';
-        }
-
-        const media = {
-          contentId: mediaUrl,
-          contentType: mimeType,
-          streamType: 'BUFFERED',
-          metadata: {
-            type: 0,
-            metadataType: 0,
-            title: title || 'Video'
-          }
-        };
-
+        // Listen for status updates
         player.on('status', (status) => {
-          console.log('[Cast] Player status:', status.playerState);
-          if (status.playerState === 'PLAYING') {
-            console.log('[Cast] Playback started!');
-          }
+          this.currentStatus = status;
+          this.notifyStatus(this.getStatus());
         });
 
-        player.load(media, { autoplay: true }, (err, status) => {
-          if (err) {
-            console.log('[Cast] Load error:', err.message);
-            cleanup();
-            resolve({ success: false, error: err.message });
-            return;
-          }
-
-          console.log('[Cast] Media loaded, status:', status.playerState);
-          clearTimeout(timeout);
-
-          // Keep connection alive but resolve success
-          resolve({ success: true, status: status.playerState });
-
-          // Close after playback starts (optional: keep alive for controls)
-          setTimeout(() => {
-            try { client.close(); } catch {}
-          }, 5000);
-        });
+        resolve(player);
       });
     });
+  }
+
+  async loadMedia(mediaUrl, title, contentType) {
+    console.log('[CastSession] loadMedia called, player exists:', !!this.player);
+
+    if (!this.player) {
+      console.log('[CastSession] No player, launching...');
+      await this.launch();
+      console.log('[CastSession] Launch complete, player exists:', !!this.player);
+    }
+
+    return new Promise((resolve, reject) => {
+      let mimeType = contentType || 'video/mp4';
+      if (mediaUrl.includes('.m3u8')) {
+        mimeType = 'application/x-mpegURL';
+      } else if (mediaUrl.includes('.ts')) {
+        mimeType = 'video/mp2t';
+      }
+
+      const media = {
+        contentId: mediaUrl,
+        contentType: mimeType,
+        streamType: 'BUFFERED',
+        metadata: {
+          type: 0,
+          metadataType: 0,
+          title: title || 'Video'
+        }
+      };
+
+      console.log('[CastSession] Loading media:', title, 'mimeType:', mimeType);
+
+      this.player.load(media, { autoplay: true }, (err, status) => {
+        if (err) {
+          console.log('[CastSession] Load error:', err.message);
+          reject(err);
+          return;
+        }
+        console.log('[CastSession] Media loaded, status:', status?.playerState);
+        this.currentStatus = status;
+        resolve(status);
+      });
+    });
+  }
+
+  // Playback controls - con callback per conferma
+  play(callback) {
+    if (this.player) {
+      console.log('[CastSession] Sending PLAY command');
+      this.player.play((err, status) => {
+        if (err) {
+          console.log('[CastSession] Play error:', err.message);
+        } else {
+          console.log('[CastSession] Play success, status:', status?.playerState);
+          if (status) {
+            this.currentStatus = status;
+            this.notifyStatus(this.getStatus());
+          }
+        }
+        if (callback) callback(err, status);
+      });
+    }
+  }
+
+  pause(callback) {
+    if (this.player) {
+      console.log('[CastSession] Sending PAUSE command');
+      this.player.pause((err, status) => {
+        if (err) {
+          console.log('[CastSession] Pause error:', err.message);
+        } else {
+          console.log('[CastSession] Pause success, status:', status?.playerState);
+          if (status) {
+            this.currentStatus = status;
+            this.notifyStatus(this.getStatus());
+          }
+        }
+        if (callback) callback(err, status);
+      });
+    }
+  }
+
+  stop(callback) {
+    if (this.player) {
+      console.log('[CastSession] Sending STOP command');
+      this.player.stop((err, status) => {
+        if (err) {
+          console.log('[CastSession] Stop error:', err.message);
+        } else {
+          console.log('[CastSession] Stop success');
+          if (status) {
+            this.currentStatus = status;
+            this.notifyStatus(this.getStatus());
+          }
+        }
+        if (callback) callback(err, status);
+      });
+    }
+  }
+
+  seek(time, callback) {
+    if (this.player) {
+      console.log('[CastSession] Sending SEEK command to:', time);
+      this.player.seek(time, (err, status) => {
+        if (err) {
+          console.log('[CastSession] Seek error:', err.message);
+        } else {
+          console.log('[CastSession] Seek success');
+          if (status) {
+            this.currentStatus = status;
+            this.notifyStatus(this.getStatus());
+          }
+        }
+        if (callback) callback(err, status);
+      });
+    }
+  }
+
+  setVolume(level, callback) {
+    if (this.client && this.connected) {
+      const vol = Math.max(0, Math.min(1, level));
+      console.log('[CastSession] Setting volume to:', vol);
+      this.client.setVolume({ level: vol }, (err, volume) => {
+        if (err) {
+          console.log('[CastSession] Volume error:', err.message);
+        } else {
+          console.log('[CastSession] Volume set to:', volume?.level);
+          // Update status with new volume
+          if (this.currentStatus) {
+            this.currentStatus.volume = volume;
+            this.notifyStatus(this.getStatus());
+          }
+        }
+        if (callback) callback(err, volume);
+      });
+    }
+  }
+
+  setMuted(muted, callback) {
+    if (this.client && this.connected) {
+      console.log('[CastSession] Setting muted to:', muted);
+      this.client.setVolume({ muted }, (err, volume) => {
+        if (err) {
+          console.log('[CastSession] Mute error:', err.message);
+        } else {
+          console.log('[CastSession] Muted set to:', volume?.muted);
+          if (this.currentStatus) {
+            this.currentStatus.volume = volume;
+            this.notifyStatus(this.getStatus());
+          }
+        }
+        if (callback) callback(err, volume);
+      });
+    }
+  }
+
+  // Richiedi lo stato attuale dal player
+  requestStatus(callback) {
+    if (this.player) {
+      this.player.getStatus((err, status) => {
+        if (err) {
+          console.log('[CastSession] getStatus error:', err.message);
+        } else if (status) {
+          this.currentStatus = status;
+          this.notifyStatus(this.getStatus());
+        }
+        if (callback) callback(err, status);
+      });
+    }
+  }
+
+  getStatus() {
+    const status = this.currentStatus || {};
+    return {
+      connected: this.connected,
+      playerState: status.playerState || 'IDLE',
+      currentTime: status.currentTime || 0,
+      duration: status.media?.duration || 0,
+      volume: status.volume?.level || 1,
+      muted: status.volume?.muted || false,
+      mediaTitle: status.media?.metadata?.title || '',
+    };
+  }
+
+  notifyStatus(status) {
+    // Send status to renderer
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send('cast-status', status);
+    }
+  }
+
+  setMainWindow(win) {
+    this.mainWindow = win;
+  }
+
+  close() {
+    console.log('[CastSession] Closing session');
+    this.connected = false;
+    if (this.player) {
+      try { this.player.stop(); } catch {}
+    }
+    if (this.client) {
+      try { this.client.close(); } catch {}
+    }
+    this.player = null;
+    this.notifyStatus({ connected: false });
+  }
+}
+
+// IPC Handlers for Cast controls
+
+ipcMain.handle('cast-connect', async (event, { ip }) => {
+  console.log('[Cast] cast-connect called for IP:', ip);
+
+  // Close existing session
+  if (activeCastSession) {
+    console.log('[Cast] Closing existing session');
+    activeCastSession.close();
+  }
+
+  try {
+    activeCastSession = new CastSession(ip);
+    activeCastSession.setMainWindow(BrowserWindow.fromWebContents(event.sender));
+
+    console.log('[Cast] Connecting...');
+    await activeCastSession.connect();
+    console.log('[Cast] Connected, launching player...');
+    await activeCastSession.launch();
+    console.log('[Cast] Player launched, player exists:', !!activeCastSession.player);
+
+    return { success: true };
+  } catch (err) {
+    console.error('[Cast] Connect error:', err.message);
+    activeCastSession = null;
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('cast-load', async (event, { mediaUrl, title, contentType }) => {
+  console.log('[Cast] cast-load called:', title);
+  console.log('[Cast] activeCastSession exists:', !!activeCastSession);
+  console.log('[Cast] activeCastSession.connected:', activeCastSession?.connected);
+  console.log('[Cast] activeCastSession.player exists:', !!activeCastSession?.player);
+
+  if (!activeCastSession || !activeCastSession.connected) {
+    console.log('[Cast] ERROR: Not connected');
+    return { success: false, error: 'Not connected' };
+  }
+
+  try {
+    const status = await activeCastSession.loadMedia(mediaUrl, title, contentType);
+    return { success: true, status: activeCastSession.getStatus() };
+  } catch (err) {
+    console.error('[Cast] Load error:', err.message);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('cast-control', async (event, { action, value }) => {
+  console.log('[Cast] Control received:', action, value);
+  console.log('[Cast] activeCastSession exists:', !!activeCastSession);
+  console.log('[Cast] activeCastSession.connected:', activeCastSession?.connected);
+  console.log('[Cast] activeCastSession.player exists:', !!activeCastSession?.player);
+
+  if (!activeCastSession) {
+    console.log('[Cast] ERROR: No active session');
+    return { success: false, error: 'No active session' };
+  }
+
+  if (!activeCastSession.player) {
+    console.log('[Cast] ERROR: No player available');
+    return { success: false, error: 'No player available' };
+  }
+
+  if (!activeCastSession.connected) {
+    console.log('[Cast] ERROR: Session not connected');
+    return { success: false, error: 'Session not connected' };
+  }
+
+  return new Promise((resolve) => {
+    const callback = (err, result) => {
+      console.log('[Cast] Control callback - err:', err?.message, 'result:', result?.playerState || result);
+      if (err) {
+        resolve({ success: false, error: err.message });
+      } else {
+        resolve({ success: true, status: activeCastSession.getStatus() });
+      }
+    };
+
+    try {
+      switch (action) {
+        case 'play':
+          activeCastSession.play(callback);
+          break;
+        case 'pause':
+          activeCastSession.pause(callback);
+          break;
+        case 'stop':
+          activeCastSession.stop(callback);
+          break;
+        case 'seek':
+          activeCastSession.seek(value, callback);
+          break;
+        case 'volume':
+          activeCastSession.setVolume(value, callback);
+          break;
+        case 'mute':
+          activeCastSession.setMuted(value, callback);
+          break;
+        case 'status':
+          activeCastSession.requestStatus(callback);
+          break;
+        default:
+          resolve({ success: false, error: 'Unknown action' });
+      }
+    } catch (err) {
+      resolve({ success: false, error: err.message });
+    }
   });
+});
+
+ipcMain.handle('cast-status', async () => {
+  if (!activeCastSession) {
+    return { connected: false };
+  }
+  return activeCastSession.getStatus();
+});
+
+ipcMain.handle('cast-disconnect', async () => {
+  console.log('[Cast] Disconnecting');
+  if (activeCastSession) {
+    activeCastSession.close();
+    activeCastSession = null;
+  }
+  return { success: true };
+});
+
+// Legacy handler for backward compatibility
+ipcMain.handle('cast-to-device', async (event, { ip, mediaUrl, title, contentType }) => {
+  console.log('[Cast] Legacy cast to device:', ip);
+
+  // Use the new session-based approach
+  if (activeCastSession) {
+    activeCastSession.close();
+  }
+
+  try {
+    activeCastSession = new CastSession(ip);
+    activeCastSession.setMainWindow(BrowserWindow.fromWebContents(event.sender));
+    await activeCastSession.connect();
+    await activeCastSession.launch();
+    const status = await activeCastSession.loadMedia(mediaUrl, title, contentType);
+    return { success: true, status: activeCastSession.getStatus() };
+  } catch (err) {
+    console.error('[Cast] Error:', err.message);
+    if (activeCastSession) {
+      activeCastSession.close();
+      activeCastSession = null;
+    }
+    return { success: false, error: err.message };
+  }
 });
 
 function createWindow() {

@@ -1,6 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-// Expose device discovery API to renderer
+// Expose device discovery and cast API to renderer
 contextBridge.exposeInMainWorld('electronAPI', {
   // Device discovery
   discoverDevices: () => ipcRenderer.invoke('discover-devices'),
@@ -8,8 +8,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   scanIp: (ipOrSubnet) => ipcRenderer.invoke('scan-ip', ipOrSubnet),
   probeDeviceServices: (ip) => ipcRenderer.invoke('probe-device-services', ip),
 
-  // Cast to device
+  // Cast session management
+  castConnect: (options) => ipcRenderer.invoke('cast-connect', options),
+  castLoad: (options) => ipcRenderer.invoke('cast-load', options),
+  castControl: (options) => ipcRenderer.invoke('cast-control', options),
+  castStatus: () => ipcRenderer.invoke('cast-status'),
+  castDisconnect: () => ipcRenderer.invoke('cast-disconnect'),
+
+  // Legacy cast (backward compatibility)
   castToDevice: (options) => ipcRenderer.invoke('cast-to-device', options),
+
+  // Cast status updates listener
+  onCastStatus: (callback) => {
+    ipcRenderer.on('cast-status', (event, status) => callback(status));
+    return () => ipcRenderer.removeAllListeners('cast-status');
+  },
 
   // Listen for incremental device updates
   onDeviceFound: (callback) => {

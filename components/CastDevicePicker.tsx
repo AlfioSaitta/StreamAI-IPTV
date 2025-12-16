@@ -8,6 +8,7 @@ interface CastDevicePickerProps {
   mediaUrl: string;
   mediaTitle: string;
   mediaPoster?: string;
+  onDeviceSelect?: (device: DiscoveredDevice) => Promise<boolean>;
   onCastStart?: (device: DiscoveredDevice) => void;
   onCastSuccess?: (device: DiscoveredDevice) => void;
   onCastError?: (error: string) => void;
@@ -18,6 +19,7 @@ const CastDevicePicker: React.FC<CastDevicePickerProps> = ({
   onClose,
   mediaUrl,
   mediaTitle,
+  onDeviceSelect,
   onCastStart,
   onCastSuccess,
   onCastError,
@@ -67,7 +69,15 @@ const CastDevicePicker: React.FC<CastDevicePickerProps> = ({
     onCastStart?.(device);
 
     try {
-      const success = await deviceDiscovery.sendToDevice(device, mediaUrl, mediaTitle);
+      let success = false;
+
+      // Use the callback if provided (new session-based approach)
+      if (onDeviceSelect) {
+        success = await onDeviceSelect(device);
+      } else {
+        // Fallback to old method
+        success = await deviceDiscovery.sendToDevice(device, mediaUrl, mediaTitle);
+      }
 
       if (success) {
         setCastSuccess(true);
@@ -82,7 +92,7 @@ const CastDevicePicker: React.FC<CastDevicePickerProps> = ({
     } finally {
       setIsCasting(false);
     }
-  }, [mediaUrl, mediaTitle, onCastStart, onCastSuccess, onCastError, onClose]);
+  }, [mediaUrl, mediaTitle, onDeviceSelect, onCastStart, onCastSuccess, onCastError, onClose]);
 
   const handleManualAdd = useCallback(async () => {
     if (!manualIP.trim()) return;
