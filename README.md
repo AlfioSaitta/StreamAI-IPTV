@@ -87,6 +87,62 @@ L'archivio sarà disponibile in `dist/streamai-iptv-X.X.X.tar.gz`
 
 ---
 
+## 📱 Build Android
+
+StreamAI supporta la build per dispositivi Android tramite **Capacitor**.
+
+### Requisiti Android
+- **JDK 17+**: Java Development Kit (non solo JRE)
+- **Android Studio** (opzionale, ma consigliato)
+- **Android SDK**: API level 22+ (Android 5.1+)
+
+### Installazione JDK (Linux)
+```bash
+# Ubuntu/Debian
+sudo apt install openjdk-17-jdk
+
+# Fedora/RHEL
+sudo dnf install java-17-openjdk-devel
+
+# openSUSE
+sudo zypper install java-17-openjdk-devel
+```
+
+### Comandi Build Android
+
+```bash
+# Sincronizza i file web con il progetto Android
+npm run android:sync
+
+# Apri il progetto in Android Studio
+npm run android:open
+
+# Build APK Debug (direttamente da terminale)
+npm run android:build
+
+# Build APK Release (firmato)
+npm run android:build:release
+
+# Build e avvia su dispositivo/emulatore connesso
+npm run android:run
+```
+
+### Output APK
+- **Debug**: `android/app/build/outputs/apk/debug/app-debug.apk`
+- **Release**: `android/app/build/outputs/apk/release/app-release-unsigned.apk`
+
+### Funzionalità Android
+- ✅ Streaming Live/VOD/Series
+- ✅ Player video HTML5 con HLS.js
+- ✅ Picture-in-Picture
+- ✅ Fullscreen
+- ✅ Supporto HTTP cleartext per stream IPTV
+- ✅ Deep link `streamai://`
+- ❌ Casting (solo su Electron)
+- ❌ Download locale (solo su Electron)
+
+---
+
 ## ⌨️ Scorciatoie da Tastiera
 
 | Tasto | Azione |

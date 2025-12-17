@@ -10,6 +10,11 @@
     "dev:quiet": "electron . 2>/dev/null",
     "build": "vite build",
     "dist:linux": "vite build && electron-builder --linux",
+    "android:sync": "vite build && npx cap sync android",
+    "android:open": "npx cap open android",
+    "android:build": "vite build && npx cap sync android && cd android && ./gradlew assembleDebug",
+    "android:build:release": "bash scripts/android-build-release.sh",
+    "android:run": "vite build && npx cap sync android && npx cap run android",
     "postinstall": "node scripts/patch-ffmpeg.js || true"
   },
   "author": "StreamAI",
@@ -28,6 +33,10 @@
     "vite": "^5.1.4"
   },
   "dependencies": {
+    "@capacitor/android": "^8.0.0",
+    "@capacitor/app": "^8.0.0",
+    "@capacitor/cli": "^8.0.0",
+    "@capacitor/core": "^8.0.0",
     "@ffmpeg/ffmpeg": "^0.12.10",
     "@ffmpeg/util": "^0.12.1",
     "@google/genai": "*",

@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Channel } from '../types.ts';
 import { MetadataService } from '../services/metadata.ts';
@@ -9,6 +8,8 @@ import CastDevicePicker from './CastDevicePicker.tsx';
 import { AlertTriangle, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipForward, SkipBack, List, X, FastForward, Rewind, RotateCcw, PictureInPicture2, Cast, Loader2, Tv, StopCircle, ChevronLeft } from 'lucide-react';
 import Hls from 'hls.js';
 import mpegts from 'mpegts.js';
+import { nativeVideoPlayer } from '../services/nativeVideoPlayer.ts';
+import { platformService } from '../services/platformService.ts';
 
 interface VideoPlayerProps {
   channel: Channel | null;
@@ -723,7 +724,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
           autoCleanupMaxBackwardDuration: 2, // Solo 2s backbuffer
           autoCleanupMinBackwardDuration: 1,
           fixAudioTimestampGap: true,
-          // Inseguimento latenza ISTANTANEO
+          // Inseguimento latenza ISTANTANEA
           liveBufferLatencyChasing: true,
           liveBufferLatencyMaxLatency: 0.8, // Max 800ms di ritardo
           liveBufferLatencyMinRemain: 0.2, // Min 200ms buffer
@@ -802,6 +803,53 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
 
       // Funzione helper per tentare riproduzione nativa con gestione errori avanzata
       function tryNativePlayback(videoEl: HTMLVideoElement, url: string) {
+        // Su Android: prova prima il player nativo (ExoPlayer) che supporta HEVC
+        if (platformService.isAndroid && nativeVideoPlayer.isAvailable) {
+          console.log('[NativePlayer] Using ExoPlayer for Android (HEVC support)');
+          setIsBuffering(true);
+
+          nativeVideoPlayer.play({
+            url: url,
+            title: channel?.cleanName || channel?.name || 'Video',
+            subtitle: channel?.group || '',
+            poster: channel?.logo || '',
+            autoplay: true,
+            fullscreen: true,
+          }).then((success) => {
+            if (success) {
+              console.log('[NativePlayer] ExoPlayer started successfully');
+              setIsBuffering(false);
+              setIsPlaying(true);
+              // Il player nativo gestisce tutto, nascondi il video HTML
+              videoEl.style.display = 'none';
+            } else {
+              console.warn('[NativePlayer] ExoPlayer failed, falling back to WebView');
+              videoEl.style.display = '';
+              // Fallback al player WebView standard
+              playInWebView(videoEl, url);
+            }
+          }).catch((err) => {
+            console.error('[NativePlayer] ExoPlayer error:', err);
+            videoEl.style.display = '';
+            playInWebView(videoEl, url);
+          });
+
+          // Listener per quando il player nativo viene chiuso
+          nativeVideoPlayer.on('exit', () => {
+            videoEl.style.display = '';
+            setIsPlaying(false);
+            if (onBack) onBack();
+          });
+
+          return;
+        }
+
+        // Fallback: riproduzione standard nel WebView
+        playInWebView(videoEl, url);
+      }
+
+      // Riproduzione nel WebView (fallback)
+      function playInWebView(videoEl: HTMLVideoElement, url: string) {
         videoEl.src = url;
 
         const handleError = () => {
@@ -820,6 +868,22 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
                 // Questo è spesso il caso per HEVC/4K non supportato
                 errorMsg = 'Codec Non Supportato (HEVC/4K)';
                 console.warn('Decode error - likely unsupported codec:', mediaError.message);
+
+                // Su Android: prova il player nativo come ultima risorsa
+                if (platformService.isAndroid) {
+                  console.log('[VideoPlayer] Codec error detected, trying native ExoPlayer...');
+                  nativeVideoPlayer.init().then((available) => {
+                    if (available) {
+                      nativeVideoPlayer.play({
+                        url: url,
+                        title: channel?.cleanName || channel?.name || 'Video',
+                        autoplay: true,
+                        fullscreen: true,
+                      });
+                    }
+                  });
+                  return; // Non mostrare errore, stiamo provando il player nativo
+                }
                 break;
               case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
                 errorMsg = 'Formato Video Non Supportato';
@@ -847,8 +911,26 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
             // Attendi un attimo per vedere se arriva un errore più specifico
             setTimeout(() => {
               if (!videoEl.error && videoEl.readyState < 2) {
-                setError('Impossibile Riprodurre - Codec Non Supportato');
-                setIsBuffering(false);
+                // Su Android: prova il player nativo
+                if (platformService.isAndroid) {
+                  console.log('[VideoPlayer] Playback timeout, trying native ExoPlayer...');
+                  nativeVideoPlayer.init().then((available) => {
+                    if (available) {
+                      nativeVideoPlayer.play({
+                        url: url,
+                        title: channel?.cleanName || channel?.name || 'Video',
+                        autoplay: true,
+                        fullscreen: true,
+                      });
+                    } else {
+                      setError('Impossibile Riprodurre - Codec Non Supportato');
+                      setIsBuffering(false);
+                    }
+                  });
+                } else {
+                  setError('Impossibile Riprodurre - Codec Non Supportato');
+                  setIsBuffering(false);
+                }
               }
             }, 2000);
           }
