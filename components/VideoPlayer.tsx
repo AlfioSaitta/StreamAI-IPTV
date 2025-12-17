@@ -5,11 +5,12 @@ import { DownloadManager } from '../services/downloadManager.ts';
 import { useCast } from '../hooks/useCast.ts';
 import { useCastSession } from '../hooks/useCastSession.ts';
 import CastDevicePicker from './CastDevicePicker.tsx';
-import { AlertTriangle, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipForward, SkipBack, List, X, FastForward, Rewind, RotateCcw, PictureInPicture2, Cast, Loader2, Tv, StopCircle, ChevronLeft } from 'lucide-react';
+import { AlertTriangle, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipForward, SkipBack, List, X, FastForward, Rewind, RotateCcw, PictureInPicture2, Cast, Loader2, Tv, StopCircle, ChevronLeft, Info, Settings } from 'lucide-react';
 import Hls from 'hls.js';
 import mpegts from 'mpegts.js';
 import { nativeVideoPlayer } from '../services/nativeVideoPlayer.ts';
 import { platformService } from '../services/platformService.ts';
+import { streamInfoService, StreamCodecInfo } from '../services/streamInfoService.ts';
 
 interface VideoPlayerProps {
   channel: Channel | null;
@@ -125,6 +126,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
   const [showPlaylist, setShowPlaylist] = useState(false);
   const playlistRef = useRef<HTMLDivElement>(null);
 
+  // Stream Info State
+  const [showStreamInfo, setShowStreamInfo] = useState(false);
+  const [streamInfo, setStreamInfo] = useState<StreamCodecInfo | null>(null);
+  const [streamLogs, setStreamLogs] = useState<string[]>([]);
+
   // Cast State
   const cast = useCast();
   const castSession = useCastSession();
@@ -139,6 +145,46 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
 
   // Throttle progress updates to avoid flooding
   const lastProgressUpdate = useRef<number>(0);
+
+  // Funzione per raccogliere info stream
+  const collectStreamInfo = useCallback(() => {
+    if (!channel) return;
+
+    // Reset logs
+    setStreamLogs([]);
+
+    const info = streamInfoService.collectInfo(
+      videoRef.current,
+      hlsRef.current,
+      mpegtsRef.current,
+      channel.url
+    );
+
+    setStreamInfo(info);
+    console.log('[StreamInfo] Collected:', info);
+  }, [channel]);
+
+  // Registra callback per i log del streamInfoService
+  useEffect(() => {
+    const logCallback = (message: string, level: 'info' | 'warn' | 'error') => {
+      const timestamp = new Date().toLocaleTimeString();
+      const prefix = level === 'error' ? '❌' : level === 'warn' ? '⚠️' : 'ℹ️';
+      setStreamLogs(prev => [...prev.slice(-50), `${timestamp} ${prefix} ${message}`]);
+    };
+
+    streamInfoService.onLog(logCallback);
+    return () => {
+      streamInfoService.offLog(logCallback);
+    };
+  }, []);
+
+  // Toggle pannello info stream
+  const toggleStreamInfo = () => {
+    if (!showStreamInfo) {
+      collectStreamInfo();
+    }
+    setShowStreamInfo(!showStreamInfo);
+  };
 
   const showOSD = (Icon: React.ElementType, text?: string) => {
       setOsdMessage({ icon: Icon, text });
@@ -1975,6 +2021,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
 
               {/* Right Controls */}
               <div className="flex items-center gap-2 md:gap-3 flex-1 justify-end">
+                  {/* Stream Info / Codec */}
+                  <button
+                      onClick={toggleStreamInfo}
+                      className={`tv-focus p-2.5 rounded-full hover:bg-white/10 transition-all ${showStreamInfo ? 'text-green-400' : 'text-white/80 hover:text-white'}`}
+                      title="Info Codec"
+                  >
+                      <Info className="w-5 h-5" />
+                  </button>
+
                   {/* Cast */}
                   <button
                       onClick={() => castSession.isConnected ? null : setShowDevicePicker(true)}
@@ -2055,6 +2110,191 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
       {castMessage && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[101] bg-black/90 text-white px-4 py-2 rounded-lg text-sm animate-fade-in">
           {castMessage}
+        </div>
+      )}
+
+      {/* STREAM INFO PANEL - Pannello informazioni codec e log */}
+      {showStreamInfo && (
+        <div className="absolute top-0 left-0 bottom-0 w-96 max-w-[90vw] bg-black/95 backdrop-blur-xl border-r border-white/10 z-[70] transform transition-transform duration-300 flex flex-col overflow-hidden">
+          {/* Header */}
+          <div className="p-4 border-b border-white/10 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-2">
+              <Info className="w-5 h-5 text-green-400" />
+              <h3 className="font-bold text-white">Info Stream</h3>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={collectStreamInfo}
+                className="tv-focus px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-500 text-white text-xs font-medium transition-colors"
+              >
+                Aggiorna
+              </button>
+              <button
+                onClick={() => setShowStreamInfo(false)}
+                className="tv-focus p-2 rounded-full hover:bg-white/10"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Content - scrollabile */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {streamInfo ? (
+              <>
+                {/* Video Info */}
+                <div className="space-y-2">
+                  <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Video</h4>
+                  <div className="bg-white/5 rounded-lg p-3 space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-gray-400 text-sm">Codec</span>
+                      <span className={`text-sm font-medium ${streamInfo.isHEVC ? 'text-yellow-400' : 'text-white'}`}>
+                        {streamInfo.videoCodec || 'N/A'}
+                        {streamInfo.isHEVC && ' ⚠️'}
+                      </span>
+                    </div>
+                    {streamInfo.videoCodecId && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-400 text-sm">Codec ID</span>
+                        <span className="text-white text-sm font-mono">{streamInfo.videoCodecId}</span>
+                      </div>
+                    )}
+                    {streamInfo.videoProfile && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-400 text-sm">Profilo</span>
+                        <span className="text-white text-sm">{streamInfo.videoProfile}</span>
+                      </div>
+                    )}
+                    {streamInfo.videoLevel && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-400 text-sm">Livello</span>
+                        <span className="text-white text-sm">L{streamInfo.videoLevel}</span>
+                      </div>
+                    )}
+                    {streamInfo.width && streamInfo.height && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-400 text-sm">Risoluzione</span>
+                        <span className="text-white text-sm">{streamInfo.width}x{streamInfo.height}</span>
+                      </div>
+                    )}
+                    {streamInfo.frameRate && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-400 text-sm">Frame Rate</span>
+                        <span className="text-white text-sm">{streamInfo.frameRate} fps</span>
+                      </div>
+                    )}
+                    {streamInfo.bitrate && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-400 text-sm">Bitrate</span>
+                        <span className="text-white text-sm">{(streamInfo.bitrate / 1000000).toFixed(2)} Mbps</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Audio Info */}
+                <div className="space-y-2">
+                  <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Audio</h4>
+                  <div className="bg-white/5 rounded-lg p-3 space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-gray-400 text-sm">Codec</span>
+                      <span className="text-white text-sm font-medium">{streamInfo.audioCodec || 'N/A'}</span>
+                    </div>
+                    {streamInfo.audioCodecId && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-400 text-sm">Codec ID</span>
+                        <span className="text-white text-sm font-mono">{streamInfo.audioCodecId}</span>
+                      </div>
+                    )}
+                    {streamInfo.audioChannels && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-400 text-sm">Canali</span>
+                        <span className="text-white text-sm">{streamInfo.audioChannels}</span>
+                      </div>
+                    )}
+                    {streamInfo.audioSampleRate && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-400 text-sm">Sample Rate</span>
+                        <span className="text-white text-sm">{streamInfo.audioSampleRate} Hz</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Container/Protocol */}
+                <div className="space-y-2">
+                  <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Streaming</h4>
+                  <div className="bg-white/5 rounded-lg p-3 space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-gray-400 text-sm">Protocollo</span>
+                      <span className="text-white text-sm">{streamInfo.protocol || 'N/A'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-400 text-sm">Container</span>
+                      <span className="text-white text-sm">{streamInfo.container || 'N/A'}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Supporto */}
+                <div className="space-y-2">
+                  <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Compatibilità</h4>
+                  <div className={`rounded-lg p-3 ${streamInfo.isSupported ? 'bg-green-500/10 border border-green-500/30' : 'bg-red-500/10 border border-red-500/30'}`}>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-2xl ${streamInfo.isSupported ? '' : ''}`}>
+                        {streamInfo.isSupported ? '✅' : '❌'}
+                      </span>
+                      <div>
+                        <p className={`text-sm font-medium ${streamInfo.isSupported ? 'text-green-400' : 'text-red-400'}`}>
+                          {streamInfo.supportDetails}
+                        </p>
+                        {streamInfo.isHEVC && !streamInfo.isSupported && (
+                          <p className="text-xs text-gray-400 mt-1">
+                            HEVC/H.265 potrebbe non essere supportato da questo browser
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Codec Flags */}
+                <div className="flex flex-wrap gap-2">
+                  {streamInfo.isH264 && (
+                    <span className="px-2 py-1 bg-blue-500/20 text-blue-400 text-xs rounded-full">H.264</span>
+                  )}
+                  {streamInfo.isHEVC && (
+                    <span className="px-2 py-1 bg-yellow-500/20 text-yellow-400 text-xs rounded-full">HEVC/H.265</span>
+                  )}
+                  {streamInfo.isAV1 && (
+                    <span className="px-2 py-1 bg-purple-500/20 text-purple-400 text-xs rounded-full">AV1</span>
+                  )}
+                  {streamInfo.isVP9 && (
+                    <span className="px-2 py-1 bg-green-500/20 text-green-400 text-xs rounded-full">VP9</span>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="text-center py-8 text-gray-400">
+                <Info className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                <p>Premi "Aggiorna" per analizzare lo stream</p>
+              </div>
+            )}
+
+            {/* Log Section */}
+            {streamLogs.length > 0 && (
+              <div className="space-y-2 mt-4">
+                <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Log Analisi</h4>
+                <div className="bg-black/50 rounded-lg p-3 max-h-48 overflow-y-auto font-mono text-xs space-y-1">
+                  {streamLogs.map((log, i) => (
+                    <div key={i} className={`${log.includes('❌') ? 'text-red-400' : log.includes('⚠️') ? 'text-yellow-400' : 'text-gray-300'}`}>
+                      {log}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
