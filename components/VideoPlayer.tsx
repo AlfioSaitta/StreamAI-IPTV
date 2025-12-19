@@ -146,14 +146,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
   // Throttle progress updates to avoid flooding
   const lastProgressUpdate = useRef<number>(0);
 
-  // Funzione per raccogliere info stream
-  const collectStreamInfo = useCallback(() => {
+  // Funzione per raccogliere info stream (versione asincrona per analisi approfondita)
+  const collectStreamInfo = useCallback(async () => {
     if (!channel) return;
 
     // Reset logs
     setStreamLogs([]);
 
-    const info = streamInfoService.collectInfo(
+    // Usa la versione asincrona per analisi più approfondita
+    const info = await streamInfoService.collectInfoAsync(
       videoRef.current,
       hlsRef.current,
       mpegtsRef.current,
@@ -162,7 +163,44 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
 
     setStreamInfo(info);
     console.log('[StreamInfo] Collected:', info);
+
+    // Log aggiuntivo per debug
+    if (info.isHEVC) {
+      console.warn('[StreamInfo] ⚠️ HEVC/H.265 detected - Support:', info.supportDetails);
+    }
+
+    return info;
   }, [channel]);
+
+  // Analisi automatica quando lo stream è pronto
+  const autoAnalyzeStream = useCallback(() => {
+    // Prima analisi rapida dopo 2 secondi
+    setTimeout(async () => {
+      const info = await collectStreamInfo();
+      if (info) {
+        const logPrefix = '[AutoAnalyze]';
+        console.log(`${logPrefix} Prima analisi completata`);
+        console.log(`${logPrefix} Video: ${info.videoCodec || 'non rilevato'} ${info.width || '?'}x${info.height || '?'}`);
+        console.log(`${logPrefix} Audio: ${info.audioCodec || 'non rilevato'}`);
+        console.log(`${logPrefix} Protocol: ${info.protocol}, Container: ${info.container}`);
+        // Se i codec non sono stati rilevati, fai una seconda analisi dopo altri 3 secondi
+        if (!info.videoCodec) {
+          console.log(`${logPrefix} Codec non rilevato, ri-analisi tra 3 secondi...`);
+          setTimeout(async () => {
+            const info2 = await collectStreamInfo();
+            if (info2) {
+              console.log(`${logPrefix} Seconda analisi: Video: ${info2.videoCodec || 'non rilevato'}`);
+              if (info2.isHEVC) {
+                console.warn(`${logPrefix} ⚠️ HEVC/H.265 rilevato - Supporto: ${info2.supportDetails}`);
+              }
+            }
+          }, 3000);
+        } else if (info.isHEVC) {
+          console.warn(`${logPrefix} ⚠️ HEVC/H.265 rilevato - Supporto: ${info.supportDetails}`);
+        }
+      }
+    }, 2000);
+  }, [collectStreamInfo]);
 
   // Registra callback per i log del streamInfoService
   useEffect(() => {
@@ -178,10 +216,28 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
     };
   }, []);
 
+  // Auto-analizza codec quando lo stream inizia la riproduzione
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !channel) return;
+
+    const onPlayingAutoAnalyze = () => {
+      console.log('[VideoPlayer] 🎬 Stream playing - triggering auto codec analysis');
+      autoAnalyzeStream();
+    };
+
+    // Analizza quando il video inizia a riprodurre
+    video.addEventListener('playing', onPlayingAutoAnalyze, { once: true });
+
+    return () => {
+      video.removeEventListener('playing', onPlayingAutoAnalyze);
+    };
+  }, [channel, autoAnalyzeStream]);
+
   // Toggle pannello info stream
   const toggleStreamInfo = () => {
     if (!showStreamInfo) {
-      collectStreamInfo();
+      collectStreamInfo(); // Funzione async, si esegue in background
     }
     setShowStreamInfo(!showStreamInfo);
   };
@@ -1681,9 +1737,36 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
                         Prova a riprodurre il contenuto con un player esterno.
                     </p>
                 )}
-                <p className="text-xs text-gray-400 mt-2">
-                    Premi il pulsante X in alto a destra per tornare alla lista.
-                </p>
+                <div className="flex gap-3 mt-4">
+                    <button
+                        onClick={() => {
+                            setError(null);
+                            if (onBack) onBack();
+                        }}
+                        className="tv-focus px-6 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded-lg font-medium transition-colors"
+                    >
+                        Chiudi
+                    </button>
+                    <button
+                        onClick={() => {
+                            setError(null);
+                            setIsBuffering(true);
+                            // Forza ricaricamento dello stream
+                            if (videoRef.current && channel) {
+                                videoRef.current.src = '';
+                                setTimeout(() => {
+                                    if (videoRef.current) {
+                                        videoRef.current.src = channel.url;
+                                        videoRef.current.play().catch(() => {});
+                                    }
+                                }, 100);
+                            }
+                        }}
+                        className="tv-focus px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors"
+                    >
+                        Riprova
+                    </button>
+                </div>
             </div>
         </div>
       )}
@@ -2148,15 +2231,20 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
                   <div className="bg-white/5 rounded-lg p-3 space-y-2">
                     <div className="flex justify-between">
                       <span className="text-gray-400 text-sm">Codec</span>
-                      <span className={`text-sm font-medium ${streamInfo.isHEVC ? 'text-yellow-400' : 'text-white'}`}>
-                        {streamInfo.videoCodec || 'N/A'}
+                      <span className={`text-sm font-medium ${
+                        !streamInfo.videoCodec ? 'text-gray-500 italic' :
+                        streamInfo.isHEVC ? 'text-yellow-400' : 
+                        streamInfo.isDolbyVision ? 'text-purple-400' : 'text-white'
+                      }`}>
+                        {streamInfo.videoCodec || 'Non rilevato'}
                         {streamInfo.isHEVC && ' ⚠️'}
+                        {streamInfo.isDolbyVision && ' 🎬'}
                       </span>
                     </div>
                     {streamInfo.videoCodecId && (
                       <div className="flex justify-between">
                         <span className="text-gray-400 text-sm">Codec ID</span>
-                        <span className="text-white text-sm font-mono">{streamInfo.videoCodecId}</span>
+                        <span className="text-white font-mono text-xs">{streamInfo.videoCodecId}</span>
                       </div>
                     )}
                     {streamInfo.videoProfile && (
@@ -2171,22 +2259,49 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
                         <span className="text-white text-sm">L{streamInfo.videoLevel}</span>
                       </div>
                     )}
+                    {streamInfo.videoBitDepth && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-400 text-sm">Bit Depth</span>
+                        <span className={`text-sm ${streamInfo.videoBitDepth > 8 ? 'text-cyan-400' : 'text-white'}`}>
+                          {streamInfo.videoBitDepth}-bit {streamInfo.videoBitDepth > 8 && '✨'}
+                        </span>
+                      </div>
+                    )}
+                    {streamInfo.videoHDR && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-400 text-sm">HDR</span>
+                        <span className="text-amber-400 text-sm">
+                          ✓ {streamInfo.isDolbyVision ? 'Dolby Vision' :
+                             streamInfo.isHDR10 ? 'HDR10' :
+                             streamInfo.isHLG ? 'HLG' :
+                             streamInfo.videoColorSpace || 'HDR'}
+                        </span>
+                      </div>
+                    )}
                     {streamInfo.width && streamInfo.height && (
                       <div className="flex justify-between">
                         <span className="text-gray-400 text-sm">Risoluzione</span>
-                        <span className="text-white text-sm">{streamInfo.width}x{streamInfo.height}</span>
+                        <span className="text-white text-sm">
+                          {streamInfo.width}×{streamInfo.height}
+                          <span className="text-gray-500 ml-1">
+                            {streamInfo.height >= 2160 ? '(4K)' :
+                             streamInfo.height >= 1440 ? '(2K)' :
+                             streamInfo.height >= 1080 ? '(FHD)' :
+                             streamInfo.height >= 720 ? '(HD)' : '(SD)'}
+                          </span>
+                        </span>
                       </div>
                     )}
                     {streamInfo.frameRate && (
                       <div className="flex justify-between">
                         <span className="text-gray-400 text-sm">Frame Rate</span>
-                        <span className="text-white text-sm">{streamInfo.frameRate} fps</span>
+                        <span className="text-white text-sm">{streamInfo.frameRate.toFixed(2)} fps</span>
                       </div>
                     )}
-                    {streamInfo.bitrate && (
+                    {(streamInfo.bitrate || streamInfo.videoBitrate) && (
                       <div className="flex justify-between">
                         <span className="text-gray-400 text-sm">Bitrate</span>
-                        <span className="text-white text-sm">{(streamInfo.bitrate / 1000000).toFixed(2)} Mbps</span>
+                        <span className="text-white text-sm">{((streamInfo.videoBitrate || streamInfo.bitrate)! / 1000000).toFixed(2)} Mbps</span>
                       </div>
                     )}
                   </div>
@@ -2198,28 +2313,78 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
                   <div className="bg-white/5 rounded-lg p-3 space-y-2">
                     <div className="flex justify-between">
                       <span className="text-gray-400 text-sm">Codec</span>
-                      <span className="text-white text-sm font-medium">{streamInfo.audioCodec || 'N/A'}</span>
+                      <span className={`text-sm font-medium ${!streamInfo.audioCodec ? 'text-gray-500 italic' : 'text-white'}`}>
+                        {streamInfo.audioCodec || 'Non rilevato'}
+                      </span>
                     </div>
                     {streamInfo.audioCodecId && (
                       <div className="flex justify-between">
                         <span className="text-gray-400 text-sm">Codec ID</span>
-                        <span className="text-white text-sm font-mono">{streamInfo.audioCodecId}</span>
+                        <span className="text-white font-mono text-xs">{streamInfo.audioCodecId}</span>
                       </div>
                     )}
                     {streamInfo.audioChannels && (
                       <div className="flex justify-between">
                         <span className="text-gray-400 text-sm">Canali</span>
-                        <span className="text-white text-sm">{streamInfo.audioChannels}</span>
+                        <span className="text-white text-sm">
+                          {streamInfo.audioChannels === 1 ? 'Mono' :
+                           streamInfo.audioChannels === 2 ? 'Stereo (2.0)' :
+                           streamInfo.audioChannels === 6 ? 'Surround 5.1' :
+                           streamInfo.audioChannels === 8 ? 'Surround 7.1' :
+                           `${streamInfo.audioChannels} canali`}
+                        </span>
                       </div>
                     )}
                     {streamInfo.audioSampleRate && (
                       <div className="flex justify-between">
                         <span className="text-gray-400 text-sm">Sample Rate</span>
-                        <span className="text-white text-sm">{streamInfo.audioSampleRate} Hz</span>
+                        <span className="text-white text-sm">{(streamInfo.audioSampleRate / 1000).toFixed(1)} kHz</span>
+                      </div>
+                    )}
+                    {streamInfo.audioBitrate && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-400 text-sm">Bitrate</span>
+                        <span className="text-white text-sm">{streamInfo.audioBitrate} kbps</span>
+                      </div>
+                    )}
+                    {streamInfo.audioLanguage && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-400 text-sm">Lingua</span>
+                        <span className="text-white text-sm">{streamInfo.audioLanguage}</span>
                       </div>
                     )}
                   </div>
                 </div>
+
+                {/* Playback Quality */}
+                {(streamInfo.totalFrames > 0 || streamInfo.droppedFrames > 0) && (
+                  <div className="space-y-2">
+                    <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Qualità Playback</h4>
+                    <div className="bg-white/5 rounded-lg p-3 space-y-2">
+                      {streamInfo.totalFrames > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-gray-400 text-sm">Frame Totali</span>
+                          <span className="text-white text-sm">{streamInfo.totalFrames.toLocaleString()}</span>
+                        </div>
+                      )}
+                      {streamInfo.droppedFrames > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-gray-400 text-sm">Frame Persi</span>
+                          <span className={`text-sm ${streamInfo.frameDropRate > 1 ? 'text-yellow-400' : 'text-green-400'}`}>
+                            {streamInfo.droppedFrames} ({streamInfo.frameDropRate.toFixed(2)}%)
+                            {streamInfo.frameDropRate > 1 ? ' ⚠️' : ' ✓'}
+                          </span>
+                        </div>
+                      )}
+                      {streamInfo.corruptedFrames > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-gray-400 text-sm">Frame Corrotti</span>
+                          <span className="text-red-400 text-sm">{streamInfo.corruptedFrames} ⚠️</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {/* Container/Protocol */}
                 <div className="space-y-2">
@@ -2233,6 +2398,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
                       <span className="text-gray-400 text-sm">Container</span>
                       <span className="text-white text-sm">{streamInfo.container || 'N/A'}</span>
                     </div>
+                    {streamInfo.mimeType && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-400 text-sm">MIME Type</span>
+                        <span className="text-white font-mono text-xs truncate max-w-[180px]">{streamInfo.mimeType}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -2244,16 +2415,48 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
                       <span className={`text-2xl ${streamInfo.isSupported ? '' : ''}`}>
                         {streamInfo.isSupported ? '✅' : '❌'}
                       </span>
-                      <div>
+                      <div className="flex-1">
                         <p className={`text-sm font-medium ${streamInfo.isSupported ? 'text-green-400' : 'text-red-400'}`}>
                           {streamInfo.supportDetails}
                         </p>
+                        <div className="flex flex-wrap gap-2 mt-1">
+                          {streamInfo.hardwareAccelerated && (
+                            <span className="text-xs text-cyan-400">🚀 HW Accel</span>
+                          )}
+                          {streamInfo.powerEfficient && (
+                            <span className="text-xs text-green-400">⚡ Power Efficient</span>
+                          )}
+                        </div>
                         {streamInfo.isHEVC && !streamInfo.isSupported && (
                           <p className="text-xs text-gray-400 mt-1">
                             HEVC/H.265 potrebbe non essere supportato da questo browser
                           </p>
                         )}
                       </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Detection Info */}
+                <div className="space-y-2">
+                  <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Rilevamento</h4>
+                  <div className="bg-white/5 rounded-lg p-3 space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-gray-400 text-sm">Metodo</span>
+                      <span className="text-white text-sm">{streamInfo.detectionMethod}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-400 text-sm">Affidabilità</span>
+                      <span className={`text-sm font-medium ${
+                        streamInfo.confidence === 'high' ? 'text-green-400' :
+                        streamInfo.confidence === 'medium' ? 'text-yellow-400' :
+                        streamInfo.confidence === 'low' ? 'text-orange-400' : 'text-red-400'
+                      }`}>
+                        {streamInfo.confidence === 'high' ? 'ALTA' :
+                         streamInfo.confidence === 'medium' ? 'MEDIA' :
+                         streamInfo.confidence === 'low' ? 'BASSA' :
+                         streamInfo.confidence === 'none' ? 'NON RILEVATO' : 'N/A'}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -2266,11 +2469,26 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ channel, playlist = [], onCha
                   {streamInfo.isHEVC && (
                     <span className="px-2 py-1 bg-yellow-500/20 text-yellow-400 text-xs rounded-full">HEVC/H.265</span>
                   )}
+                  {streamInfo.isDolbyVision && (
+                    <span className="px-2 py-1 bg-purple-500/20 text-purple-400 text-xs rounded-full">Dolby Vision</span>
+                  )}
                   {streamInfo.isAV1 && (
                     <span className="px-2 py-1 bg-purple-500/20 text-purple-400 text-xs rounded-full">AV1</span>
                   )}
                   {streamInfo.isVP9 && (
                     <span className="px-2 py-1 bg-green-500/20 text-green-400 text-xs rounded-full">VP9</span>
+                  )}
+                  {streamInfo.isVP8 && (
+                    <span className="px-2 py-1 bg-green-500/20 text-green-400 text-xs rounded-full">VP8</span>
+                  )}
+                  {streamInfo.videoHDR && (
+                    <span className="px-2 py-1 bg-amber-500/20 text-amber-400 text-xs rounded-full">HDR</span>
+                  )}
+                  {streamInfo.videoBitDepth && streamInfo.videoBitDepth > 8 && (
+                    <span className="px-2 py-1 bg-cyan-500/20 text-cyan-400 text-xs rounded-full">{streamInfo.videoBitDepth}-bit</span>
+                  )}
+                  {streamInfo.hardwareAccelerated && (
+                    <span className="px-2 py-1 bg-emerald-500/20 text-emerald-400 text-xs rounded-full">HW Decode</span>
                   )}
                 </div>
               </>

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import ChannelList from './components/ChannelList.tsx';
-import VideoPlayer from './components/VideoPlayer.tsx';
+import VideoPlayer from './components/VideoPlayerNew.tsx';
 import AIRecommender from './components/AIRecommender.tsx';
 import XtreamLogin from './components/XtreamLogin.tsx';
 import SeriesDetail from './components/SeriesDetail.tsx';

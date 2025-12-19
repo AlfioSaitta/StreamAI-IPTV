@@ -2,6 +2,32 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Video.js customizations */
+.video-js {
+  background-color: #000 !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.video-js .vjs-tech {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain;
+}
+
+/* Hide default Video.js controls since we use custom ones */
+.video-js .vjs-control-bar,
+.video-js .vjs-big-play-button,
+.video-js .vjs-loading-spinner,
+.video-js .vjs-modal-dialog {
+  display: none !important;
+}
+
+/* Video.js error display customization */
+.video-js .vjs-error-display {
+  display: none !important;
+}
+
 /* Hide default scrollbar but keep functionality */
 ::-webkit-scrollbar {
   display: none;
