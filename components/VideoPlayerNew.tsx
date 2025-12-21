@@ -120,8 +120,6 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     setIsPlaying(false);
 
     try {
-      // Tenta di aprire l'URL con l'intent di sistema (Android chiederà quale app usare)
-      // await AppLauncher.openUrl({ url: channel.url });
       // Fallback a window.open se AppLauncher non è disponibile
       window.open(channel.url, '_system');
     } catch (e) {
@@ -387,12 +385,12 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       const sourceType = isHLS ? 'application/x-mpegURL' : 'application/dash+xml';
 
       const options: any = {
-        autoplay: true,
+        autoplay: false, // Disabilita autoplay per evitare download iniziale
         controls: false,
         responsive: true,
         fluid: false,
         fill: true,
-        preload: 'auto',
+        preload: 'metadata', // Carica solo i metadati inizialmente
         techOrder: ['html5'],
         playbackRates: [0.5, 0.75, 1, 1.25, 1.5, 2], // Velocità di riproduzione
         html5: {
@@ -445,9 +443,9 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       const videoEl = document.createElement('video');
       videoEl.className = 'w-full h-full';
       videoEl.style.backgroundColor = '#000';
-      videoEl.autoplay = true;
+      videoEl.autoplay = false; // Disabilita autoplay
       videoEl.playsInline = true;
-      videoEl.preload = 'auto';
+      videoEl.preload = 'metadata'; // Carica solo metadati
 
       container.appendChild(videoEl);
 
@@ -459,15 +457,8 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
 
       // Imposta la sorgente
       videoEl.src = source;
-
-      // Avvia riproduzione
-      videoEl.play().catch((err) => {
-        console.warn('[NativeVideo] Autoplay failed:', err);
-        // Non mostrare errore per autoplay blocked
-        if (err.name !== 'NotAllowedError') {
-          handlePlaybackError(err, source);
-        }
-      });
+      
+      // Non chiamiamo play() qui, lo faremo dopo il seek in onloadedmetadata
     }
 
     // Cleanup
@@ -562,6 +553,9 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
           player.currentTime(resumeTime);
         }
       }
+      
+      // Avvia la riproduzione DOPO aver impostato il tempo
+      player.play();
     });
 
     player.on('progress', () => {
@@ -672,6 +666,14 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
             videoEl.currentTime = resumeTime;
           }
         }
+        
+        // Avvia la riproduzione DOPO aver impostato il tempo
+        videoEl.play().catch((err) => {
+          console.warn('[NativeVideo] Autoplay failed:', err);
+          if (err.name !== 'NotAllowedError') {
+            handlePlaybackError(err, source);
+          }
+        });
       }
     };
 
@@ -1360,365 +1362,6 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
           </div>
         </div>
       </div>
-
-      {/* Stream Info Panel */}
-      {showStreamInfo && (
-        <div className="absolute top-16 right-4 w-80 bg-black/90 backdrop-blur border border-white/10 rounded-xl z-40 overflow-hidden max-h-[80vh] overflow-y-auto">
-          <div className="p-4 border-b border-white/10 flex items-center justify-between sticky top-0 bg-black/90">
-            <h3 className="font-bold text-white">Info Stream</h3>
-            <button onClick={() => setShowStreamInfo(false)} className="p-1 hover:bg-white/10 rounded">
-              <X className="w-5 h-5 text-white" />
-            </button>
-          </div>
-          <div className="p-4 space-y-4 text-sm">
-            {/* Qualità corrente */}
-            {currentQuality && (
-              <div className="bg-white/5 rounded-lg p-3">
-                <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">Qualità</h4>
-                <div className="flex justify-between items-center">
-                  <span className="text-white font-medium">{currentQuality}</span>
-                  {liveBitrate && (
-                    <span className="text-green-400">{(liveBitrate / 1000000).toFixed(2)} Mbps</span>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Video */}
-            <div className="bg-white/5 rounded-lg p-3 space-y-2">
-              <h4 className="text-xs font-semibold text-gray-400 uppercase">Video</h4>
-              <div className="flex justify-between">
-                <span className="text-gray-400">Codec</span>
-                <span className={`${codecInfo?.videoCodec ? 'text-white' : 'text-gray-500 italic'}`}>
-                  {codecInfo?.videoCodec || 'Non rilevato'}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">Risoluzione</span>
-                <span className="text-white">
-                  {codecInfo?.width && codecInfo?.height
-                    ? `${codecInfo.width}×${codecInfo.height}`
-                    : 'N/A'}
-                </span>
-              </div>
-              {codecInfo?.frameRate && (
-                <div className="flex justify-between">
-                  <span className="text-gray-400">Frame Rate</span>
-                  <span className="text-white">{codecInfo.frameRate} fps</span>
-                </div>
-              )}
-            </div>
-
-            {/* Audio */}
-            <div className="bg-white/5 rounded-lg p-3 space-y-2">
-              <h4 className="text-xs font-semibold text-gray-400 uppercase">Audio</h4>
-              <div className="flex justify-between">
-                <span className="text-gray-400">Codec</span>
-                <span className={`${codecInfo?.audioCodec ? 'text-white' : 'text-gray-500 italic'}`}>
-                  {codecInfo?.audioCodec || 'Non rilevato'}
-                </span>
-              </div>
-            </div>
-
-            {/* Streaming */}
-            <div className="bg-white/5 rounded-lg p-3 space-y-2">
-              <h4 className="text-xs font-semibold text-gray-400 uppercase">Streaming</h4>
-              <div className="flex justify-between">
-                <span className="text-gray-400">Protocollo</span>
-                <span className="text-white">{codecInfo?.protocol || 'N/A'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">Container</span>
-                <span className="text-white">{codecInfo?.container || 'N/A'}</span>
-              </div>
-              {networkSpeed && (
-                <div className="flex justify-between">
-                  <span className="text-gray-400">Velocità Rete</span>
-                  <span className="text-white">{(networkSpeed / 1000000).toFixed(2)} Mbps</span>
-                </div>
-              )}
-            </div>
-
-            {/* Buffer */}
-            {buffered > 0 && (
-              <div className="bg-white/5 rounded-lg p-3">
-                <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">Buffer</h4>
-                <div className="h-2 bg-white/10 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-green-500 transition-all duration-300"
-                    style={{ width: `${Math.min(buffered, 100)}%` }}
-                  />
-                </div>
-                <p className="text-xs text-gray-400 mt-1">{buffered.toFixed(0)}% caricato</p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Playlist Panel */}
-      {showPlaylist && playlist.length > 0 && (
-        <div className="absolute top-0 right-0 bottom-0 w-80 bg-black/95 backdrop-blur z-40 flex flex-col">
-          <div className="p-4 border-b border-white/10 flex items-center justify-between">
-            <h3 className="font-bold text-white">Playlist</h3>
-            <button onClick={() => setShowPlaylist(false)} className="p-1 hover:bg-white/10 rounded">
-              <X className="w-5 h-5 text-white" />
-            </button>
-          </div>
-          <div className="flex-1 overflow-y-auto">
-            {playlist.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => {
-                  if (onChannelSelect) onChannelSelect(item);
-                  setShowPlaylist(false);
-                }}
-                className={`w-full p-3 flex items-center gap-3 hover:bg-white/10 transition-colors ${
-                  item.id === channel?.id ? 'bg-white/20' : ''
-                }`}
-              >
-                {item.logo ? (
-                  <img src={item.logo} alt="" className="w-10 h-10 object-contain rounded" />
-                ) : (
-                  <div className="w-10 h-10 bg-gray-700 rounded flex items-center justify-center text-xs text-gray-400">
-                    TV
-                  </div>
-                )}
-                <span className="text-white text-sm truncate">{item.cleanName || item.name}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Error overlay */}
-      {error && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/90">
-          <div className="bg-red-900/50 backdrop-blur border border-red-500/50 px-8 py-6 rounded-2xl flex flex-col items-center gap-4 max-w-md text-center">
-            <AlertTriangle className="w-12 h-12 text-red-400" />
-            <p className="text-xl font-medium text-white">{error}</p>
-            {error.includes('Codec') && (
-              <p className="text-sm text-gray-300">
-                Questo contenuto potrebbe utilizzare un codec video non supportato dal browser.
-              </p>
-            )}
-            <div className="flex gap-3 mt-2">
-              <button
-                onClick={() => {
-                  setError(null);
-                  if (onBack) onBack();
-                }}
-                className="px-6 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded-lg font-medium transition-colors"
-              >
-                Chiudi
-              </button>
-              <button
-                onClick={() => {
-                  setError(null);
-                  setIsBuffering(true);
-                  // Forza un re-render cambiando temporaneamente il canale
-                  // Il useEffect si occuperà di ricaricare
-                  const currentChannel = channel;
-                  if (currentChannel) {
-                    // Pulisci e ricarica
-                    if (playerRef.current) {
-                      try {
-                        playerRef.current.dispose();
-                      } catch (e) {}
-                      playerRef.current = null;
-                    }
-                    if (nativeVideoRef.current) {
-                      nativeVideoRef.current.pause();
-                      nativeVideoRef.current.src = '';
-                      nativeVideoRef.current = null;
-                    }
-                    // Ricarica dopo un breve delay
-                    setTimeout(() => {
-                      if (videoRef.current && currentChannel) {
-                        const container = videoRef.current;
-                        container.innerHTML = '';
-                        const videoEl = document.createElement('video');
-                        videoEl.className = 'w-full h-full';
-                        videoEl.style.backgroundColor = '#000';
-                        videoEl.autoplay = true;
-                        videoEl.playsInline = true;
-                        videoEl.src = currentChannel.url;
-                        container.appendChild(videoEl);
-                        nativeVideoRef.current = videoEl;
-                        setupNativeVideoEvents(videoEl, currentChannel.url, currentChannel.type === 'live');
-                        videoEl.play().catch(console.warn);
-                      }
-                    }, 100);
-                  }
-                }}
-                className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors"
-              >
-                Riprova
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Seek Indicator */}
-      {seekIndicator && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-40">
-          <div className="bg-black/70 rounded-full px-4 py-2 flex items-center gap-2">
-            {seekIndicator.direction === 'left' ? (
-              <Rewind className="w-6 h-6 text-white" />
-            ) : (
-              <FastForward className="w-6 h-6 text-white" />
-            )}
-            <span className="text-white text-lg font-medium">{seekIndicator.seconds}s</span>
-          </div>
-        </div>
-      )}
-
-      {/* CAST OVERLAY - Mostra quando c'è una sessione Cast attiva */}
-      {castSession.isConnected && (
-        <div
-          className="absolute inset-0 z-[100] flex flex-col items-center justify-center bg-gradient-to-b from-black/90 via-black/70 to-black/90"
-        >
-          {/* Cast Icon Animation */}
-          <div className="relative mb-6">
-            <div className="absolute inset-0 bg-blue-500/20 rounded-full animate-ping" style={{ animationDuration: '2s' }}></div>
-            <div className="relative bg-gradient-to-br from-blue-500 to-blue-700 p-6 rounded-full shadow-lg shadow-blue-500/30">
-              <Tv className="w-16 h-16 text-white" />
-            </div>
-          </div>
-
-          {/* Device Info */}
-          <h2 className="text-2xl font-semibold text-white mb-2">
-            Trasmissione su {castSession.device?.name || 'dispositivo'}
-          </h2>
-          <p className="text-gray-400 mb-8">{channel?.cleanName || channel?.name}</p>
-
-          {/* Playback Status */}
-          <div className="flex items-center gap-3 mb-6">
-            <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-              castSession.status.playerState === 'PLAYING' ? 'bg-green-500/20 text-green-400' :
-              castSession.status.playerState === 'PAUSED' ? 'bg-yellow-500/20 text-yellow-400' :
-              castSession.status.playerState === 'BUFFERING' ? 'bg-blue-500/20 text-blue-400' :
-              'bg-gray-500/20 text-gray-400'
-            }`}>
-              {castSession.status.playerState === 'PLAYING' ? '▶ In riproduzione' :
-               castSession.status.playerState === 'PAUSED' ? '⏸ In pausa' :
-               castSession.status.playerState === 'BUFFERING' ? '⏳ Buffering...' :
-               '⏹ Fermo'}
-            </span>
-          </div>
-
-          {/* Progress Bar */}
-          {castSession.status.duration > 0 && (
-            <div className="w-full max-w-xl px-8 mb-6">
-              <div className="flex items-center gap-4 text-sm text-gray-400 mb-2">
-                <span>{formatTime(castSession.status.currentTime)}</span>
-                <div
-                  className="flex-1 h-2 bg-white/20 rounded-full cursor-pointer relative group"
-                  onClick={(e) => {
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const percent = (e.clientX - rect.left) / rect.width;
-                    castSession.seek(percent * castSession.status.duration);
-                  }}
-                >
-                  <div
-                    className="absolute h-full bg-blue-500 rounded-full transition-all"
-                    style={{ width: `${(castSession.status.currentTime / castSession.status.duration) * 100}%` }}
-                  />
-                </div>
-                <span>{formatTime(castSession.status.duration)}</span>
-              </div>
-            </div>
-          )}
-
-          {/* Playback Controls */}
-          <div className="flex items-center gap-6 mb-8">
-            {/* Rewind 10s */}
-            <button
-              onClick={() => castSession.seek(Math.max(0, castSession.status.currentTime - 10))}
-              className="p-3 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
-              title="Indietro 10s"
-            >
-              <Rewind className="w-6 h-6" />
-            </button>
-
-            {/* Play/Pause */}
-            <button
-              onClick={async () => {
-                if (castSession.status.playerState === 'PLAYING') {
-                  await castSession.pause();
-                } else {
-                  await castSession.play();
-                }
-              }}
-              className="p-5 rounded-full bg-white text-black hover:bg-gray-200 transition-colors shadow-lg"
-            >
-              {castSession.status.playerState === 'PLAYING' ?
-                <Pause className="w-8 h-8" /> :
-                <Play className="w-8 h-8 ml-1" />
-              }
-            </button>
-
-            {/* Forward 10s */}
-            <button
-              onClick={() => castSession.seek(castSession.status.currentTime + 10)}
-              className="p-3 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
-              title="Avanti 10s"
-            >
-              <FastForward className="w-6 h-6" />
-            </button>
-
-            {/* Stop */}
-            <button
-              onClick={() => castSession.stop()}
-              className="p-3 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
-              title="Stop"
-            >
-              <StopCircle className="w-6 h-6" />
-            </button>
-          </div>
-
-          {/* Volume Control */}
-          <div className="flex items-center gap-4 w-full max-w-xs px-8 mb-8">
-            <button
-              onClick={() => castSession.setMuted(!castSession.status.muted)}
-              className="p-2 rounded-full hover:bg-white/10 text-white transition-colors"
-            >
-              {castSession.status.muted || castSession.status.volume === 0 ?
-                <VolumeX className="w-5 h-5" /> :
-                <Volume2 className="w-5 h-5" />
-              }
-            </button>
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.05"
-              value={castSession.status.muted ? 0 : castSession.status.volume}
-              onChange={(e) => {
-                const val = parseFloat(e.target.value);
-                castSession.setVolume(val);
-                if (val > 0 && castSession.status.muted) {
-                  castSession.setMuted(false);
-                }
-              }}
-              className="flex-1 h-2 bg-white/20 rounded-full appearance-none cursor-pointer"
-            />
-            <span className="text-sm text-gray-400 w-10 text-right">
-              {Math.round((castSession.status.muted ? 0 : castSession.status.volume) * 100)}%
-            </span>
-          </div>
-
-          {/* Disconnect Button */}
-          <button
-            onClick={() => castSession.disconnect()}
-            className="px-6 py-2 bg-red-600 hover:bg-red-500 text-white rounded-full font-medium transition-colors flex items-center gap-2"
-          >
-            <X className="w-4 h-4" />
-            Disconnetti
-          </button>
-        </div>
-      )}
 
       {/* Cast Device Picker Modal */}
       {channel && (
