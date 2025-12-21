@@ -1108,6 +1108,152 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         </div>
       )}
 
+      {/* CAST OVERLAY - Mostra quando c'è una sessione Cast attiva */}
+      {castSession.isConnected && (
+        <div
+          className="absolute inset-0 z-[100] flex flex-col items-center justify-center bg-gradient-to-b from-black/90 via-black/70 to-black/90"
+        >
+          {/* Cast Icon Animation */}
+          <div className="relative mb-6">
+            <div className="absolute inset-0 bg-blue-500/20 rounded-full animate-ping" style={{ animationDuration: '2s' }}></div>
+            <div className="relative bg-gradient-to-br from-blue-500 to-blue-700 p-6 rounded-full shadow-lg shadow-blue-500/30">
+              <Tv className="w-16 h-16 text-white" />
+            </div>
+          </div>
+
+          {/* Device Info */}
+          <h2 className="text-2xl font-semibold text-white mb-2">
+            Trasmissione su {castSession.device?.name || 'dispositivo'}
+          </h2>
+          <p className="text-gray-400 mb-8">{channel?.cleanName || channel?.name}</p>
+
+          {/* Playback Status */}
+          <div className="flex items-center gap-3 mb-6">
+            <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+              castSession.status.playerState === 'PLAYING' ? 'bg-green-500/20 text-green-400' :
+              castSession.status.playerState === 'PAUSED' ? 'bg-yellow-500/20 text-yellow-400' :
+              castSession.status.playerState === 'BUFFERING' ? 'bg-blue-500/20 text-blue-400' :
+              'bg-gray-500/20 text-gray-400'
+            }`}>
+              {castSession.status.playerState === 'PLAYING' ? '▶ In riproduzione' :
+               castSession.status.playerState === 'PAUSED' ? '⏸ In pausa' :
+               castSession.status.playerState === 'BUFFERING' ? '⏳ Buffering...' :
+               '⏹ Fermo'}
+            </span>
+          </div>
+
+          {/* Progress Bar */}
+          {castSession.status.duration > 0 && (
+            <div className="w-full max-w-xl px-8 mb-6">
+              <div className="flex items-center gap-4 text-sm text-gray-400 mb-2">
+                <span>{formatTime(castSession.status.currentTime)}</span>
+                <div
+                  className="flex-1 h-2 bg-white/20 rounded-full cursor-pointer relative group"
+                  onClick={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const percent = (e.clientX - rect.left) / rect.width;
+                    castSession.seek(percent * castSession.status.duration);
+                  }}
+                >
+                  <div
+                    className="absolute h-full bg-blue-500 rounded-full transition-all"
+                    style={{ width: `${(castSession.status.currentTime / castSession.status.duration) * 100}%` }}
+                  />
+                </div>
+                <span>{formatTime(castSession.status.duration)}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Playback Controls */}
+          <div className="flex items-center gap-6 mb-8">
+            {/* Rewind 10s */}
+            <button
+              onClick={() => castSession.seek(Math.max(0, castSession.status.currentTime - 10))}
+              className="p-3 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+              title="Indietro 10s"
+            >
+              <Rewind className="w-6 h-6" />
+            </button>
+
+            {/* Play/Pause */}
+            <button
+              onClick={async () => {
+                if (castSession.status.playerState === 'PLAYING') {
+                  await castSession.pause();
+                } else {
+                  await castSession.play();
+                }
+              }}
+              className="p-5 rounded-full bg-white text-black hover:bg-gray-200 transition-colors shadow-lg"
+            >
+              {castSession.status.playerState === 'PLAYING' ?
+                <Pause className="w-8 h-8" /> :
+                <Play className="w-8 h-8 ml-1" />
+              }
+            </button>
+
+            {/* Forward 10s */}
+            <button
+              onClick={() => castSession.seek(castSession.status.currentTime + 10)}
+              className="p-3 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+              title="Avanti 10s"
+            >
+              <FastForward className="w-6 h-6" />
+            </button>
+
+            {/* Stop */}
+            <button
+              onClick={() => castSession.stop()}
+              className="p-3 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+              title="Stop"
+            >
+              <StopCircle className="w-6 h-6" />
+            </button>
+          </div>
+
+          {/* Volume Control */}
+          <div className="flex items-center gap-4 w-full max-w-xs px-8 mb-8">
+            <button
+              onClick={() => castSession.setMuted(!castSession.status.muted)}
+              className="p-2 rounded-full hover:bg-white/10 text-white transition-colors"
+            >
+              {castSession.status.muted || castSession.status.volume === 0 ?
+                <VolumeX className="w-5 h-5" /> :
+                <Volume2 className="w-5 h-5" />
+              }
+            </button>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              value={castSession.status.muted ? 0 : castSession.status.volume}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value);
+                castSession.setVolume(val);
+                if (val > 0 && castSession.status.muted) {
+                  castSession.setMuted(false);
+                }
+              }}
+              className="flex-1 h-2 bg-white/20 rounded-full appearance-none cursor-pointer"
+            />
+            <span className="text-sm text-gray-400 w-10 text-right">
+              {Math.round((castSession.status.muted ? 0 : castSession.status.volume) * 100)}%
+            </span>
+          </div>
+
+          {/* Disconnect Button */}
+          <button
+            onClick={() => castSession.disconnect()}
+            className="px-6 py-2 bg-red-600 hover:bg-red-500 text-white rounded-full font-medium transition-colors flex items-center gap-2"
+          >
+            <X className="w-4 h-4" />
+            Disconnetti
+          </button>
+        </div>
+      )}
+
       {/* Custom Controls */}
       <div
         className={`absolute inset-0 z-30 transition-opacity duration-300 ${
