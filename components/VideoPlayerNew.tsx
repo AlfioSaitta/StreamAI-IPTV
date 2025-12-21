@@ -81,6 +81,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   const [networkSpeed, setNetworkSpeed] = useState<number | null>(null);
   const [seekIndicator, setSeekIndicator] = useState<{direction: 'left' | 'right', seconds: number} | null>(null);
   const [isUsingNativePlayer, setIsUsingNativePlayer] = useState(false);
+  const [showNextButton, setShowNextButton] = useState(false);
 
   // Cast state
   const [isCastLoading, setIsCastLoading] = useState(false);
@@ -323,6 +324,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     setCurrentTime(0);
     setDuration(0);
     setIsUsingNativePlayer(false);
+    setShowNextButton(false);
 
     const source = channel.url;
     const isLive = channel.type === 'live';
@@ -531,6 +533,13 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       const dur = player.duration() || 0;
       setCurrentTime(ct);
 
+      // Mostra pulsante "Prossimo episodio" se mancano meno di 45 secondi
+      if (onNext && dur > 0 && dur - ct < 45) {
+        setShowNextButton(true);
+      } else {
+        setShowNextButton(false);
+      }
+
       const now = Date.now();
       if (onProgress && dur > 0 && (now - lastProgressUpdate.current > 5000)) {
         lastProgressUpdate.current = now;
@@ -642,6 +651,13 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       const dur = videoEl.duration || 0;
       setCurrentTime(ct);
 
+      // Mostra pulsante "Prossimo episodio" se mancano meno di 45 secondi
+      if (onNext && dur > 0 && dur - ct < 45) {
+        setShowNextButton(true);
+      } else {
+        setShowNextButton(false);
+      }
+
       const now = Date.now();
       if (onProgress && dur > 0 && isFinite(dur) && (now - lastProgressUpdate.current > 5000)) {
         lastProgressUpdate.current = now;
@@ -732,7 +748,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   // Gestione controlli visibilità
   useEffect(() => {
     const hideControls = () => {
-      if (isPlaying && !showPlaylist && !showStreamInfo && !showQualityMenu && !showSpeedMenu) {
+      if (isPlaying && !showPlaylist && !showStreamInfo && !showQualityMenu && !showSpeedMenu && !showNextButton) {
         setShowControls(false);
       }
     };
@@ -760,7 +776,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         clearTimeout(controlsTimeoutRef.current);
       }
     };
-  }, [isPlaying, showPlaylist, showStreamInfo, showQualityMenu, showSpeedMenu]);
+  }, [isPlaying, showPlaylist, showStreamInfo, showQualityMenu, showSpeedMenu, showNextButton]);
 
   // Gesture touch per mobile
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
@@ -1076,6 +1092,19 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
               <p className="text-white/60 text-sm">{(liveBitrate / 1000000).toFixed(1)} Mbps</p>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Next Episode Button Overlay */}
+      {showNextButton && onNext && (
+        <div className="absolute bottom-24 right-8 z-40 animate-fade-in">
+          <button
+            onClick={onNext}
+            className="flex items-center gap-3 bg-white text-black px-6 py-3 rounded-lg font-bold shadow-lg hover:bg-gray-200 transition-transform hover:scale-105"
+          >
+            <span>Prossimo episodio</span>
+            <SkipForward className="w-5 h-5 fill-black" />
+          </button>
         </div>
       )}
 
