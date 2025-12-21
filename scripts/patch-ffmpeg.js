@@ -18,11 +18,21 @@ console.log(`[patch-ffmpeg] Platform: ${platform}, Arch: ${arch}`);
 // Versione Electron installata
 let electronVersion = '29.0.0';
 try {
-  const electronPkg = require(path.join(__dirname, '..', 'node_modules', 'electron', 'package.json'));
-  electronVersion = electronPkg.version;
-  console.log(`[patch-ffmpeg] Electron version: ${electronVersion}`);
+  // Prova a leggere dal package.json di electron
+  const electronPkgPath = path.join(__dirname, '..', 'node_modules', 'electron', 'package.json');
+  if (fs.existsSync(electronPkgPath)) {
+    const electronPkg = require(electronPkgPath);
+    electronVersion = electronPkg.version;
+    console.log(`[patch-ffmpeg] Electron version detected: ${electronVersion}`);
+  } else {
+    // Fallback: prova a eseguire electron --version
+    const electronBin = path.join(__dirname, '..', 'node_modules', '.bin', 'electron');
+    const versionOutput = execSync(`${electronBin} --version`).toString().trim();
+    electronVersion = versionOutput.replace('v', '');
+    console.log(`[patch-ffmpeg] Electron binary version: ${electronVersion}`);
+  }
 } catch (e) {
-  console.log('[patch-ffmpeg] Uso versione Electron default:', electronVersion);
+  console.log('[patch-ffmpeg] Warning: Could not detect Electron version, using default:', electronVersion);
 }
 
 // Mappa piattaforma/arch
@@ -179,10 +189,10 @@ function showManualInstructions(targetPath) {
   }
   console.log('OPZIONE 2 - Scarica libffmpeg manualmente:');
   console.log('');
-  console.log('  1. Vai su: https://nicedoc.io/nicedoc/nicedoc-electron/releases');
+  console.log('  1. Vai su: https://github.com/BranchBit/electron-chromium-ffmpeg-hevc-prebuilt/releases');
   console.log('     o cerca "electron ffmpeg codecs" su GitHub');
   console.log('');
-  console.log('  2. Scarica il file per la tua piattaforma');
+  console.log('  2. Scarica il file per la tua piattaforma e versione Electron');
   console.log('');
   console.log('  3. Copia il file nel percorso:');
   console.log(`     ${targetPath}`);
@@ -227,11 +237,15 @@ function copyElectronFiles(srcDir, destDir) {
     const src = path.join(srcDir, file);
     const dest = path.join(destDir, file);
     if (fs.existsSync(src)) {
-      fs.copyFileSync(src, dest);
-      if (platform !== 'win32') {
-        try { fs.chmodSync(dest, 0o755); } catch {}
+      try {
+        fs.copyFileSync(src, dest);
+        if (platform !== 'win32') {
+          try { fs.chmodSync(dest, 0o755); } catch {}
+        }
+        copied++;
+      } catch (e) {
+        console.error(`[patch-ffmpeg] Errore copia ${file}: ${e.message}`);
       }
-      copied++;
     }
   }
   return copied;
@@ -265,40 +279,7 @@ async function patch() {
     console.log(`[patch-ffmpeg] Versione patch diversa: ${installedVersion} -> ${currentPatchVersion}`);
   }
 
-  // Verifica anche se esiste il backup (indica che il patch è stato applicato)
-  const backupPath = targetPath + '.original';
-  const backupDir = electronPath + '.original';
-  if ((fs.existsSync(backupPath) || fs.existsSync(backupDir)) && fs.existsSync(patchMarkerFile)) {
-    console.log('[patch-ffmpeg] ✓ Patch già applicata, skip download');
-    return;
-  }
-
-  // Prima controlla se c'è già un libffmpeg nei pacchetti npm locali
-  const nodeModulesPath = path.join(__dirname, '..', 'node_modules');
-  const localPackages = ['@aspect-build/electron-libffmpeg-linux-x64-gpl', 'electron-ffmpeg-codecs'];
-
-  for (const pkg of localPackages) {
-    const pkgPath = path.join(nodeModulesPath, pkg);
-    if (fs.existsSync(pkgPath)) {
-      const found = findFileRecursive(pkgPath, config.libName);
-      if (found) {
-        console.log(`[patch-ffmpeg] Trovato FFmpeg locale: ${found}`);
-        const backupPath = targetPath + '.original';
-        if (!fs.existsSync(backupPath)) {
-          fs.copyFileSync(targetPath, backupPath);
-        }
-        fs.copyFileSync(found, targetPath);
-        if (platform !== 'win32') fs.chmodSync(targetPath, 0o755);
-        // Salva marker versione
-        fs.writeFileSync(patchMarkerFile, `${electronVersion}-local`);
-        console.log('[patch-ffmpeg] ✓ Patch completata con pacchetto locale!');
-        return;
-      }
-    }
-  }
-
   // URLs da provare per scaricare ffmpeg con codec proprietari
-  // Fonte: https://github.com/BranchBit/electron-chromium-ffmpeg-hevc-prebuilt
   const getPlatformName = () => {
     if (platform === 'darwin') return 'macosx';
     if (platform === 'win32') return 'windows';
@@ -315,7 +296,8 @@ async function patch() {
     `https://github.com/BranchBit/electron-chromium-ffmpeg-hevc-prebuilt/releases/download/v${electronVersion}/v${electronVersion}-${platformName}-electron-chromium-ffmpeg-hevc-prebuilt.zip`,
   ];
 
-  // Se la versione non è disponibile, prova versioni vicine
+  // Se la versione non è disponibile, prova versioni vicine (fallback)
+  // Nota: questo è rischioso ma spesso funziona per versioni patch diverse
   if (majorVersion >= 37) {
     downloadUrls.push(`https://github.com/BranchBit/electron-chromium-ffmpeg-hevc-prebuilt/releases/download/v37.2.4/v37.2.4-${platformName}-electron-chromium-ffmpeg-hevc-prebuilt.zip`);
   }
@@ -343,19 +325,23 @@ async function patch() {
 
           if (!fs.existsSync(backupDir)) {
             console.log(`[patch-ffmpeg] Backup: ${backupDir}`);
-            fs.cpSync(electronPath, backupDir, { recursive: true });
+            try {
+              fs.cpSync(electronPath, backupDir, { recursive: true });
+            } catch (e) {
+              console.error('[patch-ffmpeg] Errore backup:', e.message);
+            }
           }
 
           console.log('[patch-ffmpeg] Installazione distribuzione Electron con codec HEVC...');
           const copied = copyElectronFiles(srcDir, electronPath);
-          // Salva marker versione
-          fs.writeFileSync(patchMarkerFile, currentPatchVersion);
-          console.log(`[patch-ffmpeg] ✓ Patch completata! ${copied} file copiati. Codec HEVC/H.265 abilitati.`);
-
-          // Nota: BranchBit compila i codec staticamente nel binario electron
-          // Non c'è un libffmpeg.so separato
-          console.log('[patch-ffmpeg] Nota: I codec HEVC sono compilati staticamente nel binario electron');
-          return;
+          
+          if (copied > 0) {
+            // Salva marker versione
+            fs.writeFileSync(patchMarkerFile, currentPatchVersion);
+            console.log(`[patch-ffmpeg] ✓ Patch completata! ${copied} file copiati. Codec HEVC/H.265 abilitati.`);
+            console.log('[patch-ffmpeg] Nota: I codec HEVC sono compilati staticamente nel binario electron');
+            return;
+          }
         } else if (ffmpegFile) {
           // Solo libffmpeg.so
           const backupPath = targetPath + '.original';
@@ -387,4 +373,3 @@ async function patch() {
 patch().catch(err => {
   console.error('[patch-ffmpeg] Errore:', err.message);
 });
-

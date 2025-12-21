@@ -13,106 +13,85 @@ const isWayland = process.env.XDG_SESSION_TYPE === 'wayland' || process.env.WAYL
 // ============================================
 // CONFIGURAZIONE STORAGE - Illimitato
 // ============================================
-
-// Disabilita la quota di storage (permette cache illimitata)
 app.commandLine.appendSwitch('unlimited-storage');
 
 // ============================================
 // CONFIGURAZIONE SSL/TLS - Ignora errori certificati
 // ============================================
-
-// Ignora TUTTI gli errori di certificato SSL
 app.commandLine.appendSwitch('ignore-certificate-errors');
 app.commandLine.appendSwitch('ignore-ssl-errors', 'true');
 app.commandLine.appendSwitch('ignore-urlfetcher-cert-requests');
 app.commandLine.appendSwitch('allow-insecure-localhost');
-
-// Permetti contenuti misti (HTTP su HTTPS)
 app.commandLine.appendSwitch('allow-running-insecure-content');
-
-// Disabilita verifiche di sicurezza della rete
 app.commandLine.appendSwitch('disable-web-security');
 app.commandLine.appendSwitch('disable-site-isolation-trials');
-
-// Disabilita HSTS e altre protezioni che forzano HTTPS
-app.commandLine.appendSwitch('disable-features', 'BlockInsecurePrivateNetworkRequests,IsolateOrigins,site-per-process');
-
-// Usa configurazione TLS più permissiva
 app.commandLine.appendSwitch('ssl-version-min', 'tls1');
 app.commandLine.appendSwitch('cipher-suite-blacklist', '');
-
-// Disabilita certificate transparency
 app.commandLine.appendSwitch('disable-background-networking');
-
-// Riduci il logging degli errori SSL (non li elimina ma li rende meno verbosi)
-app.commandLine.appendSwitch('log-level', '3'); // 0=INFO, 1=WARNING, 2=LOG_ERROR, 3=FATAL only
+app.commandLine.appendSwitch('log-level', '3');
 
 // ============================================
 // CONFIGURAZIONE GOOGLE CAST
 // ============================================
-
-// Abilita le API Cast di Chrome
 app.commandLine.appendSwitch('load-media-router-component-extension', '1');
 app.commandLine.appendSwitch('enable-media-router');
-
-// Abilita discovery mDNS per trovare dispositivi Chromecast
 app.commandLine.appendSwitch('enable-local-file-accesses');
 
-// Abilita flags per Cast
-app.commandLine.appendSwitch('enable-features', 'MediaRouter,GlobalMediaControls,CastMediaRouteProvider');
-
 // ============================================
-// CONFIGURAZIONE PER LINUX/WAYLAND
+// GESTIONE FEATURES (ENABLE/DISABLE)
 // ============================================
 
+// Lista delle features da ABILITARE
+const enabledFeatures = [
+  'MediaRouter',
+  'GlobalMediaControls',
+  'CastMediaRouteProvider',
+  'PlatformHEVCDecoderSupport', // Supporto HEVC
+  'ProprietaryCodecs'           // Codec proprietari
+];
+
+// Lista delle features da DISABILITARE
+const disabledFeatures = [
+  'BlockInsecurePrivateNetworkRequests',
+  'IsolateOrigins',
+  'site-per-process',
+  'HardwareMediaKeyHandling'
+];
+
+// Configurazione specifica per Linux
 if (isLinux) {
-  // Forza X11 via XWayland - più stabile di Wayland nativo
   app.commandLine.appendSwitch('ozone-platform', 'x11');
-
-  // Disabilita solo il compositing GPU, non la GPU intera
   app.commandLine.appendSwitch('disable-gpu-compositing');
   app.commandLine.appendSwitch('disable-gpu-sandbox');
-
-  // Abilita accelerazione video hardware
   app.commandLine.appendSwitch('enable-accelerated-video-decode');
   app.commandLine.appendSwitch('ignore-gpu-blocklist');
+  
+  // Codec e VAAPI per Linux
+  enabledFeatures.push(
+    'VaapiVideoDecoder',
+    'VaapiVideoDecodeLinuxGL',
+    'VaapiIgnoreDriverChecks',
+    'UseChromeOSDirectVideoDecoder'
+  );
 
-  // IMPORTANTE: Abilita codec proprietari (HEVC/H.265)
-  // Questo è il flag chiave per abilitare i codec proprietari in Chromium
-  app.commandLine.appendSwitch('enable-features', 'PlatformHEVCDecoderSupport,VaapiVideoDecoder,VaapiVideoDecodeLinuxGL,VaapiIgnoreDriverChecks,UseChromeOSDirectVideoDecoder');
-
-  // Abilita FFmpeg per decodifica software come fallback
-  app.commandLine.appendSwitch('disable-features', 'HardwareMediaKeyHandling');
-
-  // Forza l'uso di FFmpeg per codec non supportati nativamente
-  // Questo permette la decodifica software HEVC se l'hardware non lo supporta
+  // Forza ffmpeg per decodifica software se HW fallisce
   app.commandLine.appendSwitch('enable-ffmpeg-video-decoding');
-
-  // Permetti codec proprietari
   app.commandLine.appendSwitch('enable-proprietary-codecs');
 }
 
-// Features per supporto codec - configurazione per Windows/Mac
-const baseFeatures = [
-  'PlatformHEVCDecoderSupport',  // Supporto HEVC del sistema
-];
-
-// Features per Windows
-const windowsFeatures = [
-  'MediaFoundationAsyncH264Encoding',
-  'MediaFoundationVideoCapture',
-  'MediaFoundationH264Encoding',
-  'MediaFoundationClearPlayback',
-];
-
-// Applica features solo per Windows/Mac (Linux configurato sopra)
-if (!isLinux) {
-  let enabledFeatures = [...baseFeatures];
-  if (process.platform === 'win32') {
-    enabledFeatures = [...enabledFeatures, ...windowsFeatures];
-  }
-  app.commandLine.appendSwitch('enable-features', enabledFeatures.join(','));
+// Configurazione specifica per Windows
+if (process.platform === 'win32') {
+  enabledFeatures.push(
+    'MediaFoundationAsyncH264Encoding',
+    'MediaFoundationVideoCapture',
+    'MediaFoundationH264Encoding',
+    'MediaFoundationClearPlayback'
+  );
 }
+
+// Applica le features accumulate
+app.commandLine.appendSwitch('enable-features', enabledFeatures.join(','));
+app.commandLine.appendSwitch('disable-features', disabledFeatures.join(','));
 
 // Variabile per tracciare tentativi di restart
 let gpuRestartAttempts = 0;

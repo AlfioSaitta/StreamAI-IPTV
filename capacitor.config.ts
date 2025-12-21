@@ -5,17 +5,39 @@ const config: CapacitorConfig = {
   appName: 'StreamAI IPTV',
   webDir: 'dist',
   android: {
-    allowMixedContent: true, // Permetti contenuti HTTP e HTTPS misti
+    allowMixedContent: true,
     captureInput: true,
-    webContentsDebuggingEnabled: true, // Per debug, rimuovere in produzione
+    webContentsDebuggingEnabled: true,
+  },
+  ios: {
+    contentInset: 'always',
+    allowsLinkPreview: false,
+    scrollEnabled: true,
+    limitsNavigationsToAppBoundDomains: false,
+    handleApplicationNotifications: true,
   },
   server: {
     androidScheme: 'https',
-    cleartext: true, // Permetti traffico HTTP per streaming
+    iosScheme: 'streamai', // Custom scheme per iOS per evitare problemi CORS/Mixed Content
+    cleartext: true,
+    allowNavigation: ['*'], // Permetti navigazione su qualsiasi dominio (necessario per stream esterni)
   },
   plugins: {
     CapacitorHttp: {
       enabled: true,
+    },
+    Keyboard: {
+      resize: 'body',
+      style: 'dark',
+      resizeOnFullScreen: true,
+    },
+    SplashScreen: {
+      launchShowDuration: 2000,
+      backgroundColor: "#141414",
+      showSpinner: true,
+      androidSpinnerStyle: "large",
+      iosSpinnerStyle: "small",
+      spinnerColor: "#e50914",
     },
   },
 };

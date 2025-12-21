@@ -1,10 +1,27 @@
 /**
  * Native Video Player Service
- * Su Android: apre il video con un player esterno (VLC, MX Player, ecc.) che supporta HEVC
+ * Su Android/iOS: usa capacitor-video-player (ExoPlayer/AVPlayer) interno all'app
  * Su altre piattaforme: fallback al player web
  */
 
 import { platformService } from './platformService';
+import { Capacitor } from '@capacitor/core';
+
+// Definizione interfaccia per il plugin (nel caso manchino i tipi)
+export interface CapacitorVideoPlayerPlugin {
+  initPlayer(options: { mode: string; url: string; playerId: string; componentTag: string; [key: string]: any }): Promise<{ result: boolean }>;
+  isPlaying(options: { playerId: string }): Promise<{ value: boolean }>;
+  play(options: { playerId: string }): Promise<{ result: boolean }>;
+  pause(options: { playerId: string }): Promise<{ result: boolean }>;
+  stop(options: { playerId: string }): Promise<{ result: boolean }>;
+  getDuration(options: { playerId: string }): Promise<{ value: number }>;
+  getCurrentTime(options: { playerId: string }): Promise<{ value: number }>;
+  setCurrentTime(options: { playerId: string; seektime: number }): Promise<{ result: boolean }>;
+  setVolume(options: { playerId: string; volume: number }): Promise<{ result: boolean }>;
+  setMuted(options: { playerId: string; muted: boolean }): Promise<{ result: boolean }>;
+  stopAllPlayers(): Promise<{ result: boolean }>;
+  addListener(eventName: string, listenerFunc: (data: any) => void): Promise<{ remove: () => void }>;
+}
 
 export interface NativePlayerOptions {
   url: string;
@@ -18,19 +35,29 @@ export interface NativePlayerOptions {
 }
 
 class NativeVideoPlayerService {
+  private plugin: any = null;
   private isNativeAvailable = false;
   private listeners: Map<string, ((data: any) => void)[]> = new Map();
+  private playerId = 'fullscreen-player';
+  private eventHandlers: any[] = [];
 
   async init(): Promise<boolean> {
-    // Il player nativo (intent esterno) è disponibile solo su Android
-    if (!platformService.isAndroid) {
+    if (!platformService.isNative) {
       console.log('[NativePlayer] Not available on this platform');
       return false;
     }
 
-    this.isNativeAvailable = true;
-    console.log('[NativePlayer] External player intent available on Android');
-    return true;
+    try {
+      // Import dinamico del plugin
+      const { CapacitorVideoPlayer } = await import('capacitor-video-player');
+      this.plugin = CapacitorVideoPlayer;
+      this.isNativeAvailable = true;
+      console.log('[NativePlayer] CapacitorVideoPlayer plugin loaded');
+      return true;
+    } catch (e) {
+      console.error('[NativePlayer] Failed to load capacitor-video-player:', e);
+      return false;
+    }
   }
 
   get isAvailable(): boolean {
@@ -38,86 +65,123 @@ class NativeVideoPlayerService {
   }
 
   /**
-   * Apre il video con un player esterno su Android
+   * Avvia la riproduzione con il player nativo interno
    */
   async play(options: NativePlayerOptions): Promise<boolean> {
-    if (!platformService.isAndroid) {
-      console.warn('[NativePlayer] Not on Android, cannot use external player');
-      return false;
+    if (!this.isNativeAvailable || !this.plugin) {
+      // Prova a inizializzare se non fatto
+      const initialized = await this.init();
+      if (!initialized) return false;
     }
 
     try {
-      console.log('[NativePlayer] Opening with external player:', options.url);
+      console.log('[NativePlayer] Starting internal native player:', options.url);
 
-      // Usa Capacitor App per aprire l'URL con un'app esterna
-      // L'utente può scegliere VLC, MX Player o altri player che supportano HEVC
-      const { App } = await import('@capacitor/app');
+      // Rimuovi listener precedenti
+      await this.cleanupListeners();
 
-      // Prova ad aprire con intent video
-      // Android mostrerà un chooser con le app video disponibili
-      const videoUrl = options.url;
+      // Configura listener
+      await this.setupListeners();
 
-      // Crea un intent URL per video
-      // Formato: intent://URL#Intent;type=video/*;end
-      const intentUrl = `intent://${videoUrl.replace(/^https?:\/\//, '')}#Intent;type=video/*;S.title=${encodeURIComponent(options.title || 'Video')};end`;
+      // Avvia il player in modalità fullscreen
+      const res = await this.plugin.initPlayer({
+        mode: 'fullscreen',
+        url: options.url,
+        playerId: this.playerId,
+        componentTag: 'div',
+        title: options.title || '',
+        subtitle: options.subtitle || '',
+        poster: options.poster || '',
+        autoPlay: options.autoplay !== false,
+        headers: options.headers,
+        chromecast: true, // Abilita supporto cast nativo se disponibile
+        pipEnabled: true, // Abilita PiP nativo
+      });
 
-      try {
-        await App.openUrl({ url: intentUrl });
-        this.emit('play', { url: options.url });
-        return true;
-      } catch {
-        // Fallback: apri direttamente l'URL (alcuni player lo gestiscono)
-        await App.openUrl({ url: videoUrl });
+      if (res && res.result) {
         this.emit('play', { url: options.url });
         return true;
       }
+      return false;
+
     } catch (error) {
-      console.error('[NativePlayer] Error opening external player:', error);
+      console.error('[NativePlayer] Error starting player:', error);
       this.emit('error', { error: String(error) });
       return false;
     }
   }
 
-  /**
-   * Non applicabile per player esterni
-   */
+  private async setupListeners() {
+    if (!this.plugin) return;
+
+    const add = async (event: string, handler: (data: any) => void) => {
+      const handle = await this.plugin.addListener(event, handler);
+      this.eventHandlers.push(handle);
+    };
+
+    // Eventi del player
+    await add('jeepCapVideoPlayerPlay', (data: any) => this.emit('play', data));
+    await add('jeepCapVideoPlayerPause', (data: any) => this.emit('pause', data));
+    await add('jeepCapVideoPlayerEnded', (data: any) => this.emit('ended', data));
+    await add('jeepCapVideoPlayerExit', (data: any) => this.emit('exit', data)); // Utente chiude il player
+    await add('jeepCapVideoPlayerReady', (data: any) => this.emit('ready', data));
+    await add('jeepCapVideoPlayerCurrentTime', (data: any) => this.emit('timeupdate', data));
+  }
+
+  private async cleanupListeners() {
+    for (const handler of this.eventHandlers) {
+      if (handler.remove) handler.remove();
+    }
+    this.eventHandlers = [];
+  }
+
   async pause(): Promise<void> {
-    // Non possiamo controllare player esterni
+    if (this.plugin) await this.plugin.pause({ playerId: this.playerId });
   }
 
   async resume(): Promise<void> {
-    // Non possiamo controllare player esterni
+    if (this.plugin) await this.plugin.play({ playerId: this.playerId });
   }
 
   async stop(): Promise<void> {
-    // Non possiamo controllare player esterni
+    if (this.plugin) {
+      await this.plugin.stop({ playerId: this.playerId });
+      // Su Android stop() potrebbe non chiudere il player fullscreen, usiamo stopAllPlayers per sicurezza
+      if (platformService.isAndroid) {
+        await this.plugin.stopAllPlayers();
+      }
+    }
   }
 
-  async seekTo(_seconds: number): Promise<void> {
-    // Non possiamo controllare player esterni
+  async seekTo(seconds: number): Promise<void> {
+    if (this.plugin) await this.plugin.setCurrentTime({ playerId: this.playerId, seektime: seconds });
   }
 
   async getCurrentTime(): Promise<number> {
+    if (this.plugin) {
+      const res = await this.plugin.getCurrentTime({ playerId: this.playerId });
+      return res.value;
+    }
     return 0;
   }
 
   async getDuration(): Promise<number> {
+    if (this.plugin) {
+      const res = await this.plugin.getDuration({ playerId: this.playerId });
+      return res.value;
+    }
     return 0;
   }
 
-  async setVolume(_volume: number): Promise<void> {
-    // Non possiamo controllare player esterni
+  async setVolume(volume: number): Promise<void> {
+    if (this.plugin) await this.plugin.setVolume({ playerId: this.playerId, volume });
   }
 
-  async setMuted(_muted: boolean): Promise<void> {
-    // Non possiamo controllare player esterni
+  async setMuted(muted: boolean): Promise<void> {
+    if (this.plugin) await this.plugin.setMuted({ playerId: this.playerId, muted });
   }
 
-  async isPlaying(): Promise<boolean> {
-    return false;
-  }
-
-  // Event emitter semplice
+  // Event emitter
   on(event: string, callback: (data: any) => void): void {
     if (!this.listeners.has(event)) {
       this.listeners.set(event, []);
@@ -143,6 +207,10 @@ class NativeVideoPlayerService {
   }
 
   async destroy(): Promise<void> {
+    await this.cleanupListeners();
+    if (this.plugin) {
+      await this.plugin.stopAllPlayers();
+    }
     this.listeners.clear();
   }
 }

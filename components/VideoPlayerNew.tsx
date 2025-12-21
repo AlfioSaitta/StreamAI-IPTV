@@ -1,6 +1,9 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import videojs from 'video.js';
 import 'video.js/dist/video-js.css';
+// import { AppLauncher } from '@capacitor/app-launcher'; // Rimosso perché non usato e causa errore di build
+
+
 import { Channel } from '../types';
 import { platformService } from '../services/platformService';
 import { nativeVideoPlayer } from '../services/nativeVideoPlayer';
@@ -9,7 +12,7 @@ import CastDevicePicker from './CastDevicePicker';
 import {
   AlertTriangle, Play, Pause, Volume2, VolumeX, Maximize, Minimize,
   SkipForward, SkipBack, List, X, FastForward, Rewind, RotateCcw,
-  PictureInPicture2, Loader2, Info, Cast, Tv, StopCircle
+  PictureInPicture2, Loader2, Info, Cast, Tv, StopCircle, ExternalLink
 } from 'lucide-react';
 import Player from 'video.js/dist/types/player';
 
@@ -77,10 +80,16 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   const [liveBitrate, setLiveBitrate] = useState<number | null>(null);
   const [networkSpeed, setNetworkSpeed] = useState<number | null>(null);
   const [seekIndicator, setSeekIndicator] = useState<{direction: 'left' | 'right', seconds: number} | null>(null);
+  const [isUsingNativePlayer, setIsUsingNativePlayer] = useState(false);
 
   // Cast state
   const [isCastLoading, setIsCastLoading] = useState(false);
   const [showDevicePicker, setShowDevicePicker] = useState(false);
+
+  // Playback speed state
+  const [playbackRate, setPlaybackRate] = useState(1);
+  const [showSpeedMenu, setShowSpeedMenu] = useState(false);
+  const playbackRates = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
   // Refs per timeout
   const controlsTimeoutRef = useRef<number | null>(null);
@@ -98,6 +107,27 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
     }
     return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
+  // Funzione per aprire il player esterno (VLC/MX Player)
+  const openExternalPlayer = async () => {
+    if (!channel?.url) return;
+    
+    // Mette in pausa il player interno
+    const videoEl = getVideoElement();
+    if (videoEl) videoEl.pause();
+    if (playerRef.current) playerRef.current.pause();
+    setIsPlaying(false);
+
+    try {
+      // Tenta di aprire l'URL con l'intent di sistema (Android chiederà quale app usare)
+      // await AppLauncher.openUrl({ url: channel.url });
+      // Fallback a window.open se AppLauncher non è disponibile
+      window.open(channel.url, '_system');
+    } catch (e) {
+      console.error("Errore apertura player esterno", e);
+      setError("Impossibile aprire il player esterno");
+    }
   };
 
   // Rileva informazioni sul codec
@@ -286,7 +316,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
 
   // Inizializza il player
   useEffect(() => {
-    if (!channel || !videoRef.current) return;
+    if (!channel) return;
 
     // Reset stato
     setError(null);
@@ -294,10 +324,44 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     setIsPlaying(false);
     setCurrentTime(0);
     setDuration(0);
+    setIsUsingNativePlayer(false);
 
     const source = channel.url;
     const isLive = channel.type === 'live';
     const srcLower = source.toLowerCase();
+
+    // === NATIVE PLAYER (ANDROID/IOS) HANDLING ===
+    if (platformService.isNative) {
+      console.log('[VideoPlayer] Native platform detected, using internal native player');
+      setIsUsingNativePlayer(true);
+      setIsBuffering(false);
+
+      const handlePlayerExit = () => {
+        console.log('[NativePlayer] Exit event received');
+        if (onBack) onBack();
+        nativeVideoPlayer.off('exit', handlePlayerExit);
+      };
+
+      nativeVideoPlayer.on('exit', handlePlayerExit);
+      
+      nativeVideoPlayer.play({
+        url: source,
+        title: channel.cleanName || channel.name || 'Video',
+        autoplay: true,
+        fullscreen: true,
+      }).then(success => {
+        if (!success) {
+          setError('Impossibile avviare il player nativo');
+        }
+      });
+      
+      return () => {
+        nativeVideoPlayer.off('exit', handlePlayerExit);
+      };
+    }
+
+    // === WEB / ELECTRON PLAYER HANDLING ===
+    if (!videoRef.current) return;
 
     // Determina se usare Video.js (per HLS/DASH) o player nativo (per file progressivi)
     const isHLS = srcLower.includes('.m3u8');
@@ -330,6 +394,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         fill: true,
         preload: 'auto',
         techOrder: ['html5'],
+        playbackRates: [0.5, 0.75, 1, 1.25, 1.5, 2], // Velocità di riproduzione
         html5: {
           vhs: {
             overrideNative: !platformService.isIOS,
@@ -339,6 +404,9 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
             handleManifestRedirects: true,
             maxPlaylistRetries: 5,
             bandwidth: 5000000,
+            useBandwidthFromLocalStorage: true,
+            limitRenditionByPlayerDimensions: true,
+            useDevicePixelRatio: true,
           },
           nativeVideoTracks: platformService.isIOS,
           nativeAudioTracks: platformService.isIOS,
@@ -361,6 +429,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
 
         player.ready(function(this: Player) {
           console.log('[VideoJS] Player ready');
+
           setupPlayerEvents(this);
         });
       } catch (err) {
@@ -535,10 +604,6 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
             break;
           case 3:
             errorMsg = 'Codec non supportato';
-            if (platformService.isAndroid) {
-              tryNativePlayer(channel!.url);
-              return;
-            }
             break;
           case 4:
             errorMsg = 'Formato non supportato';
@@ -651,19 +716,9 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
           break;
         case MediaError.MEDIA_ERR_DECODE:
           errorMsg = 'Codec non supportato';
-          // Prova player nativo su Android
-          if (platformService.isAndroid) {
-            tryNativePlayer(source);
-            return;
-          }
           break;
         case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
           errorMsg = 'Formato non supportato';
-          // Prova player nativo su Android
-          if (platformService.isAndroid) {
-            tryNativePlayer(source);
-            return;
-          }
           break;
       }
     }
@@ -672,36 +727,10 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     setIsBuffering(false);
   };
 
-  // Prova il player nativo Android (ExoPlayer)
-  const tryNativePlayer = async (source: string) => {
-    if (!platformService.isAndroid) return;
-
-    console.log('[Video] Trying native Android player...');
-    try {
-      const available = await nativeVideoPlayer.init();
-      if (available) {
-        const success = await nativeVideoPlayer.play({
-          url: source,
-          title: channel?.cleanName || channel?.name || 'Video',
-          autoplay: true,
-          fullscreen: true,
-        });
-        if (success) {
-          setIsBuffering(false);
-          return;
-        }
-      }
-    } catch (e) {
-      console.error('[Video] Native player failed:', e);
-    }
-    setError('Formato non supportato');
-  };
-
-
   // Gestione controlli visibilità
   useEffect(() => {
     const hideControls = () => {
-      if (isPlaying && !showPlaylist && !showStreamInfo && !showQualityMenu) {
+      if (isPlaying && !showPlaylist && !showStreamInfo && !showQualityMenu && !showSpeedMenu) {
         setShowControls(false);
       }
     };
@@ -729,7 +758,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         clearTimeout(controlsTimeoutRef.current);
       }
     };
-  }, [isPlaying, showPlaylist, showStreamInfo, showQualityMenu]);
+  }, [isPlaying, showPlaylist, showStreamInfo, showQualityMenu, showSpeedMenu]);
 
   // Gesture touch per mobile
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
@@ -816,6 +845,19 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         player.play();
       }
     }
+  };
+
+  // Cambia velocità di riproduzione
+  const changePlaybackRate = (rate: number) => {
+    const videoEl = getVideoElement();
+    if (videoEl) {
+      videoEl.playbackRate = rate;
+      setPlaybackRate(rate);
+    } else if (playerRef.current) {
+      playerRef.current.playbackRate(rate);
+      setPlaybackRate(rate);
+    }
+    setShowSpeedMenu(false);
   };
 
   const toggleMute = () => {
@@ -964,6 +1006,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
           break;
         case 'Escape':
           if (showQualityMenu) setShowQualityMenu(false);
+          else if (showSpeedMenu) setShowSpeedMenu(false);
           else if (showPlaylist) setShowPlaylist(false);
           else if (showStreamInfo) setShowStreamInfo(false);
           else if (onBack) onBack();
@@ -973,12 +1016,31 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [volume, showPlaylist, showStreamInfo, showQualityMenu, onBack]);
+  }, [volume, showPlaylist, showStreamInfo, showQualityMenu, showSpeedMenu, onBack]);
 
   if (!channel) {
     return (
       <div className="w-full h-full flex items-center justify-center bg-black">
         <p className="text-gray-400">Seleziona un canale</p>
+      </div>
+    );
+  }
+
+  // Se siamo su Android/iOS e stiamo usando il player nativo, mostra una UI di placeholder
+  if (isUsingNativePlayer) {
+    return (
+      <div className="relative w-full h-full bg-black flex flex-col items-center justify-center p-8 text-center">
+        <div className="mb-6 relative">
+          <div className="absolute inset-0 bg-blue-500/20 rounded-full animate-ping" style={{ animationDuration: '2s' }}></div>
+          <div className="relative bg-gradient-to-br from-blue-600 to-blue-800 p-6 rounded-full shadow-lg shadow-blue-500/30">
+            <Tv className="w-16 h-16 text-white" />
+          </div>
+        </div>
+        
+        <h2 className="text-2xl font-bold text-white mb-2">Riproduzione in corso...</h2>
+        <p className="text-gray-400 mb-8 max-w-md">
+          Il video è in riproduzione nel player nativo. Premi il tasto "Indietro" del dispositivo per tornare all'app.
+        </p>
       </div>
     );
   }
@@ -1168,9 +1230,9 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
                 </button>
                 <input
                   type="range"
-                  min={0}
-                  max={1}
-                  step={0.05}
+                  min="0"
+                  max="1"
+                  step="0.05"
                   value={isMuted ? 0 : volume}
                   onChange={handleVolumeChange}
                   className="w-20 h-1 bg-white/20 rounded-full appearance-none cursor-pointer"
@@ -1211,6 +1273,34 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
                 </div>
               )}
 
+              {/* Speed selector - solo per VOD */}
+              {channel.type !== 'live' && (
+                <div className="relative">
+                  <button
+                    onClick={() => setShowSpeedMenu(!showSpeedMenu)}
+                    className="px-2 py-1 rounded hover:bg-white/10 transition-colors text-white text-sm font-medium"
+                    title="Velocità di riproduzione"
+                  >
+                    {playbackRate === 1 ? '1x' : `${playbackRate}x`}
+                  </button>
+                  {showSpeedMenu && (
+                    <div className="absolute bottom-full right-0 mb-2 bg-black/95 rounded-lg border border-white/10 overflow-hidden min-w-[80px]">
+                      {playbackRates.map((rate) => (
+                        <button
+                          key={rate}
+                          onClick={() => changePlaybackRate(rate)}
+                          className={`w-full px-4 py-2 text-left text-sm hover:bg-white/10 transition-colors ${
+                            playbackRate === rate ? 'text-green-400' : 'text-white'
+                          }`}
+                        >
+                          {rate === 1 ? 'Normale' : `${rate}x`}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Reset progress */}
               {onResetProgress && channel.type !== 'live' && (
                 <button
@@ -1219,6 +1309,17 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
                   title="Ricomincia dall'inizio"
                 >
                   <RotateCcw className="w-5 h-5 text-white" />
+                </button>
+              )}
+
+              {/* External Player (VLC/MX) - Salvavita per compatibilità */}
+              {platformService.isNative && (
+                <button
+                  onClick={openExternalPlayer}
+                  className="p-2 rounded-full hover:bg-white/10 transition-colors"
+                  title="Apri con player esterno (VLC)"
+                >
+                  <ExternalLink className="w-5 h-5 text-white" />
                 </button>
               )}
 
@@ -1666,4 +1767,3 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
 };
 
 export default VideoPlayerNew;
-

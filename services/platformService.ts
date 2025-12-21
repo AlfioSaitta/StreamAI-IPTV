@@ -1,7 +1,9 @@
 /**
  * Platform Detection Service
- * Rileva la piattaforma corrente (Electron, Android/Capacitor, Web)
+ * Rileva la piattaforma corrente (Electron, Android/Capacitor, iOS/Capacitor, Web)
  */
+
+import { Capacitor } from '@capacitor/core';
 
 export type Platform = 'electron' | 'android' | 'ios' | 'web';
 
@@ -9,32 +11,33 @@ class PlatformService {
   private _platform: Platform = 'web';
   private _isInitialized = false;
 
-  async init(): Promise<void> {
+  constructor() {
+    this.init();
+  }
+
+  init(): void {
     if (this._isInitialized) return;
 
-    // Controlla se siamo in Electron
+    // 1. Controllo Electron (priorità alta)
     if (typeof window !== 'undefined' && (window as any).electronAPI?.isElectron) {
       this._platform = 'electron';
     }
-    // Controlla se siamo in Capacitor (Android/iOS)
-    else if (typeof window !== 'undefined' && (window as any).Capacitor) {
-      const Capacitor = (window as any).Capacitor;
-      if (Capacitor.isNativePlatform()) {
-        const platform = Capacitor.getPlatform();
-        if (platform === 'android') {
-          this._platform = 'android';
-        } else if (platform === 'ios') {
-          this._platform = 'ios';
-        }
+    // 2. Controllo Capacitor Nativo (Android/iOS)
+    else if (Capacitor.isNativePlatform()) {
+      const capPlatform = Capacitor.getPlatform();
+      if (capPlatform === 'android') {
+        this._platform = 'android';
+      } else if (capPlatform === 'ios') {
+        this._platform = 'ios';
       }
     }
-    // Altrimenti siamo in un browser web
+    // 3. Fallback Web
     else {
       this._platform = 'web';
     }
 
     this._isInitialized = true;
-    console.log('[Platform] Detected platform:', this._platform);
+    console.log(`[PlatformService] Initialized: ${this._platform} (Native: ${Capacitor.isNativePlatform()})`);
   }
 
   get platform(): Platform {
@@ -54,7 +57,7 @@ class PlatformService {
   }
 
   get isNative(): boolean {
-    return this._platform !== 'web';
+    return this._platform === 'android' || this._platform === 'ios';
   }
 
   get isWeb(): boolean {
@@ -67,25 +70,33 @@ class PlatformService {
 
   /**
    * Funzionalità disponibili per piattaforma
+   * Utile per abilitare/disabilitare feature nella UI
    */
   get capabilities() {
     return {
-      // Casting disponibile solo su Electron (per ora)
-      casting: this._platform === 'electron',
-      // Picture-in-Picture
-      pip: this._platform !== 'web' || document.pictureInPictureEnabled,
-      // Download locale
-      download: this._platform === 'electron',
-      // Fullscreen
+      // Casting: Electron (nativo Node), Mobile (Plugin futuro), Web (Chrome Cast SDK)
+      casting: this.isElectron || this.isWeb, 
+      
+      // Picture-in-Picture: Supportato su Desktop e Android recenti
+      pip: this.isElectron || (this.isWeb && document.pictureInPictureEnabled),
+      
+      // Download locale: Solo Electron per ora (filesystem access)
+      download: this.isElectron,
+      
+      // Fullscreen: Sempre true
       fullscreen: true,
+      
       // Storage persistente
       storage: true,
-      // Notifiche
-      notifications: this._platform !== 'web',
+      
+      // Player Nativo (ExoPlayer/AVPlayer) vs HTML5 Video
+      nativePlayer: this.isNative,
+      
+      // Haptic Feedback
+      haptics: this.isNative,
     };
   }
 }
 
 export const platformService = new PlatformService();
 export default platformService;
-

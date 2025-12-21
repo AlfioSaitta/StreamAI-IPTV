@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { App as CapacitorApp } from '@capacitor/app';
 import ChannelList from './components/ChannelList.tsx';
 import VideoPlayer from './components/VideoPlayerNew.tsx';
 import AIRecommender from './components/AIRecommender.tsx';
@@ -16,6 +17,7 @@ import { CacheService } from './services/cacheService.ts';
 import { i18n } from './services/i18n.ts';
 import { Category, Channel, XtreamCredentials, StreamType, Profile } from './types.ts';
 import { Server } from 'lucide-react';
+import { platformService } from './services/platformService.ts';
 
 function App() {
   const [activeProfile, setActiveProfile] = useState<Profile | null>(null);
@@ -41,10 +43,85 @@ function App() {
   // Focus Restoration State
   const [lastFocusedChannelId, setLastFocusedChannelId] = useState<string | null>(null);
 
+  // Refs per gestire il tasto Back su Android senza problemi di closure
+  const stateRef = useRef({
+    currentChannel,
+    selectedSeries,
+    selectedMovie,
+    showSettings,
+    showXtreamModal,
+    activeTab,
+    activeProfile
+  });
+
+  // Aggiorna i ref quando lo stato cambia
+  useEffect(() => {
+    stateRef.current = {
+      currentChannel,
+      selectedSeries,
+      selectedMovie,
+      showSettings,
+      showXtreamModal,
+      activeTab,
+      activeProfile
+    };
+  }, [currentChannel, selectedSeries, selectedMovie, showSettings, showXtreamModal, activeTab, activeProfile]);
+
+  // Gestione Tasto Back (Android Hardware Button)
+  useEffect(() => {
+    if (!platformService.isNative) return;
+
+    const handleBackButton = async () => {
+      const state = stateRef.current;
+
+      // 1. Chiudi Player Video
+      if (state.currentChannel) {
+        setCurrentChannel(null);
+        return;
+      }
+
+      // 2. Chiudi Modali/Dettagli
+      if (state.selectedMovie) {
+        setSelectedMovie(null);
+        return;
+      }
+      if (state.selectedSeries) {
+        setSelectedSeries(null);
+        return;
+      }
+      if (state.showSettings) {
+        setShowSettings(false);
+        return;
+      }
+      if (state.showXtreamModal && state.activeProfile?.xtreamCreds) {
+        // Chiudi modale login solo se abbiamo già credenziali (annulla modifica)
+        setShowXtreamModal(false);
+        return;
+      }
+
+      // 3. Navigazione Tab
+      if (state.activeTab !== 'home') {
+        setActiveTab('home');
+        return;
+      }
+
+      // 4. Logout Profilo (se siamo nella home) o Uscita App
+      // Se siamo nella root (Home), chiediamo conferma o usciamo
+      // Per ora usciamo dall'app come comportamento standard Android
+      CapacitorApp.exitApp();
+    };
+
+    const listener = CapacitorApp.addListener('backButton', handleBackButton);
+
+    return () => {
+      listener.then(l => l.remove());
+    };
+  }, []);
 
   // Initialize Cache Persistence
   useEffect(() => {
     CacheService.init();
+    platformService.init();
   }, []);
 
 
