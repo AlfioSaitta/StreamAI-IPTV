@@ -318,6 +318,39 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onBack, onPr
               onChange={(v) => handlePreferenceChange('aiCaching', v)}
             />
           </div>
+
+          <div className="border-t border-white/10 my-6" />
+
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <ShieldCheck className="w-5 h-5 text-gray-400" />
+                <div>
+                  <h3 className="font-medium text-white">{t.geminiApiKey}</h3>
+                  <p className="text-sm text-gray-400 mt-1">{t.geminiApiKeyDesc}</p>
+                </div>
+              </div>
+            </div>
+            
+            <div className="flex flex-col gap-3">
+              <input
+                type="password"
+                value={preferences.geminiApiKey || ''}
+                onChange={(e) => handlePreferenceChange('geminiApiKey', e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:border-purple-500 focus:outline-none transition-colors font-mono text-sm"
+                placeholder="AIza..."
+              />
+              <a 
+                href="https://aistudio.google.com/app/apikey" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="text-xs text-purple-400 hover:text-purple-300 transition-colors flex items-center gap-1 w-fit"
+              >
+                <Globe className="w-3 h-3" />
+                {t.getApiKeyLink}
+              </a>
+            </div>
+          </div>
         </section>
 
         {/* Playback & Debug Settings */}

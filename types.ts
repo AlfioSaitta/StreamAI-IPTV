@@ -56,6 +56,7 @@ export interface ProfilePreferences {
   aiCaching: boolean; // Enable/Disable Gemini Response Caching
   debugOverlay: boolean; // Show network speed and debug info in player
   theme?: 'dark' | 'oled';
+  geminiApiKey?: string; // Custom API Key provided by user
 }
 
 export interface Profile {

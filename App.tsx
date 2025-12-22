@@ -518,6 +518,7 @@ function App() {
               activeTab={activeTab}
               history={activeProfile.history}
               aiCaching={activeProfile.preferences?.aiCaching}
+              geminiApiKey={activeProfile.preferences?.geminiApiKey}
             />
         )}
 

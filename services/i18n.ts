@@ -91,6 +91,9 @@ export interface Translations {
   aiSettings: string;
   aiCaching: string;
   aiCachingDesc: string;
+  geminiApiKey: string;
+  geminiApiKeyDesc: string;
+  getApiKeyLink: string;
   debugOverlay: string;
   debugOverlayDesc: string;
   appearance: string;
@@ -217,6 +220,9 @@ const translations: Record<SupportedLanguage, Translations> = {
     aiSettings: 'Intelligenza Artificiale',
     aiCaching: 'Cache Risposte AI',
     aiCachingDesc: 'Salva le risposte di Gemini per risparmiare tempo e dati',
+    geminiApiKey: 'Google Gemini API Key',
+    geminiApiKeyDesc: 'Usa la tua chiave personale per evitare limiti di quota',
+    getApiKeyLink: 'Ottieni una chiave gratuita su Google AI Studio',
     debugOverlay: 'Info Debug Network',
     debugOverlayDesc: 'Mostra velocità di rete e stato buffering nel player',
     appearance: 'Aspetto',
@@ -342,6 +348,9 @@ const translations: Record<SupportedLanguage, Translations> = {
     aiSettings: 'Artificial Intelligence',
     aiCaching: 'AI Response Cache',
     aiCachingDesc: 'Save Gemini responses to save time and data',
+    geminiApiKey: 'Google Gemini API Key',
+    geminiApiKeyDesc: 'Use your personal key to avoid quota limits',
+    getApiKeyLink: 'Get a free key at Google AI Studio',
     debugOverlay: 'Network Debug Info',
     debugOverlayDesc: 'Show network speed and buffering status in the player',
     appearance: 'Appearance',

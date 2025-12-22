@@ -15,13 +15,20 @@ const apiKey = getApiKey();
 
 // Lazy load del modulo Gemini
 let aiInstance: any = null;
-const getAI = async () => {
-  if (aiInstance) return aiInstance;
+let currentKey: string | null = null;
+
+const getAI = async (customApiKey?: string) => {
+  const activeKey = customApiKey || apiKey;
+  
+  // Se la chiave è cambiata, ricrea l'istanza
+  if (aiInstance && currentKey === activeKey) return aiInstance;
+  
   try {
     const { GoogleGenAI } = await import("@google/genai");
     aiInstance = new GoogleGenAI({ 
-      apiKey
+      apiKey: activeKey
     });
+    currentKey = activeKey;
     return aiInstance;
   } catch (e) {
     console.warn("Impossibile caricare Gemini AI:", e);
@@ -34,7 +41,8 @@ export const getRecommendations = async (
   userPreference: string,
   context: StreamType = 'live',
   history: WatchHistoryItem[] = [],
-  useCache: boolean = true
+  useCache: boolean = true,
+  customApiKey?: string
 ): Promise<Recommendation[]> => {
   // 0. Check Cache
   const cacheKey = `ai_recommend_${context}_${userPreference.toLowerCase().trim()}`;
@@ -50,11 +58,11 @@ export const getRecommendations = async (
     }
   }
 
-  const ai = await getAI();
+  const ai = await getAI(customApiKey);
 
-  if (!ai || !apiKey) {
+  if (!ai || (!apiKey && !customApiKey)) {
     return [
-      { channelName: "Errore", reason: "Servizio AI non disponibile." }
+      { channelName: "Errore", reason: "Servizio AI non disponibile o API Key mancante." }
     ];
   }
 
