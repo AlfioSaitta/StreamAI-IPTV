@@ -51,9 +51,9 @@ const formatTime = (seconds: number): string => {
     : `${m}:${s.toString().padStart(2, '0')}`;
 };
 
-// --- SUB-COMPONENTS ---
+// --- SUB-COMPONENTS (Defined as functions to prevent ReferenceError in prod builds) ---
 
-const CastOverlay = memo(({ session, channel }: { session: any, channel: Channel | null }) => {
+function CastOverlayComponent({ session, channel }: { session: any, channel: Channel | null }) {
   if (!session.isConnected) return null;
   
   return (
@@ -138,61 +138,68 @@ const CastOverlay = memo(({ session, channel }: { session: any, channel: Channel
       </button>
     </div>
   );
-});
+}
+const CastOverlay = memo(CastOverlayComponent);
 
-const StreamInfoOverlay = memo(({ info, bitrate, networkSpeed, onClose, currentQuality }: any) => (
-  <div className="absolute top-16 right-4 w-80 bg-black/90 backdrop-blur border border-white/10 rounded-xl z-40 overflow-hidden max-h-[80vh] overflow-y-auto animate-fade-in">
-    <div className="p-4 border-b border-white/10 flex items-center justify-between sticky top-0 bg-black/90">
-      <h3 className="font-bold text-white">Info Stream</h3>
-      <button onClick={onClose} className="p-1 hover:bg-white/10 rounded"><X className="w-5 h-5 text-white" /></button>
-    </div>
-    <div className="p-4 space-y-4 text-sm">
-      <div className="bg-white/5 rounded-lg p-3">
-        <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">Qualità</h4>
-        <div className="flex justify-between items-center">
-          <span className="text-white font-medium">{currentQuality}</span>
-          {bitrate && <span className="text-green-400">{(bitrate / 1000000).toFixed(2)} Mbps</span>}
+function StreamInfoOverlayComponent({ info, bitrate, networkSpeed, onClose, currentQuality }: any) {
+  return (
+    <div className="absolute top-16 right-4 w-80 bg-black/90 backdrop-blur border border-white/10 rounded-xl z-40 overflow-hidden max-h-[80vh] overflow-y-auto animate-fade-in">
+      <div className="p-4 border-b border-white/10 flex items-center justify-between sticky top-0 bg-black/90">
+        <h3 className="font-bold text-white">Info Stream</h3>
+        <button onClick={onClose} className="p-1 hover:bg-white/10 rounded"><X className="w-5 h-5 text-white" /></button>
+      </div>
+      <div className="p-4 space-y-4 text-sm">
+        <div className="bg-white/5 rounded-lg p-3">
+          <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">Qualità</h4>
+          <div className="flex justify-between items-center">
+            <span className="text-white font-medium">{currentQuality}</span>
+            {bitrate && <span className="text-green-400">{(bitrate / 1000000).toFixed(2)} Mbps</span>}
+          </div>
+        </div>
+        <div className="bg-white/5 rounded-lg p-3 space-y-2">
+          <h4 className="text-xs font-semibold text-gray-400 uppercase">Video</h4>
+          <div className="flex justify-between"><span className="text-gray-400">Codec</span><span className="text-white">{info?.videoCodec || 'N/A'}</span></div>
+          <div className="flex justify-between"><span className="text-gray-400">Res</span><span className="text-white">{info?.width ? `${info.width}×${info.height}` : 'N/A'}</span></div>
+          {info?.frameRate && <div className="flex justify-between"><span className="text-gray-400">FPS</span><span className="text-white">{info.frameRate}</span></div>}
+        </div>
+        <div className="bg-white/5 rounded-lg p-3 space-y-2">
+          <h4 className="text-xs font-semibold text-gray-400 uppercase">Audio</h4>
+          <div className="flex justify-between"><span className="text-gray-400">Codec</span><span className="text-white">{info?.audioCodec || 'N/A'}</span></div>
+        </div>
+        <div className="bg-white/5 rounded-lg p-3 space-y-2">
+          <h4 className="text-xs font-semibold text-gray-400 uppercase">Rete</h4>
+          <div className="flex justify-between"><span className="text-gray-400">Proto</span><span className="text-white">{info?.protocol || 'N/A'}</span></div>
+          {networkSpeed && <div className="flex justify-between"><span className="text-gray-400">Speed</span><span className="text-white">{(networkSpeed / 1000000).toFixed(2)} Mbps</span></div>}
         </div>
       </div>
-      <div className="bg-white/5 rounded-lg p-3 space-y-2">
-        <h4 className="text-xs font-semibold text-gray-400 uppercase">Video</h4>
-        <div className="flex justify-between"><span className="text-gray-400">Codec</span><span className="text-white">{info?.videoCodec || 'N/A'}</span></div>
-        <div className="flex justify-between"><span className="text-gray-400">Res</span><span className="text-white">{info?.width ? `${info.width}×${info.height}` : 'N/A'}</span></div>
-        {info?.frameRate && <div className="flex justify-between"><span className="text-gray-400">FPS</span><span className="text-white">{info.frameRate}</span></div>}
-      </div>
-      <div className="bg-white/5 rounded-lg p-3 space-y-2">
-        <h4 className="text-xs font-semibold text-gray-400 uppercase">Audio</h4>
-        <div className="flex justify-between"><span className="text-gray-400">Codec</span><span className="text-white">{info?.audioCodec || 'N/A'}</span></div>
-      </div>
-      <div className="bg-white/5 rounded-lg p-3 space-y-2">
-        <h4 className="text-xs font-semibold text-gray-400 uppercase">Rete</h4>
-        <div className="flex justify-between"><span className="text-gray-400">Proto</span><span className="text-white">{info?.protocol || 'N/A'}</span></div>
-        {networkSpeed && <div className="flex justify-between"><span className="text-gray-400">Speed</span><span className="text-white">{(networkSpeed / 1000000).toFixed(2)} Mbps</span></div>}
-      </div>
     </div>
-  </div>
-));
+  );
+}
+const StreamInfoOverlay = memo(StreamInfoOverlayComponent);
 
-const PlaylistOverlay = memo(({ playlist, currentId, onSelect, onClose }: any) => (
-  <div className="absolute top-0 right-0 bottom-0 w-80 bg-black/95 backdrop-blur z-40 flex flex-col animate-fade-in border-l border-white/10">
-    <div className="p-4 border-b border-white/10 flex items-center justify-between">
-      <h3 className="font-bold text-white">Playlist</h3>
-      <button onClick={onClose} className="p-1 hover:bg-white/10 rounded"><X className="w-5 h-5 text-white" /></button>
+function PlaylistOverlayComponent({ playlist, currentId, onSelect, onClose }: any) {
+  return (
+    <div className="absolute top-0 right-0 bottom-0 w-80 bg-black/95 backdrop-blur z-40 flex flex-col animate-fade-in border-l border-white/10">
+      <div className="p-4 border-b border-white/10 flex items-center justify-between">
+        <h3 className="font-bold text-white">Playlist</h3>
+        <button onClick={onClose} className="p-1 hover:bg-white/10 rounded"><X className="w-5 h-5 text-white" /></button>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {playlist.map((item: Channel) => (
+          <button
+            key={item.id}
+            onClick={() => { onSelect(item); onClose(); }}
+            className={`w-full p-3 flex items-center gap-3 hover:bg-white/10 transition-colors border-b border-white/5 ${item.id === currentId ? 'bg-white/20' : ''}`}
+          >
+            {item.logo ? <img src={item.logo} alt="" className="w-10 h-10 object-contain rounded bg-black" /> : <div className="w-10 h-10 bg-gray-700 rounded flex items-center justify-center text-xs text-gray-400">TV</div>}
+            <span className="text-white text-sm truncate text-left">{item.cleanName || item.name}</span>
+          </button>
+        ))}
+      </div>
     </div>
-    <div className="flex-1 overflow-y-auto">
-      {playlist.map((item: Channel) => (
-        <button
-          key={item.id}
-          onClick={() => { onSelect(item); onClose(); }}
-          className={`w-full p-3 flex items-center gap-3 hover:bg-white/10 transition-colors border-b border-white/5 ${item.id === currentId ? 'bg-white/20' : ''}`}
-        >
-          {item.logo ? <img src={item.logo} alt="" className="w-10 h-10 object-contain rounded bg-black" /> : <div className="w-10 h-10 bg-gray-700 rounded flex items-center justify-center text-xs text-gray-400">TV</div>}
-          <span className="text-white text-sm truncate text-left">{item.cleanName || item.name}</span>
-        </button>
-      ))}
-    </div>
-  </div>
-));
+  );
+}
+const PlaylistOverlay = memo(PlaylistOverlayComponent);
 
 // --- MAIN COMPONENT ---
 
@@ -380,22 +387,24 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       isPlaying: false, isBuffering: true, currentTime: 0, duration: 0,
       volume: 1, isMuted: false, isFullscreen: false, buffered: 0, error: null
     });
-    setUiState(prev => ({ ...prev, isUsingNativePlayer: false, showNextButton: false }));
+    updateUi({ isUsingNativePlayer: false, showNextButton: false });
     
     const source = channel.url;
     const isLive = channel.type === 'live';
 
     // Native Player (Android/iOS)
     if (platformService.isNative) {
-      console.log('[VideoPlayer] Using Native Player');
+      console.log('[VideoPlayer] Piattaforma nativa, uso ExoPlayer/AVPlayer');
       updateUi({ isUsingNativePlayer: true });
       updateState({ isBuffering: false });
 
-      const handleExit = () => {
+      const handlePlayerExit = () => {
+        console.log('[NativePlayer] Evento di uscita ricevuto');
         if (onBack) onBack();
-        nativeVideoPlayer.off('exit', handleExit);
+        nativeVideoPlayer.off('exit', handlePlayerExit);
       };
-      nativeVideoPlayer.on('exit', handleExit);
+
+      nativeVideoPlayer.on('exit', handlePlayerExit);
       
       nativeVideoPlayer.play({
         url: source,
@@ -406,7 +415,9 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         if (!success) updateState({ error: 'Impossibile avviare il player nativo' });
       });
       
-      return () => nativeVideoPlayer.off('exit', handleExit);
+      return () => {
+        nativeVideoPlayer.off('exit', handlePlayerExit);
+      };
     }
 
     // Web/Electron Player
@@ -467,28 +478,24 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   // --- EVENT BINDING ---
 
   const bindEvents = (player: Player | null, videoEl: HTMLVideoElement, isVJS: boolean) => {
-    const onPlay = () => { updateState({ isPlaying: true, isBuffering: false }); };
+    const onPlay = () => updateState({ isPlaying: true, isBuffering: false });
     const onPause = () => updateState({ isPlaying: false });
     const onWaiting = () => updateState({ isBuffering: true });
-    const onPlaying = () => {
-      updateState({ isBuffering: false, isPlaying: true });
-      setTimeout(() => extractCodecInfo(videoEl, player || undefined), 1000);
-      if (isVJS && !statsIntervalRef.current) {
-        statsIntervalRef.current = window.setInterval(updateLiveStats, 2000);
-      }
-    };
     
     const onTimeUpdate = () => {
       const ct = isVJS ? player!.currentTime() : videoEl.currentTime;
       const dur = isVJS ? player!.duration() : videoEl.duration;
       
-      updateState({ currentTime: ct || 0 });
+      // FIX: Forza isBuffering a false se il tempo avanza
+      if (ct > 0) {
+        updateState({ currentTime: ct || 0, isBuffering: false });
+      } else {
+        updateState({ currentTime: ct || 0 });
+      }
       
-      // Next Episode Logic
       if (onNext && dur > 0 && dur - ct < 45) updateUi({ showNextButton: true });
       else updateUi({ showNextButton: false });
 
-      // Progress Callback
       const now = Date.now();
       if (onProgress && dur > 0 && (now - lastProgressUpdate.current > 5000)) {
         lastProgressUpdate.current = now;
@@ -500,7 +507,6 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       const dur = isVJS ? player!.duration() : videoEl.duration;
       if (isFinite(dur)) updateState({ duration: dur });
 
-      // Resume Logic
       if (initialProgress && initialProgress > 0 && initialProgress < 0.95 && channel?.type !== 'live') {
         const resumeTime = dur * initialProgress;
         if (resumeTime > 30 && resumeTime < dur - 60) {
@@ -510,32 +516,14 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         }
       }
       
-      // Auto-start after seek
       if (isVJS) player!.play();
       else videoEl.play().catch(e => {
         if (e.name !== 'NotAllowedError') console.warn('Autoplay failed', e);
       });
     };
 
-    const onProgressEvt = () => {
-      let buf = 0;
-      if (isVJS) {
-        const b = player!.buffered();
-        if (b.length) buf = (b.end(b.length - 1) / (player!.duration() || 1)) * 100;
-      } else {
-        if (videoEl.buffered.length) buf = (videoEl.buffered.end(videoEl.buffered.length - 1) / (videoEl.duration || 1)) * 100;
-      }
-      updateState({ buffered: buf });
-    };
-
-    const onError = () => {
-      const err = isVJS ? player!.error() : videoEl.error;
-      console.error('[Player] Error:', err);
-      updateState({ error: 'Errore di riproduzione', isBuffering: false });
-    };
-
     const onEnded = () => {
-      if (onProgress && duration) onProgress(1, duration);
+      if (onProgress && state.duration) onProgress(1, state.duration);
       if (onNext) onNext();
     };
 
@@ -543,23 +531,18 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       player.on('play', onPlay);
       player.on('pause', onPause);
       player.on('waiting', onWaiting);
-      player.on('playing', onPlaying);
       player.on('timeupdate', onTimeUpdate);
       player.on('loadedmetadata', onLoadedMetadata);
-      player.on('progress', onProgressEvt);
       player.on('ended', onEnded);
-      player.on('error', onError);
-      player.on('fullscreenchange', () => updateState({ isFullscreen: player.isFullscreen() }));
+      player.on('error', () => updateState({ error: 'Errore di riproduzione', isBuffering: false }));
     } else {
       videoEl.onplay = onPlay;
       videoEl.onpause = onPause;
       videoEl.onwaiting = onWaiting;
-      videoEl.onplaying = onPlaying;
       videoEl.ontimeupdate = onTimeUpdate;
       videoEl.onloadedmetadata = onLoadedMetadata;
-      videoEl.onprogress = onProgressEvt;
       videoEl.onended = onEnded;
-      videoEl.onerror = onError;
+      videoEl.onerror = () => updateState({ error: 'Errore di riproduzione', isBuffering: false });
     }
   };
 
@@ -643,7 +626,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
           <div className="relative bg-gradient-to-br from-blue-600 to-blue-800 p-6 rounded-full shadow-lg shadow-blue-500/30"><Tv className="w-16 h-16 text-white" /></div>
         </div>
         <h2 className="text-2xl font-bold text-white mb-2">Riproduzione in corso...</h2>
-        <p className="text-gray-400 mb-8 max-w-md">Il video è in riproduzione nel player nativo.</p>
+        <p className="text-gray-400 mb-8 max-w-md">Il video è in riproduzione nel player nativo. Premi il tasto "Indietro" del dispositivo per tornare all'app.</p>
       </div>
     );
   }
@@ -674,15 +657,6 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         </div>
       )}
 
-      {seekIndicator && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-40">
-          <div className="bg-black/70 rounded-full px-4 py-2 flex items-center gap-2">
-            {seekIndicator.direction === 'left' ? <Rewind className="w-6 h-6 text-white" /> : <FastForward className="w-6 h-6 text-white" />}
-            <span className="text-white text-lg font-medium">{seekIndicator.seconds}s</span>
-          </div>
-        </div>
-      )}
-
       <CastOverlay session={castSession} channel={channel} />
 
       {uiState.showStreamInfo && <StreamInfoOverlay info={codecInfo} bitrate={liveStats.bitrate} networkSpeed={liveStats.networkSpeed} currentQuality={currentQuality} onClose={() => updateUi({ showStreamInfo: false })} />}
@@ -701,7 +675,6 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
 
       {/* CONTROLS BAR */}
       <div className={`absolute inset-0 z-30 transition-opacity duration-300 ${uiState.showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-        {/* Top Bar */}
         <div className="absolute top-0 left-0 right-0 p-4 bg-gradient-to-b from-black/80 to-transparent flex justify-between items-center">
           <div className="flex items-center gap-4">
             <button onClick={onBack} className="p-2 rounded-full bg-white/10 hover:bg-white/20"><X className="w-6 h-6 text-white" /></button>
