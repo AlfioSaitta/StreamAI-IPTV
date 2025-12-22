@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { FixedSizeList as List } from 'react-window';
 import { Category, Channel, StreamType, WatchHistoryItem } from '../types.ts';
 import { Search, Play, Info, ChevronRight, LogOut, Clock, RefreshCw, BookmarkPlus, BookmarkCheck, Settings, X } from 'lucide-react';
 import CachedImage from './CachedImage.tsx';
@@ -28,6 +29,98 @@ interface ChannelListProps {
   onShowDetails: (channel: Channel) => void;
 }
 
+// --- CHANNEL ITEM COMPONENT ---
+const ChannelItem = React.memo(({ 
+    channel, 
+    onSelect, 
+    isPoster, 
+    progress, 
+    isInWatchlist, 
+    onToggleWatchlist, 
+    onShowDetails 
+}: { 
+    channel: Channel, 
+    onSelect: (c: Channel) => void, 
+    isPoster: boolean, 
+    progress?: number, 
+    isInWatchlist?: boolean, 
+    onToggleWatchlist?: (c: Channel) => void, 
+    onShowDetails?: (c: Channel) => void 
+}) => {
+    return (
+        <button 
+            id={`channel-${channel.id}`}
+            onClick={() => {
+                if (channel.type === 'movie' && onShowDetails) {
+                    onShowDetails(channel);
+                } else {
+                    onSelect(channel);
+                }
+            }}
+            className={`
+                tv-focus flex-none relative rounded-md overflow-hidden bg-[#202020] shadow-lg transition-transform duration-300 group/card outline-none
+                ${isPoster ? 'w-[150px] md:w-[180px] aspect-[2/3]' : 'w-[240px] md:w-[300px] aspect-[16/9]'}
+            `}
+            tabIndex={0}
+        >
+            {onToggleWatchlist && (
+                <div
+                    onClick={(e) => { e.stopPropagation(); onToggleWatchlist(channel); }}
+                    className="absolute top-2 right-2 z-20 bg-black/60 text-white rounded-full p-2 hover:bg-black/80 border border-white/10 shadow-lg cursor-pointer"
+                    role="button"
+                    aria-label={isInWatchlist ? 'Rimuovi dalla lista' : 'Aggiungi alla lista'}
+                >
+                    {isInWatchlist ? (
+                        <BookmarkCheck className="w-4 h-4" />
+                    ) : (
+                        <BookmarkPlus className="w-4 h-4" />
+                    )}
+                </div>
+            )}
+
+            {onShowDetails && channel.type === 'movie' && (
+                <div
+                    onClick={(e) => { e.stopPropagation(); onShowDetails(channel); }}
+                    className="absolute bottom-2 left-2 z-20 bg-black/70 text-white rounded-full p-2 hover:bg-black/90 border border-white/10 shadow-lg cursor-pointer"
+                    role="button"
+                    aria-label="Altre info"
+                >
+                    <Info className="w-4 h-4" />
+                </div>
+            )}
+
+            {channel.logo ? (
+                <CachedImage 
+                    src={channel.logo} 
+                    alt={channel.name} 
+                    className="w-full h-full object-cover transition-transform duration-500 group-hover/card:scale-110" 
+                />
+            ) : (
+                <div className="w-full h-full flex items-center justify-center text-gray-600 font-bold p-2 text-center text-sm">
+                    {channel.name}
+                </div>
+            )}
+            
+            <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent opacity-0 group-hover/card:opacity-100 group-focus/card:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-3 text-left">
+                <h4 className="text-white font-bold text-sm drop-shadow-md line-clamp-2 leading-snug">{channel.cleanName || channel.name}</h4>
+            </div>
+
+            {progress ? (
+                <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-black/50">
+                    <div 
+                        className="h-full bg-red-600" 
+                        style={{ width: `${Math.min(100, Math.max(0, progress * 100))}%` }}
+                    />
+                </div>
+            ) : null}
+        </button>
+    );
+}, (prev, next) => (
+    prev.channel.id === next.channel.id && 
+    prev.progress === next.progress && 
+    prev.isInWatchlist === next.isInWatchlist
+));
+
 // Memoized Content Row
 const ContentRow = React.memo(({ title, channels, onSelect, isPoster, progressMap, watchlistSet, onToggleWatchlist, onShowDetails }: { title: string, channels: Channel[], onSelect: (c: Channel) => void, isPoster: boolean, progressMap?: Record<string, { progress: number, duration?: number }>, watchlistSet?: Set<string>, onToggleWatchlist?: (c: Channel) => void, onShowDetails?: (c: Channel) => void }) => {
     const rowRef = useRef<HTMLDivElement>(null);
@@ -46,73 +139,16 @@ const ContentRow = React.memo(({ title, channels, onSelect, isPoster, progressMa
                     className="flex gap-4 overflow-x-auto no-scrollbar scroll-smooth px-1 py-4"
                 >
                     {channels.map((channel) => (
-                        <button 
+                        <ChannelItem 
                             key={channel.id}
-                            id={`channel-${channel.id}`}
-                            onClick={() => {
-                                if (channel.type === 'movie' && onShowDetails) {
-                                    onShowDetails(channel);
-                                } else {
-                                    onSelect(channel);
-                                }
-                            }}
-                            className={`
-                                tv-focus flex-none relative rounded-md overflow-hidden bg-[#202020] shadow-lg transition-transform duration-300 group/card outline-none
-                                ${isPoster ? 'w-[150px] md:w-[180px] aspect-[2/3]' : 'w-[240px] md:w-[300px] aspect-[16/9]'}
-                            `}
-                            tabIndex={0}
-                        >
-                            {onToggleWatchlist && (
-                                <div
-                                    onClick={(e) => { e.stopPropagation(); onToggleWatchlist(channel); }}
-                                    className="absolute top-2 right-2 z-20 bg-black/60 text-white rounded-full p-2 hover:bg-black/80 border border-white/10 shadow-lg cursor-pointer"
-                                    role="button"
-                                    aria-label={watchlistSet?.has(channel.id) ? 'Rimuovi dalla lista' : 'Aggiungi alla lista'}
-                                >
-                                    {watchlistSet?.has(channel.id) ? (
-                                        <BookmarkCheck className="w-4 h-4" />
-                                    ) : (
-                                        <BookmarkPlus className="w-4 h-4" />
-                                    )}
-                                </div>
-                            )}
-
-                            {onShowDetails && channel.type === 'movie' && (
-                                <div
-                                    onClick={(e) => { e.stopPropagation(); onShowDetails(channel); }}
-                                    className="absolute bottom-2 left-2 z-20 bg-black/70 text-white rounded-full p-2 hover:bg-black/90 border border-white/10 shadow-lg cursor-pointer"
-                                    role="button"
-                                    aria-label="Altre info"
-                                >
-                                    <Info className="w-4 h-4" />
-                                </div>
-                            )}
-
-                            {channel.logo ? (
-                                <CachedImage 
-                                    src={channel.logo} 
-                                    alt={channel.name} 
-                                    className="w-full h-full object-cover transition-transform duration-500 group-hover/card:scale-110" 
-                                />
-                            ) : (
-                                <div className="w-full h-full flex items-center justify-center text-gray-600 font-bold p-2 text-center text-sm">
-                                    {channel.name}
-                                </div>
-                            )}
-                            
-                            <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent opacity-0 group-hover/card:opacity-100 group-focus/card:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-3 text-left">
-                                <h4 className="text-white font-bold text-sm drop-shadow-md line-clamp-2 leading-snug">{channel.cleanName || channel.name}</h4>
-                            </div>
-
-                            {progressMap && progressMap[channel.id]?.progress ? (
-                                <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-black/50">
-                                    <div 
-                                        className="h-full bg-red-600" 
-                                        style={{ width: `${Math.min(100, Math.max(0, progressMap[channel.id].progress * 100))}%` }}
-                                    />
-                                </div>
-                            ) : null}
-                        </button>
+                            channel={channel}
+                            onSelect={onSelect}
+                            isPoster={isPoster}
+                            progress={progressMap?.[channel.id]?.progress}
+                            isInWatchlist={watchlistSet?.has(channel.id)}
+                            onToggleWatchlist={onToggleWatchlist}
+                            onShowDetails={onShowDetails}
+                        />
                     ))}
                 </div>
             </div>

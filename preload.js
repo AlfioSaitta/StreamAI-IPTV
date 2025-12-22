@@ -1,36 +1,35 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-// Expose device discovery and cast API to renderer
 contextBridge.exposeInMainWorld('electronAPI', {
-  // Device discovery
+  isElectron: true,
+  
+  // Funzioni esistenti
   discoverDevices: () => ipcRenderer.invoke('discover-devices'),
   getLocalIPs: () => ipcRenderer.invoke('get-local-ips'),
   scanIp: (ipOrSubnet) => ipcRenderer.invoke('scan-ip', ipOrSubnet),
   probeDeviceServices: (ip) => ipcRenderer.invoke('probe-device-services', ip),
-
-  // Cast session management
+  
+  // Funzioni di Cast
   castConnect: (options) => ipcRenderer.invoke('cast-connect', options),
   castLoad: (options) => ipcRenderer.invoke('cast-load', options),
   castControl: (options) => ipcRenderer.invoke('cast-control', options),
-  castStatus: () => ipcRenderer.invoke('cast-status'),
   castDisconnect: () => ipcRenderer.invoke('cast-disconnect'),
-
-  // Legacy cast (backward compatibility)
-  castToDevice: (options) => ipcRenderer.invoke('cast-to-device', options),
-
-  // Cast status updates listener
   onCastStatus: (callback) => {
-    ipcRenderer.on('cast-status', (event, status) => callback(status));
-    return () => ipcRenderer.removeAllListeners('cast-status');
+    const handler = (event, status) => callback(status);
+    ipcRenderer.on('cast-status', handler);
+    return () => ipcRenderer.removeListener('cast-status', handler);
   },
 
-  // Listen for incremental device updates
-  onDeviceFound: (callback) => {
-    ipcRenderer.on('device-found', (event, device) => callback(device));
-    return () => ipcRenderer.removeAllListeners('device-found');
+  // Condivisione stato di riproduzione e Remote Control
+  updatePlaybackStatus: (status) => ipcRenderer.send('playback-status-update', status),
+  onNetworkPlaybackStatus: (callback) => {
+    const handler = (event, status) => callback(status);
+    ipcRenderer.on('network-playback-status', handler);
+    return () => ipcRenderer.removeListener('network-playback-status', handler);
   },
-  
-  // Check if we're in Electron
-  isElectron: true,
+  onRemoteControlCommand: (callback) => {
+    const handler = (event, command) => callback(command);
+    ipcRenderer.on('remote-control-command', handler);
+    return () => ipcRenderer.removeListener('remote-control-command', handler);
+  }
 });
-

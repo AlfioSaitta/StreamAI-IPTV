@@ -33,12 +33,27 @@
   display: none;
 }
 
+:root {
+  --bg-primary: #141414;
+  --bg-secondary: #202020;
+  --bg-panel: rgba(0, 0, 0, 0.6);
+  --border-color: rgba(255, 255, 255, 0.1);
+}
+
+.theme-oled {
+  --bg-primary: #000000;
+  --bg-secondary: #050505;
+  --bg-panel: rgba(0, 0, 0, 0.85);
+  --border-color: rgba(255, 255, 255, 0.05);
+}
+
 body {
   overscroll-behavior-y: none;
-  background-color: #141414;
+  background-color: var(--bg-primary);
   color: #e5e7eb;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.3s ease;
 }
 
 @layer utilities {
@@ -54,7 +69,9 @@ body {
   }
 
   .glass-panel {
-    @apply bg-black/60 backdrop-blur-xl border border-white/10;
+    background-color: var(--bg-panel);
+    @apply backdrop-blur-xl border;
+    border-color: var(--border-color);
   }
   
   .text-shadow {

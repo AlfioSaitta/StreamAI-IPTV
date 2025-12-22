@@ -53,10 +53,9 @@ export interface WatchHistoryItem {
 export interface ProfilePreferences {
   language: string; // ISO 639-1 code (e.g., 'it', 'en', 'es')
   subtitleLanguage: string; // Preferred subtitle language
-  autoPlayNext: boolean; // Auto-play next episode/video
-  defaultQuality: 'auto' | '4k' | '1080p' | '720p' | '480p';
-  matureContent: boolean; // Allow mature content
-  skipIntro: boolean; // Auto-skip intro
+  aiCaching: boolean; // Enable/Disable Gemini Response Caching
+  debugOverlay: boolean; // Show network speed and debug info in player
+  theme?: 'dark' | 'oled';
 }
 
 export interface Profile {

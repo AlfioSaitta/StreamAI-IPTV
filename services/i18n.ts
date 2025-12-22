@@ -88,15 +88,17 @@ export interface Translations {
   subtitleLanguage: string;
   subtitleLanguageDesc: string;
   playback: string;
-  videoQuality: string;
-  videoQualityDesc: string;
-  autoPlay: string;
-  autoPlayDesc: string;
-  skipIntro: string;
-  skipIntroDesc: string;
-  parentalControls: string;
-  matureContent: string;
-  matureContentDesc: string;
+  aiSettings: string;
+  aiCaching: string;
+  aiCachingDesc: string;
+  debugOverlay: string;
+  debugOverlayDesc: string;
+  appearance: string;
+  themeInterface: string;
+  themeInterfaceDesc: string;
+  clearCache: string;
+  clearCacheDesc: string;
+  cacheCleared: string;
   saveChanges: string;
   
   // Quality Options
@@ -212,15 +214,17 @@ const translations: Record<SupportedLanguage, Translations> = {
     subtitleLanguage: 'Lingua sottotitoli',
     subtitleLanguageDesc: 'Sottotitoli predefiniti quando disponibili',
     playback: 'Riproduzione',
-    videoQuality: 'Qualità video',
-    videoQualityDesc: 'Qualità predefinita per lo streaming',
-    autoPlay: 'Riproduci automaticamente',
-    autoPlayDesc: 'Passa automaticamente al prossimo episodio',
-    skipIntro: 'Salta intro',
-    skipIntroDesc: 'Salta automaticamente le sigle di apertura',
-    parentalControls: 'Controllo Genitori',
-    matureContent: 'Contenuti per adulti',
-    matureContentDesc: 'Mostra contenuti con classificazione per adulti',
+    aiSettings: 'Intelligenza Artificiale',
+    aiCaching: 'Cache Risposte AI',
+    aiCachingDesc: 'Salva le risposte di Gemini per risparmiare tempo e dati',
+    debugOverlay: 'Info Debug Network',
+    debugOverlayDesc: 'Mostra velocità di rete e stato buffering nel player',
+    appearance: 'Aspetto',
+    themeInterface: 'Tema Interfaccia',
+    themeInterfaceDesc: 'Scegli tra Dark standard o OLED (Nero Assoluto)',
+    clearCache: 'Svuota Cache Contenuti',
+    clearCacheDesc: 'Ricarica tutte le liste e le immagini dal server',
+    cacheCleared: 'Cache svuotata con successo',
     saveChanges: 'Salva Modifiche',
     
     // Quality Options
@@ -335,15 +339,17 @@ const translations: Record<SupportedLanguage, Translations> = {
     subtitleLanguage: 'Subtitle Language',
     subtitleLanguageDesc: 'Default subtitles when available',
     playback: 'Playback',
-    videoQuality: 'Video Quality',
-    videoQualityDesc: 'Default streaming quality',
-    autoPlay: 'Auto-play',
-    autoPlayDesc: 'Automatically play next episode',
-    skipIntro: 'Skip Intro',
-    skipIntroDesc: 'Automatically skip opening credits',
-    parentalControls: 'Parental Controls',
-    matureContent: 'Mature Content',
-    matureContentDesc: 'Show content rated for adults',
+    aiSettings: 'Artificial Intelligence',
+    aiCaching: 'AI Response Cache',
+    aiCachingDesc: 'Save Gemini responses to save time and data',
+    debugOverlay: 'Network Debug Info',
+    debugOverlayDesc: 'Show network speed and buffering status in the player',
+    appearance: 'Appearance',
+    themeInterface: 'Interface Theme',
+    themeInterfaceDesc: 'Choose between standard Dark or OLED (Pure Black)',
+    clearCache: 'Clear Content Cache',
+    clearCacheDesc: 'Reload all lists and images from the server',
+    cacheCleared: 'Cache cleared successfully',
     saveChanges: 'Save Changes',
     
     // Quality Options

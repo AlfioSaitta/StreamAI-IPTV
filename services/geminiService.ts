@@ -1,4 +1,5 @@
 import { Channel, Recommendation, StreamType, WatchHistoryItem } from "../types.ts";
+import { CacheService } from "./cacheService.ts";
 
 // API Key - usa variabile d'ambiente o fallback
 const getApiKey = (): string => {
@@ -7,7 +8,7 @@ const getApiKey = (): string => {
     return (import.meta as any).env.VITE_GEMINI_API_KEY;
   }
   // Fallback
-  return 'AIzaSyDqvYuOecmgDNi2sVm3jvgM9bl-oKdUPck';
+  return 'AIzaSyAnK6tUgMqre_oZIcQxPog4JPXxxCT65Ho';
 };
 
 const apiKey = getApiKey();
@@ -17,8 +18,10 @@ let aiInstance: any = null;
 const getAI = async () => {
   if (aiInstance) return aiInstance;
   try {
-    const { GoogleGenerativeAI } = await import("@google/generative-ai");
-    aiInstance = new GoogleGenerativeAI(apiKey);
+    const { GoogleGenAI } = await import("@google/genai");
+    aiInstance = new GoogleGenAI({ 
+      apiKey
+    });
     return aiInstance;
   } catch (e) {
     console.warn("Impossibile caricare Gemini AI:", e);
@@ -30,8 +33,23 @@ export const getRecommendations = async (
   channels: Channel[], 
   userPreference: string,
   context: StreamType = 'live',
-  history: WatchHistoryItem[] = []
+  history: WatchHistoryItem[] = [],
+  useCache: boolean = true
 ): Promise<Recommendation[]> => {
+  // 0. Check Cache
+  const cacheKey = `ai_recommend_${context}_${userPreference.toLowerCase().trim()}`;
+  if (useCache) {
+    try {
+      const cached = await CacheService.getApiData(cacheKey);
+      if (cached && (Date.now() - cached.timestamp < 3600000)) { // 1 hour cache
+        console.log("[AI] Returning cached recommendations");
+        return cached.results;
+      }
+    } catch (e) {
+      console.warn("Cache error:", e);
+    }
+  }
+
   const ai = await getAI();
 
   if (!ai || !apiKey) {
@@ -68,42 +86,63 @@ export const getRecommendations = async (
     plot: c.description ? c.description.substring(0, 100) : ""
   }));
 
-  // Format History for Prompt
-  const recentHistory = history.slice(0, 5).map(h => h.name).join(", ");
-  const historyContext = recentHistory
-    ? `Cronologia utente: ${recentHistory}.`
+  // Format Metadata for context
+  const timeContext = `Orario attuale: ${new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}.`;
+  const historyContext = history.length > 0 
+    ? `Cronologia recente dell'utente: ${history.slice(0, 5).map(h => h.name).join(", ")}.` 
     : "";
 
-  const prompt = `Sei un assistente per IPTV. Trova 3 contenuti dal catalogo.
+  const userPrompt = `Tipo richiesto: ${context.toUpperCase()}
+Richiesta Utente: "${userPreference}"
+Contesto: ${timeContext} ${historyContext}
 
-Tipo: ${context.toUpperCase()}
-Richiesta: "${userPreference}"
-${historyContext}
+REGOLE:
+1. Scegli 3 contenuti dal CATALOGO JSON sotto.
+2. Rispondi ESCLUSIVAMENTE con un array JSON: [{"channelName":"...","reason":"..."}].
+3. Spiega il motivo in italiano in modo breve e accattivante.
 
 CATALOGO:
-${JSON.stringify(selectedItems)}
-
-Rispondi SOLO con JSON array:
-[{"channelName":"nome_esatto_da_originalName","reason":"motivo breve in italiano"}]`;
+${JSON.stringify(selectedItems)}`;
 
   try {
-    const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
+    const result = await ai.models.generateContent({ 
+      model: "gemini-2.0-flash",
+      contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+      config: {
+        systemInstruction: "Sei un assistente AI esperto di cinema e TV per un'app IPTV chiamata StreamAI. Il tuo compito è fornire raccomandazioni precise basate esclusivamente sul catalogo fornito dall'utente. Rispondi sempre in formato JSON puro, senza blocchi di codice markdown. Non includere spiegazioni fuori dal JSON.",
+        temperature: 0.2,
+        topP: 0.8,
+        topK: 40
+      }
+    });
+
+    const text = result?.text || "";
 
     // Estrai JSON dalla risposta
     const jsonMatch = text.match(/\[[\s\S]*?\]/);
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]) as Recommendation[];
-      // Verifica che i canali esistano nel catalogo
-      return parsed.filter(rec =>
+      const results = parsed.filter(rec =>
         channels.some(c => c.name === rec.channelName)
       ).slice(0, 3);
+
+      // Save to cache
+      if (results.length > 0 && useCache) {
+        CacheService.saveApiData(cacheKey, { results, timestamp: Date.now() });
+      }
+      
+      return results;
     }
 
     return [{ channelName: "Nessun risultato", reason: "Prova con una ricerca diversa." }];
-  } catch (error) {
+  } catch (error: any) {
     console.error("Gemini API Error:", error);
+    const errorMessage = error?.message || "";
+    if (errorMessage.includes("404") || errorMessage.includes("not found")) {
+      return [
+        { channelName: "Errore Configurazione", reason: "Il modello AI non è stato trovato. Verifica la versione API." }
+      ];
+    }
     return [
       { channelName: "Errore AI", reason: "Richiesta fallita. Riprova tra poco." }
     ];

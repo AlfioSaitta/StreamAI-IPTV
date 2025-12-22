@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Profile, ProfilePreferences } from '../types.ts';
 import { ProfileService, DEFAULT_PREFERENCES } from '../services/profileService.ts';
+import { CacheService } from '../services/cacheService.ts';
 import { useLanguage } from '../contexts/LanguageContext.tsx';
 import {
   ArrowLeft, 
@@ -10,9 +11,11 @@ import {
   Play, 
   Monitor, 
   ShieldCheck, 
-  SkipForward,
   Check,
-  Palette
+  Palette,
+  Sparkles,
+  Zap,
+  Trash2
 } from 'lucide-react';
 
 interface ProfileSettingsProps {
@@ -35,12 +38,10 @@ const LANGUAGES = [
   { code: 'ar', name: 'العربية' },
 ];
 
-const QUALITY_OPTIONS = [
-  { value: 'auto', label: 'Automatica' },
-  { value: '4k', label: '4K Ultra HD' },
-  { value: '1080p', label: '1080p Full HD' },
-  { value: '720p', label: '720p HD' },
-  { value: '480p', label: '480p SD' },
+
+const THEME_OPTIONS = [
+  { value: 'dark', label: 'Dark Mode' },
+  { value: 'oled', label: 'OLED (Pure Black)' },
 ];
 
 const PROFILE_COLORS = [
@@ -274,79 +275,95 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onBack, onPr
           </div>
         </section>
 
-        {/* Playback Settings */}
+        {/* Appearance Settings */}
+        <section className="bg-white/5 rounded-2xl p-6 border border-white/10">
+          <h2 className="text-xl font-semibold mb-6 flex items-center gap-3">
+            <Palette className="w-6 h-6 text-purple-500" />
+            {t.appearance}
+          </h2>
+
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Monitor className="w-5 h-5 text-gray-400" />
+              <div>
+                <h3 className="font-medium text-white">{t.themeInterface}</h3>
+                <p className="text-sm text-gray-400 mt-1">{t.themeInterfaceDesc}</p>
+              </div>
+            </div>
+            <SelectDropdown
+              value={preferences.theme || 'dark'}
+              options={THEME_OPTIONS}
+              onChange={(v) => handlePreferenceChange('theme', v as 'dark' | 'oled')}
+            />
+          </div>
+        </section>
+
+        {/* AI Settings */}
+        <section className="bg-white/5 rounded-2xl p-6 border border-white/10">
+          <h2 className="text-xl font-semibold mb-6 flex items-center gap-3">
+            <Sparkles className="w-6 h-6 text-purple-500" />
+            {t.aiSettings}
+          </h2>
+
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Zap className="w-5 h-5 text-gray-400" />
+              <div>
+                <h3 className="font-medium text-white">{t.aiCaching}</h3>
+                <p className="text-sm text-gray-400 mt-1">{t.aiCachingDesc}</p>
+              </div>
+            </div>
+            <ToggleSwitch
+              enabled={preferences.aiCaching}
+              onChange={(v) => handlePreferenceChange('aiCaching', v)}
+            />
+          </div>
+        </section>
+
+        {/* Playback & Debug Settings */}
         <section className="bg-white/5 rounded-2xl p-6 border border-white/10">
           <h2 className="text-xl font-semibold mb-6 flex items-center gap-3">
             <Play className="w-6 h-6 text-purple-500" />
             {t.playback}
           </h2>
 
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <Monitor className="w-5 h-5 text-gray-400" />
-                <div>
-                  <h3 className="font-medium text-white">{t.videoQuality}</h3>
-                  <p className="text-sm text-gray-400 mt-1">{t.videoQualityDesc}</p>
-                </div>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Monitor className="w-5 h-5 text-gray-400" />
+              <div>
+                <h3 className="font-medium text-white">{t.debugOverlay}</h3>
+                <p className="text-sm text-gray-400 mt-1">{t.debugOverlayDesc}</p>
               </div>
-              <SelectDropdown
-                value={preferences.defaultQuality}
-                options={QUALITY_OPTIONS}
-                onChange={(v) => handlePreferenceChange('defaultQuality', v as ProfilePreferences['defaultQuality'])}
-              />
             </div>
-
-            <div className="border-t border-white/10" />
-
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <Play className="w-5 h-5 text-gray-400" />
-                <div>
-                  <h3 className="font-medium text-white">{t.autoPlay}</h3>
-                  <p className="text-sm text-gray-400 mt-1">{t.autoPlayDesc}</p>
-                </div>
-              </div>
-              <ToggleSwitch
-                enabled={preferences.autoPlayNext}
-                onChange={(v) => handlePreferenceChange('autoPlayNext', v)}
-              />
-            </div>
-
-            <div className="border-t border-white/10" />
-
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <SkipForward className="w-5 h-5 text-gray-400" />
-                <div>
-                  <h3 className="font-medium text-white">{t.skipIntro}</h3>
-                  <p className="text-sm text-gray-400 mt-1">{t.skipIntroDesc}</p>
-                </div>
-              </div>
-              <ToggleSwitch
-                enabled={preferences.skipIntro}
-                onChange={(v) => handlePreferenceChange('skipIntro', v)}
-              />
-            </div>
+            <ToggleSwitch
+              enabled={preferences.debugOverlay}
+              onChange={(v) => handlePreferenceChange('debugOverlay', v)}
+            />
           </div>
         </section>
 
-        {/* Parental Controls */}
+        {/* Data & Cache */}
         <section className="bg-white/5 rounded-2xl p-6 border border-white/10">
           <h2 className="text-xl font-semibold mb-6 flex items-center gap-3">
-            <ShieldCheck className="w-6 h-6 text-purple-500" />
-            {t.parentalControls}
+            <Trash2 className="w-6 h-6 text-red-500" />
+            Cache
           </h2>
 
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="font-medium text-white">{t.matureContent}</h3>
-              <p className="text-sm text-gray-400 mt-1">{t.matureContentDesc}</p>
+              <h3 className="font-medium text-white">{t.clearCache}</h3>
+              <p className="text-sm text-gray-400 mt-1">{t.clearCacheDesc}</p>
             </div>
-            <ToggleSwitch
-              enabled={preferences.matureContent}
-              onChange={(v) => handlePreferenceChange('matureContent', v)}
-            />
+            <button
+              onClick={() => {
+                CacheService.clearAll();
+                alert(t.cacheCleared);
+                window.location.reload();
+              }}
+              className="bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white border border-red-500/30 px-4 py-2 rounded-lg transition-all font-medium"
+            >
+              {t.clearCache}
+            </button>
           </div>
         </section>
       </div>

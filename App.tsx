@@ -16,8 +16,46 @@ import { ProfileService, DEFAULT_PREFERENCES } from './services/profileService.t
 import { CacheService } from './services/cacheService.ts';
 import { i18n } from './services/i18n.ts';
 import { Category, Channel, XtreamCredentials, StreamType, Profile } from './types.ts';
-import { Server } from 'lucide-react';
+import { Server, Wifi } from 'lucide-react';
 import { platformService } from './services/platformService.ts';
+
+// Componente per visualizzare lo stato di riproduzione in rete
+const NetworkStatusBanner = () => {
+  const [networkStatus, setNetworkStatus] = useState<any>(null);
+  const timeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (platformService.isElectron && window.electronAPI) {
+      const unsubscribe = window.electronAPI.onNetworkPlaybackStatus((status) => {
+        setNetworkStatus(status);
+        
+        // Nascondi il banner dopo 10 secondi
+        if (timeoutRef.current) clearTimeout(timeoutRef.current);
+        timeoutRef.current = window.setTimeout(() => {
+          setNetworkStatus(null);
+        }, 10000);
+      });
+
+      return () => {
+        unsubscribe();
+        if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      };
+    }
+  }, []);
+
+  if (!networkStatus) return null;
+
+  return (
+    <div className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-gray-800/90 backdrop-blur-md text-white p-4 rounded-xl shadow-2xl flex items-center gap-4 z-[200] animate-fade-in">
+      <Wifi className="w-6 h-6 text-blue-400" />
+      <div>
+        <p className="text-sm text-gray-300">In riproduzione su <span className="font-bold text-white">{networkStatus.deviceId}</span></p>
+        <p className="font-semibold truncate max-w-xs">{networkStatus.channelName}</p>
+      </div>
+    </div>
+  );
+};
+
 
 function App() {
   const [activeProfile, setActiveProfile] = useState<Profile | null>(null);
@@ -66,6 +104,14 @@ function App() {
       activeProfile
     };
   }, [currentChannel, selectedSeries, selectedMovie, showSettings, showXtreamModal, activeTab, activeProfile]);
+
+  useEffect(() => {
+    if (activeProfile?.preferences?.theme === 'oled') {
+      document.body.classList.add('theme-oled');
+    } else {
+      document.body.classList.remove('theme-oled');
+    }
+  }, [activeProfile]);
 
   // Gestione Tasto Back (Android Hardware Button)
   useEffect(() => {
@@ -380,6 +426,7 @@ function App() {
                     onProgress={handleVideoProgress}
                     initialProgress={getInitialProgress()}
                     onResetProgress={handleResetProgress}
+                    debugOverlay={activeProfile.preferences?.debugOverlay}
                     onBack={() => {
                         // Refresh history when closing player to update UI
                         setActiveProfile(prev => prev ? ({...prev, history: ProfileService.getHistory(prev.id)}) : null);
@@ -470,6 +517,7 @@ function App() {
               onPlayChannel={handlePlayRecommended}
               activeTab={activeTab}
               history={activeProfile.history}
+              aiCaching={activeProfile.preferences?.aiCaching}
             />
         )}
 
@@ -482,6 +530,9 @@ function App() {
 
         {/* Avviso codec HEVC - mostrato solo se necessario */}
         {activeProfile && !currentChannel && <CodecWarning />}
+
+        {/* Banner per lo stato di riproduzione in rete */}
+        <NetworkStatusBanner />
       </div>
     </LanguageProvider>
   );

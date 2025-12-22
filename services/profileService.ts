@@ -6,10 +6,9 @@ const STORAGE_KEY = 'streamai_profiles';
 export const DEFAULT_PREFERENCES: ProfilePreferences = {
   language: 'it',
   subtitleLanguage: 'it',
-  autoPlayNext: true,
-  defaultQuality: 'auto',
-  matureContent: false,
-  skipIntro: false
+  aiCaching: true,
+  debugOverlay: false,
+  theme: 'dark'
 };
 
 export const ProfileService = {

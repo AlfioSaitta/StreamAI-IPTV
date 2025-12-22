@@ -8,9 +8,10 @@ interface AIRecommenderProps {
   onPlayChannel: (name: string) => void;
   activeTab: StreamType;
   history: WatchHistoryItem[];
+  aiCaching?: boolean;
 }
 
-const AIRecommender: React.FC<AIRecommenderProps> = ({ channels, onPlayChannel, activeTab, history }) => {
+const AIRecommender: React.FC<AIRecommenderProps> = ({ channels, onPlayChannel, activeTab, history, aiCaching = true }) => {
   const [prompt, setPrompt] = useState('');
   const [loading, setLoading] = useState(false);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
@@ -48,7 +49,7 @@ const AIRecommender: React.FC<AIRecommenderProps> = ({ channels, onPlayChannel, 
     setRecommendations([]);
     setPrompt(query);
     
-    const results = await getRecommendations(channels, query, activeTab, history);
+    const results = await getRecommendations(channels, query, activeTab, history, aiCaching);
     setRecommendations(results);
     setLoading(false);
   };
