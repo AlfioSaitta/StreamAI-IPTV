@@ -11,7 +11,7 @@ import CastDevicePicker from './CastDevicePicker';
 import {
   AlertTriangle, Play, Pause, Volume2, VolumeX, Maximize, Minimize,
   SkipForward, SkipBack, List, X, FastForward, Rewind, RotateCcw,
-  PictureInPicture2, Loader2, Info, Cast, Tv, StopCircle, ExternalLink
+  PictureInPicture2, Loader2, Info, Cast, Tv, Headphones
 } from 'lucide-react';
 
 // --- TYPES ---
@@ -77,8 +77,9 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   const [isMuted, setIsMuted] = useState(false);
   const [isPiP, setIsPiP] = useState(false);
   const [showPlaylist, setShowPlaylist] = useState(false);
+  const [showAudioMenu, setShowAudioMenu] = useState(false);
+  const [audioTracks, setAudioTracks] = useState<any[]>([]);
   const [networkSpeed, setNetworkSpeed] = useState<number | null>(null);
-  const [bytesReceived, setBytesReceived] = useState(0);
 
   // Hooks
   const castSession = useCastSession();
@@ -111,16 +112,16 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   const toggleFullscreen = useCallback(() => {
     if (!containerRef.current) return;
     if (document.fullscreenElement) {
-      document.exitFullscreen();
+      document.exitFullscreen().catch(console.error);
     } else {
-      containerRef.current.requestFullscreen();
+      containerRef.current.requestFullscreen().catch(console.error);
     }
   }, []);
 
   const toggleMute = useCallback(() => {
     if (playerRef.current) {
       playerRef.current.muted(!playerRef.current.muted());
-      setIsMuted(playerRef.current.muted());
+      setIsMuted(playerRef.current.muted() || false);
     }
   }, []);
 
@@ -160,6 +161,27 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     }
   };
 
+  const handleAudioTrackChange = (trackId: string) => {
+    if (playerRef.current) {
+      const tracks = playerRef.current.audioTracks();
+      for (let i = 0; i < tracks.length; i++) {
+        const track = tracks[i];
+        track.enabled = track.id === trackId;
+      }
+      // Aggiorna lo stato locale per riflettere il cambiamento nella UI
+      const updatedTracks = [];
+      for (let i = 0; i < tracks.length; i++) {
+        updatedTracks.push({
+          id: tracks[i].id,
+          label: tracks[i].label,
+          language: tracks[i].language,
+          enabled: tracks[i].enabled
+        });
+      }
+      setAudioTracks(updatedTracks);
+    }
+  };
+
   // --- INITIALIZATION & EVENT HANDLING ---
 
   useEffect(() => {
@@ -173,6 +195,8 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     setError(null);
     setIsUsingNativePlayer(false);
     setShowPlaylist(false);
+    setShowAudioMenu(false);
+    setAudioTracks([]);
 
     const source = channel.url;
 
@@ -217,25 +241,40 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     player.on('playing', () => setIsBuffering(false));
     player.on('volumechange', () => {
       if (!player.isDisposed()) {
-        setVolume(player.volume());
-        setIsMuted(player.muted());
+        setVolume(player.volume() || 0);
+        setIsMuted(player.muted() || false);
       }
     });
     player.on('timeupdate', () => {
       if (!player.isDisposed()) {
-        setCurrentTime(player.currentTime() || 0);
-        if (onProgress) onProgress(player.currentTime() || 0, player.duration() || 0);
-        if (isBuffering && player.currentTime() > 0) setIsBuffering(false);
+        const cTime = player.currentTime() || 0;
+        setCurrentTime(cTime);
+        if (onProgress) onProgress(cTime, player.duration() || 0);
+        if (isBuffering && cTime > 0) setIsBuffering(false);
       }
     });
     player.on('durationchange', () => {
       if (!player.isDisposed()) setDuration(player.duration() || 0);
     });
     player.on('fullscreenchange', () => {
-      if (!player.isDisposed()) setIsFullscreen(player.isFullscreen());
+      if (!player.isDisposed()) setIsFullscreen(player.isFullscreen() || false);
     });
     player.on('loadedmetadata', () => {
       if (player.isDisposed()) return;
+      
+      // Get Audio Tracks
+      const tracks = player.audioTracks();
+      const tracksList = [];
+      for (let i = 0; i < tracks.length; i++) {
+        tracksList.push({
+          id: tracks[i].id,
+          label: tracks[i].label,
+          language: tracks[i].language,
+          enabled: tracks[i].enabled
+        });
+      }
+      setAudioTracks(tracksList);
+
       const dur = player.duration() || 0;
       setDuration(dur);
       if (initialProgress && initialProgress > 0.05 && initialProgress < 0.95) {
@@ -271,11 +310,11 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
           }
 
           // Check if player is playing safely
-          if (!player.paused()) {
+          if (!player.paused() && window.electronAPI?.updatePlaybackStatus) {
             window.electronAPI.updatePlaybackStatus({
               channelName: channel.name,
-              currentTime: player.currentTime(),
-              duration: player.duration(),
+              currentTime: player.currentTime() || 0,
+              duration: player.duration() || 0,
             });
           }
         }
@@ -295,8 +334,8 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
 
   // Remote Control Handler
   useEffect(() => {
-    if (platformService.isElectron && window.electronAPI) {
-      const unsubscribe = window.electronAPI.onRemoteControlCommand((command) => {
+    if (platformService.isElectron && window.electronAPI && window.electronAPI.onRemoteControlCommand) {
+      const unsubscribe = window.electronAPI.onRemoteControlCommand((command: any) => {
         const player = playerRef.current;
         if (!player || player.isDisposed()) return;
 
@@ -304,7 +343,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
           case 'play': player.play(); break;
           case 'pause': player.pause(); break;
           case 'seek': if (typeof command.value === 'number') player.currentTime(command.value); break;
-          case 'skip': if (typeof command.value === 'number') player.currentTime(player.currentTime() + command.value); break;
+          case 'skip': if (typeof command.value === 'number') player.currentTime((player.currentTime() || 0) + command.value); break;
         }
       });
       return unsubscribe;
@@ -398,6 +437,35 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         </div>
       )}
 
+      {/* AUDIO TRACKS MENU */}
+      {showAudioMenu && audioTracks.length > 1 && (
+        <div className="absolute bottom-20 right-4 w-64 bg-black/90 backdrop-blur-xl border border-white/10 rounded-2xl p-2 z-[70] shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-200">
+          <div className="p-3 border-b border-white/10 flex items-center justify-between mb-2">
+            <h3 className="font-bold text-white text-sm">Tracce Audio</h3>
+            <button onClick={() => setShowAudioMenu(false)} className="p-1 rounded-full hover:bg-white/10"><X className="w-4 h-4 text-gray-400" /></button>
+          </div>
+          <div className="space-y-1">
+            {audioTracks.map((track) => (
+              <button
+                key={track.id}
+                onClick={() => handleAudioTrackChange(track.id)}
+                className={`w-full text-left p-3 rounded-xl flex items-center justify-between transition-all ${
+                  track.enabled 
+                    ? 'bg-red-600/20 text-red-500 border border-red-500/30' 
+                    : 'hover:bg-white/10 text-gray-300 border border-transparent'
+                }`}
+              >
+                <div className="flex flex-col">
+                  <span className="text-sm font-bold capitalize">{track.label || `Traccia ${track.id}`}</span>
+                  {track.language && <span className="text-[10px] opacity-60 uppercase tracking-widest">{track.language}</span>}
+                </div>
+                {track.enabled && <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* CONTROLS BAR */}
       <div className={`absolute inset-0 z-30 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
         <div className="absolute top-0 left-0 right-0 p-4 bg-gradient-to-b from-black/80 to-transparent flex justify-between items-center">
@@ -464,6 +532,15 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
                   <List className="w-6 h-6 text-white" />
                 </button>
               )}
+              {audioTracks.length > 1 && (
+                <button 
+                  onClick={() => setShowAudioMenu(!showAudioMenu)} 
+                  className={`p-2 hover:bg-white/10 rounded-full transition-colors ${showAudioMenu ? 'text-red-500 bg-white/10' : 'text-white'}`}
+                  title="Lingue Audio"
+                >
+                  <Headphones className="w-6 h-6" />
+                </button>
+              )}
               <button onClick={() => {}} className="p-2 hover:bg-white/10 rounded-full" title="Info Codec">
                 <Info className="w-6 h-6 text-white" />
               </button>
@@ -493,6 +570,9 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         <CastDevicePicker
           isOpen={showDevicePicker}
           onClose={() => setShowDevicePicker(false)}
+          mediaUrl={channel.url}
+          mediaTitle={channel.cleanName || channel.name}
+          mediaPoster={channel.logo}
           onDeviceSelect={async (device) => {
             setIsCastLoading(true);
             const connected = await castSession.connect(device);
