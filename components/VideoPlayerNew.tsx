@@ -265,12 +265,13 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       networkStatusIntervalRef.current = window.setInterval(() => {
         if (player && !player.isDisposed()) {
           // Monitor network speed
-          const stats = (player.tech() as any)?.vhs?.stats;
+          const stats = (player.tech({ IWillNotUseThisInPlugins: true }) as any)?.vhs?.stats;
           if (stats && stats.bandwidth) {
              setNetworkSpeed(stats.bandwidth / 1024 / 1024); // Mbps
           }
 
-          if (player.playing()) {
+          // Check if player is playing safely
+          if (!player.paused()) {
             window.electronAPI.updatePlaybackStatus({
               channelName: channel.name,
               currentTime: player.currentTime(),
@@ -376,24 +377,26 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       )}
 
       {/* PLAYLIST OVERLAY */}
-      <div className={`absolute top-0 right-0 bottom-0 w-80 bg-black/90 backdrop-blur-xl border-l border-white/10 z-[60] transform transition-transform duration-300 flex flex-col ${showPlaylist ? 'translate-x-0' : 'translate-x-full'}`}>
-          <div className="p-4 border-b border-white/10 flex items-center justify-between">
-              <h3 className="font-bold text-white">Canali ({playlist.length})</h3>
-              <button onClick={() => setShowPlaylist(false)} className="p-2 rounded-full hover:bg-white/10"><X className="w-5 h-5" /></button>
-          </div>
-          <div className="flex-1 overflow-y-auto p-2 space-y-2">
-              {playlist.map(c => (
-                  <button 
-                    key={c.id}
-                    onClick={() => onChannelSelect && onChannelSelect(c)}
-                    className={`w-full text-left p-3 rounded-lg flex items-center gap-3 transition-colors ${c.id === channel.id ? 'bg-red-600 text-white' : 'hover:bg-white/10 text-gray-300'}`}
-                  >
-                      {c.logo && <img src={c.logo} alt={c.name} className="w-8 h-8 object-contain bg-black rounded" loading="lazy" />}
-                      <span className="truncate text-sm font-medium">{c.cleanName || c.name}</span>
-                  </button>
-              ))}
-          </div>
-      </div>
+      {channel.type !== 'movie' && (
+        <div className={`absolute top-0 right-0 bottom-0 w-80 bg-black/90 backdrop-blur-xl border-l border-white/10 z-[60] transform transition-transform duration-300 flex flex-col ${showPlaylist ? 'translate-x-0' : 'translate-x-full'}`}>
+            <div className="p-4 border-b border-white/10 flex items-center justify-between">
+                <h3 className="font-bold text-white">Canali ({playlist.length})</h3>
+                <button onClick={() => setShowPlaylist(false)} className="p-2 rounded-full hover:bg-white/10"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2 space-y-2">
+                {playlist.map(c => (
+                    <button 
+                      key={c.id}
+                      onClick={() => onChannelSelect && onChannelSelect(c)}
+                      className={`w-full text-left p-3 rounded-lg flex items-center gap-3 transition-colors ${c.id === channel.id ? 'bg-red-600 text-white' : 'hover:bg-white/10 text-gray-300'}`}
+                    >
+                        {c.logo && <img src={c.logo} alt={c.name} className="w-8 h-8 object-contain bg-black rounded" loading="lazy" />}
+                        <span className="truncate text-sm font-medium">{c.cleanName || c.name}</span>
+                    </button>
+                ))}
+            </div>
+        </div>
+      )}
 
       {/* CONTROLS BAR */}
       <div className={`absolute inset-0 z-30 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>

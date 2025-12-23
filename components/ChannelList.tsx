@@ -541,7 +541,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
                     onChange={e => setSearchTerm(e.target.value)}
                     tabIndex={0}
                  />
-{searchTerm && (
+                 {searchTerm && (
                     <button
                       onClick={() => setSearchTerm('')}
                       className="text-gray-400 hover:text-white transition-colors"

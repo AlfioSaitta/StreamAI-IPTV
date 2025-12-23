@@ -12,6 +12,7 @@ Si distingue per l'integrazione con **Google Gemini AI**, che offre raccomandazi
 - **Movies (VOD)**: Film on-demand con seeking fluido e qualità adattiva
 - **Series**: Episodi con navigazione tra stagioni e puntate
 - **Codec HEVC/H.265**: Supporto nativo per video 4K con codec proprietari (via BranchBit)
+- **Player Nativo (Android)**: Utilizzo del player di sistema per massime prestazioni su mobile
 
 ### 🎮 Controlli Player
 - **Picture-in-Picture (PiP)**: Guarda i contenuti in una finestra flottante (`P`)
@@ -20,21 +21,26 @@ Si distingue per l'integrazione con **Google Gemini AI**, che offre raccomandazi
 - **Volume**: Controllo volume con frecce (`↑` `↓`) e mute (`M`)
 - **Riprendi da dove eri rimasto**: Salvataggio automatico della posizione per VOD/Series
 - **Riparti dall'inizio**: Pulsante per ricominciare la riproduzione
+- **Casting**: Supporto per la trasmissione su dispositivi compatibili (Chromecast, DLNA)
 
 ### 🤖 AI Assistant
 - **Ricerca intelligente**: Chiedi all'AI cosa vuoi guardare
 - **Raccomandazioni personalizzate**: Basate sulla cronologia di visione
 - **Suggerimenti contestuali**: Diversi per Live, Movies e Series
+- **Caching Intelligente**: Risposte AI salvate localmente per ridurre latenza e costi
 
 ### 👤 Profili Utente
 - **Multi-profilo**: Supporto per più utenti
 - **Cronologia separata**: Ogni profilo ha la sua cronologia
 - **Progresso salvato**: Riprendi da dove avevi interrotto
 
-### 🔧 Ottimizzazioni
+### 🔧 Ottimizzazioni Tecniche
+- **Virtualizzazione Liste**: Rendering efficiente per playlist con migliaia di canali
+- **Memoization**: Riduzione drastica dei re-render inutili
 - **Buffering differenziato**: Configurazioni separate per Live/VOD/Series
 - **Cache immagini**: Download intelligente delle copertine
 - **Avvio rapido**: Streaming ottimizzato per partenza immediata
+- **Network Monitor**: Visualizzazione velocità di rete e stato buffer in tempo reale
 
 ---
 
@@ -134,6 +140,7 @@ npm run android:run
 ### Funzionalità Android
 - ✅ Streaming Live/VOD/Series
 - ✅ Player video HTML5 con HLS.js
+- ✅ Player Nativo (ExoPlayer) per prestazioni superiori
 - ✅ Picture-in-Picture
 - ✅ Fullscreen
 - ✅ Supporto HTTP cleartext per stream IPTV
@@ -178,18 +185,20 @@ Per le raccomandazioni AI, configura la chiave API in uno dei seguenti modi:
 ```
 streamai-iptv/
 ├── components/          # Componenti React
-│   ├── VideoPlayer.tsx  # Player principale
+│   ├── VideoPlayerNew.tsx # Player principale (Video.js + Nativo)
 │   ├── AIRecommender.tsx # Assistente AI
-│   ├── ChannelList.tsx  # Lista canali
+│   ├── ChannelList.tsx  # Lista canali virtualizzata
 │   ├── SeriesDetail.tsx # Dettaglio serie
 │   └── ...
 ├── services/            # Servizi
 │   ├── geminiService.ts # Integrazione Gemini AI
 │   ├── profileService.ts # Gestione profili
 │   ├── xtream.ts        # API Xtream Codes
+│   ├── nativeVideoPlayer.ts # Bridge per player nativo
 │   └── ...
 ├── scripts/             # Script di build
-│   └── patch-ffmpeg.js  # Patch codec HEVC
+│   ├── patch-ffmpeg.js  # Patch codec HEVC
+│   └── android-build-release.sh # Build release Android
 ├── main.js              # Entry point Electron
 ├── App.tsx              # Componente principale
 └── package.json
@@ -219,4 +228,3 @@ sudo pacman -S gst-libav gst-plugins-bad
 ## 📝 Licenza
 
 MIT License - Vedi file LICENSE per dettagli.
-
