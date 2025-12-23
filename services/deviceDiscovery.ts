@@ -136,7 +136,7 @@ class DeviceDiscoveryService {
     // Stop after timeout
     this.searchTimeout = window.setTimeout(() => {
       this.stopDiscovery();
-    }, 15000);
+    }, 30000); // Increased to 30 seconds for full scan
 
     this.notify();
   }
@@ -304,12 +304,12 @@ class DeviceDiscoveryService {
       { port: 3000, type: 'smarttv' as const, name: 'LG TV' },
     ];
 
-    const batchSize = 20;
+    const batchSize = 25;
 
-    for (let startIP = 1; startIP <= 50; startIP += batchSize) {
+    for (let startIP = 1; startIP < 255; startIP += batchSize) {
       const batch: Promise<void>[] = [];
 
-      for (let i = startIP; i < Math.min(startIP + batchSize, 51); i++) {
+      for (let i = startIP; i < Math.min(startIP + batchSize, 255); i++) {
         const ip = `${base}.${i}`;
 
         for (const sig of deviceSignatures) {
@@ -319,7 +319,7 @@ class DeviceDiscoveryService {
 
       await Promise.race([
         Promise.allSettled(batch),
-        new Promise(resolve => setTimeout(resolve, 2000))
+        new Promise(resolve => setTimeout(resolve, 2500))
       ]);
     }
   }
@@ -885,4 +885,3 @@ class DeviceDiscoveryService {
 // Singleton
 export const deviceDiscovery = new DeviceDiscoveryService();
 export default deviceDiscovery;
-

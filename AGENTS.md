@@ -14,6 +14,7 @@ Questo file serve come guida e contesto per gli agenti AI che collaborano allo s
   - *Web/Desktop:* Video.js
   - *Android:* Capacitor Video Player (ExoPlayer nativo)
 - **AI:** Google Gemini API (@google/genai)
+- **Networking:** Bonjour (mDNS), Node-SSDP (UPnP/DIAL)
 - **Icons:** Lucide React
 
 ## 📂 Struttura Directory Chiave
@@ -26,6 +27,8 @@ Questo file serve come guida e contesto per gli agenti AI che collaborano allo s
   - `geminiService.ts`: Logica di interazione con Google Gemini.
   - `xtream.ts`: Client API per server IPTV Xtream Codes.
   - `cacheService.ts`: Gestione caching locale (LocalStorage/IndexedDB).
+  - `deviceDiscovery.ts`: Logica di scansione rete per trovare dispositivi Cast/DLNA.
+  - `advertisingService.js`: (Electron Main Process) Servizio per annunciare l'app via mDNS/SSDP.
 - `/android`: Progetto nativo Android (Gradle).
 - `/scripts`: Script di automazione (es. patching FFmpeg per Electron).
 
@@ -41,15 +44,21 @@ Queste funzionalità definiscono l'identità di StreamAI e devono essere preserv
 
 ### 2. Casting & Device Discovery
 - **Requisito:** Trasmissione fluida verso Chromecast e dispositivi DLNA/UPnP.
-- **Vincolo:** Il discovery dei dispositivi deve avvenire in background senza bloccare la UI. Il pulsante Cast deve essere visibile nel player.
+- **Implementazione:**
+  - *Discovery:* Scansione completa della sottorete (/24) in `deviceDiscovery.ts`.
+  - *Advertising:* L'app si annuncia come ricevitore AirPlay/DIAL tramite `advertisingService.js` (solo Electron).
+- **Vincolo:** Il discovery dei dispositivi deve avvenire in background senza bloccare la UI.
 
 ### 3. Scorciatoie da Tastiera & Remote Control
 - **Requisito:** L'app deve essere controllabile al 100% senza mouse/touch (Telecomando TV/Tastiera).
 - **Mappatura Standard:**
-  - `Spazio` / `OK`: Play/Pausa
-  - `Frecce`: Navigazione UI e Seeking/Volume nel player
+  - `Spazio` / `Invio` / `P`: Play/Pausa
+  - `Freccia Sinistra/Destra`: Avanza avanti/indietro (Seeking)
+  - `Freccia Su/Giù`: Alza/Abbassa volume
+  - `M`: Mute/Unmute
   - `F`: Fullscreen
-  - `M`: Mute
+  - `C`: Cast (apre menu dispositivi)
+  - `L`: Lista canali (LIVE) o Lista episodi (SERIE TV)
   - `Esc`: Indietro/Chiudi menu
 
 ### 4. Interfaccia Unificata (Uniform UI)
@@ -73,6 +82,7 @@ Queste funzionalità definiscono l'identità di StreamAI e devono essere preserv
 - **Mai** chiamare API specifiche (es. `window.electronAPI` o `CapacitorPlugins`) direttamente nei componenti UI.
 - Usa sempre `platformService` per verificare l'ambiente (`isElectron`, `isNative`, `isWeb`).
 - **Android:** Gestisci sempre il tasto fisico "Back" in `App.tsx` usando `App.addListener('backButton', ...)`.
+- **Electron Main Process:** I file eseguiti nel main process (es. `advertisingService.js`) devono essere in JavaScript CommonJS (`require`), non TypeScript, poiché non vengono transpilati da Vite.
 
 ### 3. Styling (Tailwind)
 - Tema scuro di default: Background `#141414`, Testo `gray-100/gray-300`.
@@ -88,6 +98,7 @@ Queste funzionalità definiscono l'identità di StreamAI e devono essere preserv
 1.  **Codec HEVC:** Su Electron, usiamo una build custom di FFmpeg scaricata via `scripts/patch-ffmpeg.js`. Non modificare questo script senza cautela.
 2.  **Player Android:** Su Android, il tag `<video>` HTML5 ha performance scarse per IPTV. Usare sempre il player nativo tramite `nativeVideoPlayer.ts` quando `platformService.isNative` è true.
 3.  **Mixed Content:** L'app deve poter riprodurre stream HTTP (non sicuri) anche se l'app è servita in contesto sicuro. Questo è configurato in `electron/main.js` e `android/app/src/main/AndroidManifest.xml` (usesCleartextTraffic).
+4.  **Electron Build:** Assicurarsi che la cartella `services` sia inclusa in `package.json` -> `build.files` affinché `advertisingService.js` sia disponibile nella build di produzione.
 
 ## 🚀 Comandi Utili
 - `npm run dev`: Avvio sviluppo Electron.

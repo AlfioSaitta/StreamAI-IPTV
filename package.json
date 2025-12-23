@@ -43,12 +43,14 @@
     "@google/genai": "^1.34.0",
     "@types/react-window": "^1.8.8",
     "@videojs/http-streaming": "^3.17.2",
+    "bonjour": "^3.5.0",
     "capacitor-video-player": "github:phiamo/capacitor-video-player",
     "castv2-client": "^1.2.0",
     "hls.js": "^1.5.7",
     "jmuxer": "^2.0.5",
     "lucide-react": "^0.344.0",
     "mpegts.js": "^1.7.3",
+    "node-ssdp": "^4.0.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-window": "^2.2.3",
@@ -64,6 +66,7 @@
     "files": [
       "dist/**/*",
       "main.js",
+      "services/advertisingService.js",
       "icon.png",
       "package.json"
     ],

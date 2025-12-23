@@ -11,7 +11,7 @@ import CastDevicePicker from './CastDevicePicker';
 import {
   AlertTriangle, Play, Pause, Volume2, VolumeX, Maximize, Minimize,
   SkipForward, SkipBack, List, X, FastForward, Rewind, RotateCcw,
-  PictureInPicture2, Loader2, Info, Cast, Tv, Headphones
+  PictureInPicture2, Loader2, Info, Cast, Tv, Headphones, Volume1
 } from 'lucide-react';
 
 // --- TYPES ---
@@ -27,6 +27,12 @@ interface VideoPlayerProps {
   initialProgress?: number;
   onResetProgress?: () => void;
   debugOverlay?: boolean;
+}
+
+interface OsdState {
+  icon: React.ReactNode;
+  text?: string;
+  visible: boolean;
 }
 
 // --- UTILS ---
@@ -61,6 +67,8 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const controlsTimeoutRef = useRef<number | null>(null);
   const networkStatusIntervalRef = useRef<number | null>(null);
+  const osdTimeoutRef = useRef<number | null>(null);
+  const timelineRef = useRef<HTMLDivElement>(null);
 
   // State
   const [isPlaying, setIsPlaying] = useState(false);
@@ -80,9 +88,29 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   const [showAudioMenu, setShowAudioMenu] = useState(false);
   const [audioTracks, setAudioTracks] = useState<any[]>([]);
   const [networkSpeed, setNetworkSpeed] = useState<number | null>(null);
+  
+  // OSD State
+  const [osd, setOsd] = useState<OsdState>({ icon: null, visible: false });
+
+  // Timeline Hover State
+  const [hoverTime, setHoverTime] = useState<number | null>(null);
+  const [hoverPos, setHoverPos] = useState<number>(0);
 
   // Hooks
   const castSession = useCastSession();
+
+  // --- OSD HELPER ---
+  const showOsd = useCallback((icon: React.ReactNode, text?: string) => {
+    setOsd({ icon, text, visible: true });
+    
+    if (osdTimeoutRef.current) {
+      window.clearTimeout(osdTimeoutRef.current);
+    }
+    
+    osdTimeoutRef.current = window.setTimeout(() => {
+      setOsd(prev => ({ ...prev, visible: false }));
+    }, 2000);
+  }, []);
 
   // --- CONTROLS LOGIC ---
 
@@ -90,52 +118,91 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     if (playerRef.current) {
       if (playerRef.current.paused()) {
         playerRef.current.play();
+        showOsd(<Play className="w-12 h-12 text-white" fill="white" />, "Play");
       } else {
         playerRef.current.pause();
+        showOsd(<Pause className="w-12 h-12 text-white" fill="white" />, "Pausa");
       }
     }
-  }, []);
+  }, [showOsd]);
 
   const skip = useCallback((seconds: number) => {
     if (playerRef.current) {
       const newTime = (playerRef.current.currentTime() || 0) + seconds;
       playerRef.current.currentTime(Math.max(0, newTime));
+      
+      if (seconds > 0) {
+        showOsd(<FastForward className="w-12 h-12 text-white" />, `+${seconds}s`);
+      } else {
+        showOsd(<Rewind className="w-12 h-12 text-white" />, `${seconds}s`);
+      }
+    }
+  }, [showOsd]);
+
+  const handleSeek = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const time = parseFloat(e.target.value);
+    if (playerRef.current) {
+      playerRef.current.currentTime(time);
+      setCurrentTime(time); // Aggiornamento immediato UI
     }
   }, []);
 
-  const handleSeek = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    if (playerRef.current) {
-      playerRef.current.currentTime(parseFloat(e.target.value));
-    }
+  const handleTimelineMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (!timelineRef.current || duration <= 0) return;
+    
+    const rect = timelineRef.current.getBoundingClientRect();
+    const offsetX = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+    const percentage = offsetX / rect.width;
+    const time = percentage * duration;
+    
+    setHoverPos(percentage * 100);
+    setHoverTime(time);
+  }, [duration]);
+
+  const handleTimelineMouseLeave = useCallback(() => {
+    setHoverTime(null);
   }, []);
 
   const toggleFullscreen = useCallback(() => {
     if (!containerRef.current) return;
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(console.error);
+      showOsd(<Minimize className="w-12 h-12 text-white" />, "Esci da Fullscreen");
     } else {
       containerRef.current.requestFullscreen().catch(console.error);
+      showOsd(<Maximize className="w-12 h-12 text-white" />, "Fullscreen");
     }
-  }, []);
+  }, [showOsd]);
 
   const toggleMute = useCallback(() => {
     if (playerRef.current) {
       const newMuted = !playerRef.current.muted();
       playerRef.current.muted(newMuted);
       setIsMuted(newMuted);
-      // Se stiamo riattivando l'audio e il volume è a 0, impostiamolo a un valore minimo
-      if (!newMuted && playerRef.current.volume() === 0) {
-        playerRef.current.volume(0.5);
-        setVolume(0.5);
+      
+      if (newMuted) {
+        showOsd(<VolumeX className="w-12 h-12 text-white" />, "Muto");
+      } else {
+        showOsd(<Volume2 className="w-12 h-12 text-white" />, "Audio Attivo");
+        // Se stiamo riattivando l'audio e il volume è a 0, impostiamolo a un valore minimo
+        if (playerRef.current.volume() === 0) {
+          playerRef.current.volume(0.5);
+          setVolume(0.5);
+        }
       }
     }
-  }, []);
+  }, [showOsd]);
 
-  const handleVolumeChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const newVolume = parseFloat(e.target.value);
+  const handleVolumeChange = useCallback((e: React.ChangeEvent<HTMLInputElement> | number) => {
+    const newVolume = typeof e === 'number' ? e : parseFloat(e.target.value);
     if (playerRef.current) {
       playerRef.current.volume(newVolume);
       setVolume(newVolume);
+      
+      let Icon = Volume2;
+      if (newVolume === 0) Icon = VolumeX;
+      else if (newVolume < 0.5) Icon = Volume1;
+      
       if (newVolume > 0) {
         playerRef.current.muted(false);
         setIsMuted(false);
@@ -143,8 +210,13 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         playerRef.current.muted(true);
         setIsMuted(true);
       }
+      
+      // Mostra OSD solo se cambiato via tastiera (quando è un numero)
+      if (typeof e === 'number') {
+        showOsd(<Icon className="w-12 h-12 text-white" />, `${Math.round(newVolume * 100)}%`);
+      }
     }
-  }, []);
+  }, [showOsd]);
 
   const togglePiP = useCallback(async () => {
     const videoElement = playerRef.current?.el()?.querySelector('video');
@@ -154,19 +226,22 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       if (document.pictureInPictureElement) {
         await document.exitPictureInPicture();
         setIsPiP(false);
+        showOsd(<PictureInPicture2 className="w-12 h-12 text-white" />, "PiP Disattivato");
       } else if (document.pictureInPictureEnabled) {
         await videoElement.requestPictureInPicture();
         setIsPiP(true);
+        showOsd(<PictureInPicture2 className="w-12 h-12 text-white" />, "PiP Attivo");
       }
     } catch (err) {
       console.error("PiP error:", err);
     }
-  }, []);
+  }, [showOsd]);
 
   const restartFromBeginning = () => {
     if (playerRef.current) {
       playerRef.current.currentTime(0);
       if (onResetProgress) onResetProgress();
+      showOsd(<RotateCcw className="w-12 h-12 text-white" />, "Riavvia");
     }
   };
 
@@ -221,6 +296,83 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       ...seriesInfo
     });
   }, [channel]);
+
+  // --- KEYBOARD SHORTCUTS ---
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignora se l'utente sta scrivendo in un input
+      if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
+
+      const key = e.key.toLowerCase();
+
+      switch (key) {
+        // Play / Pausa
+        case ' ':
+        case 'enter':
+        case 'p':
+          e.preventDefault();
+          togglePlay();
+          break;
+
+        // Seeking
+        case 'arrowleft':
+          e.preventDefault();
+          skip(-10);
+          break;
+        case 'arrowright':
+          e.preventDefault();
+          skip(10);
+          break;
+
+        // Volume
+        case 'arrowup':
+          e.preventDefault();
+          handleVolumeChange(Math.min(1, volume + 0.1));
+          break;
+        case 'arrowdown':
+          e.preventDefault();
+          handleVolumeChange(Math.max(0, volume - 0.1));
+          break;
+        case 'm':
+          e.preventDefault();
+          toggleMute();
+          break;
+
+        // Fullscreen
+        case 'f':
+          e.preventDefault();
+          toggleFullscreen();
+          break;
+
+        // Cast
+        case 'c':
+          e.preventDefault();
+          setShowDevicePicker(true);
+          break;
+
+        // Lista Canali / Episodi
+        case 'l':
+          e.preventDefault();
+          if (channel?.type === 'live' || channel?.type === 'series') {
+            setShowPlaylist(prev => !prev);
+          }
+          break;
+
+        // Indietro / Chiudi menu
+        case 'escape':
+          e.preventDefault();
+          if (showPlaylist) setShowPlaylist(false);
+          else if (showDevicePicker) setShowDevicePicker(false);
+          else if (showAudioMenu) setShowAudioMenu(false);
+          else if (onBack) onBack();
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [togglePlay, skip, volume, handleVolumeChange, toggleMute, toggleFullscreen, channel, showPlaylist, showDevicePicker, showAudioMenu, onBack]);
+
 
   // --- INITIALIZATION & EVENT HANDLING ---
 
@@ -583,6 +735,16 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     <div ref={containerRef} className="relative w-full h-full bg-black overflow-hidden select-none">
       <div ref={videoRef} className="w-full h-full bg-black" />
 
+      {/* OSD Overlay */}
+      {osd.visible && (
+        <div className="absolute inset-0 z-40 flex items-center justify-center pointer-events-none animate-in fade-in zoom-in duration-200">
+          <div className="bg-black/60 backdrop-blur-md p-6 rounded-3xl flex flex-col items-center gap-3 shadow-2xl border border-white/10">
+            {osd.icon}
+            {osd.text && <span className="text-white font-medium text-lg">{osd.text}</span>}
+          </div>
+        </div>
+      )}
+
       {/* Network Debug Overlay */}
       {networkSpeed && (debugOverlay || isBuffering) && !error && (
         <div className={`absolute ${isBuffering ? 'inset-0 bg-black/50' : 'top-20 right-6'} flex flex-col items-center justify-center z-20 gap-4 transition-all`}>
@@ -674,11 +836,61 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 to-transparent">
           {channel.type !== 'live' && duration > 0 && (
             <div className="mb-4">
-              <div className="relative h-1 bg-white/20 rounded-full overflow-hidden group cursor-pointer">
-                <div className="absolute h-full bg-red-500" style={{ width: `${(currentTime / duration) * 100}%` }} />
-                <input type="range" min={0} max={duration} value={currentTime} onChange={handleSeek} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+              <div 
+                ref={timelineRef}
+                className="relative h-2 bg-white/20 rounded-full cursor-pointer group/timeline hover:h-3 transition-all duration-200"
+                onMouseMove={handleTimelineMouseMove}
+                onMouseLeave={handleTimelineMouseLeave}
+                onClick={(e) => {
+                  if (!timelineRef.current) return;
+                  const rect = timelineRef.current.getBoundingClientRect();
+                  const offsetX = e.clientX - rect.left;
+                  const percentage = offsetX / rect.width;
+                  const time = percentage * duration;
+                  if (playerRef.current) {
+                    playerRef.current.currentTime(time);
+                    setCurrentTime(time);
+                  }
+                }}
+              >
+                {/* Buffered Bar */}
+                <div className="absolute h-full bg-white/30 rounded-full" style={{ width: '0%' }} />
+                
+                {/* Played Bar */}
+                <div className="absolute h-full bg-red-600 rounded-full" style={{ width: `${(currentTime / duration) * 100}%` }} />
+                
+                {/* Hover Ghost Bar */}
+                {hoverTime !== null && (
+                  <div className="absolute h-full bg-white/20 rounded-full" style={{ width: `${hoverPos}%` }} />
+                )}
+
+                {/* Thumb (visible on hover) */}
+                <div 
+                  className="absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-red-600 rounded-full shadow-lg scale-0 group-hover/timeline:scale-100 transition-transform duration-200"
+                  style={{ left: `${(currentTime / duration) * 100}%`, transform: 'translate(-50%, -50%) scale(var(--tw-scale-x))' }}
+                />
+
+                {/* Tooltip */}
+                {hoverTime !== null && (
+                  <div 
+                    className="absolute bottom-5 -translate-x-1/2 bg-black/80 text-white text-xs px-2 py-1 rounded border border-white/10 whitespace-nowrap pointer-events-none"
+                    style={{ left: `${hoverPos}%` }}
+                  >
+                    {formatTime(hoverTime)}
+                  </div>
+                )}
+
+                {/* Input Range (Invisible but functional for dragging) */}
+                <input 
+                  type="range" 
+                  min={0} 
+                  max={duration} 
+                  value={currentTime} 
+                  onChange={handleSeek} 
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" 
+                />
               </div>
-              <div className="flex justify-between text-xs text-gray-400 mt-1">
+              <div className="flex justify-between text-xs text-gray-400 mt-2 font-medium">
                 <span>{formatTime(currentTime)}</span><span>{formatTime(duration)}</span>
               </div>
             </div>
