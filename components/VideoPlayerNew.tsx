@@ -120,8 +120,14 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
 
   const toggleMute = useCallback(() => {
     if (playerRef.current) {
-      playerRef.current.muted(!playerRef.current.muted());
-      setIsMuted(playerRef.current.muted() || false);
+      const newMuted = !playerRef.current.muted();
+      playerRef.current.muted(newMuted);
+      setIsMuted(newMuted);
+      // Se stiamo riattivando l'audio e il volume è a 0, impostiamolo a un valore minimo
+      if (!newMuted && playerRef.current.volume() === 0) {
+        playerRef.current.volume(0.5);
+        setVolume(0.5);
+      }
     }
   }, []);
 
@@ -130,12 +136,15 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     if (playerRef.current) {
       playerRef.current.volume(newVolume);
       setVolume(newVolume);
-      if (newVolume > 0 && isMuted) {
+      if (newVolume > 0) {
         playerRef.current.muted(false);
         setIsMuted(false);
+      } else {
+        playerRef.current.muted(true);
+        setIsMuted(true);
       }
     }
-  }, [isMuted]);
+  }, []);
 
   const togglePiP = useCallback(async () => {
     const videoElement = playerRef.current?.el()?.querySelector('video');
@@ -168,17 +177,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         const track = tracks[i];
         track.enabled = track.id === trackId;
       }
-      // Aggiorna lo stato locale per riflettere il cambiamento nella UI
-      const updatedTracks = [];
-      for (let i = 0; i < tracks.length; i++) {
-        updatedTracks.push({
-          id: tracks[i].id,
-          label: tracks[i].label,
-          language: tracks[i].language,
-          enabled: tracks[i].enabled
-        });
-      }
-      setAudioTracks(updatedTracks);
+      // Lo stato locale verrà aggiornato automaticamente dall'event listener 'change' aggiunto nel useEffect
     }
   };
 
@@ -235,10 +234,21 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     });
     playerRef.current = player;
 
-    player.on('play', () => { setIsPlaying(true); setIsBuffering(false); });
-    player.on('pause', () => setIsPlaying(false));
-    player.on('waiting', () => setIsBuffering(true));
-    player.on('playing', () => setIsBuffering(false));
+    player.on('play', () => { 
+      if (!player.isDisposed()) {
+        setIsPlaying(true); 
+        setIsBuffering(false); 
+      }
+    });
+    player.on('pause', () => {
+      if (!player.isDisposed()) setIsPlaying(false);
+    });
+    player.on('waiting', () => {
+      if (!player.isDisposed()) setIsBuffering(true);
+    });
+    player.on('playing', () => {
+      if (!player.isDisposed()) setIsBuffering(false);
+    });
     player.on('volumechange', () => {
       if (!player.isDisposed()) {
         setVolume(player.volume() || 0);
@@ -262,18 +272,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     player.on('loadedmetadata', () => {
       if (player.isDisposed()) return;
       
-      // Get Audio Tracks
-      const tracks = player.audioTracks();
-      const tracksList = [];
-      for (let i = 0; i < tracks.length; i++) {
-        tracksList.push({
-          id: tracks[i].id,
-          label: tracks[i].label,
-          language: tracks[i].language,
-          enabled: tracks[i].enabled
-        });
-      }
-      setAudioTracks(tracksList);
+      updateAudioTracksList();
 
       const dur = player.duration() || 0;
       setDuration(dur);
@@ -296,8 +295,27 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     });
 
     // PiP Events
-    videoEl.addEventListener('enterpictureinpicture', () => setIsPiP(true));
-    videoEl.addEventListener('leavepictureinpicture', () => setIsPiP(false));
+    const handleEnterPiP = () => setIsPiP(true);
+    const handleLeavePiP = () => setIsPiP(false);
+    videoEl.addEventListener('enterpictureinpicture', handleEnterPiP);
+    videoEl.addEventListener('leavepictureinpicture', handleLeavePiP);
+
+    // Audio Track Change Event
+    const tracks = player.audioTracks();
+    const updateAudioTracksList = () => {
+      const tracksList = [];
+      for (let i = 0; i < tracks.length; i++) {
+        tracksList.push({
+          id: tracks[i].id,
+          label: tracks[i].label,
+          language: tracks[i].language,
+          enabled: tracks[i].enabled
+        });
+      }
+      setAudioTracks(tracksList);
+    };
+    
+    tracks.addEventListener('change', updateAudioTracksList);
 
     // Broadcast network status
     if (platformService.isElectron && window.electronAPI) {
@@ -323,8 +341,9 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
 
     return () => {
       if (networkStatusIntervalRef.current) clearInterval(networkStatusIntervalRef.current);
-      videoEl.removeEventListener('enterpictureinpicture', () => setIsPiP(true));
-      videoEl.removeEventListener('leavepictureinpicture', () => setIsPiP(false));
+      videoEl.removeEventListener('enterpictureinpicture', handleEnterPiP);
+      videoEl.removeEventListener('leavepictureinpicture', handleLeavePiP);
+      tracks.removeEventListener('change', updateAudioTracksList);
       if (playerRef.current) {
         playerRef.current.dispose();
         playerRef.current = null;
@@ -582,8 +601,8 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
             }
             const loaded = await castSession.loadMedia(channel.url, channel.cleanName || channel.name, channel.logo);
             setIsCastLoading(false);
-            if (loaded) {
-              playerRef.current?.pause();
+            if (loaded && playerRef.current && !playerRef.current.isDisposed()) {
+              playerRef.current.pause();
             }
             return loaded;
           }}
