@@ -1,46 +1,44 @@
 # 📺 StreamAI IPTV Player
 
 **StreamAI** è un player IPTV di nuova generazione sviluppato con **React 19**, **TypeScript**, **Electron** e **Tailwind CSS**. 
-Si distingue per l'integrazione con **Google Gemini AI**, che offre raccomandazioni intelligenti sui contenuti basate sulle preferenze dell'utente.
+Si distingue per l'integrazione con **Google Gemini AI**, che offre raccomandazioni intelligenti sui contenuti basate sulle preferenze dell'utente, e per un ecosistema di networking avanzato per il casting e il controllo remoto.
 
 ---
 
 ## ✨ Funzionalità Principali
 
-### 🎬 Riproduzione
-- **Live TV**: Streaming live con zapping veloce e buffering ottimizzato
-- **Movies (VOD)**: Film on-demand con seeking fluido e qualità adattiva
-- **Series**: Episodi con navigazione tra stagioni e puntate
-- **Codec HEVC/H.265**: Supporto nativo per video 4K con codec proprietari (via BranchBit)
-- **Player Nativo (Android)**: Utilizzo del player di sistema per massime prestazioni su mobile
+### 🎬 Riproduzione Avanzata
+- **Live TV**: Streaming live con zapping veloce e buffering ottimizzato.
+- **Movies (VOD)**: Film on-demand con seeking fluido, timeline interattiva e anteprima al passaggio del mouse.
+- **Series**: Episodi con navigazione tra stagioni e puntate, e salvataggio automatico del progresso.
+- **Codec HEVC/H.265**: Supporto nativo per video 4K con codec proprietari (via BranchBit).
+- **Player Nativo (Android)**: Utilizzo del player di sistema (ExoPlayer) per massime prestazioni su mobile.
+- **OSD (On-Screen Display)**: Feedback visivo immediato per volume, seeking, play/pausa e stato buffer.
 
-### 🎮 Controlli Player
-- **Picture-in-Picture (PiP)**: Guarda i contenuti in una finestra flottante (`P`)
-- **Fullscreen**: Schermo intero (`F`)
-- **Seeking**: Avanti/indietro 10 secondi con frecce (`←` `→`)
-- **Volume**: Controllo volume con frecce (`↑` `↓`) e mute (`M`)
-- **Riprendi da dove eri rimasto**: Salvataggio automatico della posizione per VOD/Series
-- **Riparti dall'inizio**: Pulsante per ricominciare la riproduzione
-- **Casting**: Supporto per la trasmissione su dispositivi compatibili (Chromecast, DLNA)
+### 📡 Networking & Casting
+- **Casting Universale**: Trasmissione su Chromecast, dispositivi DLNA/UPnP e AirPlay.
+- **Device Discovery**: Scansione profonda della rete locale (/24 subnet) per trovare tutti i dispositivi compatibili.
+- **Advertising Service**: L'app si annuncia sulla rete tramite mDNS (Bonjour), SSDP e DIAL, rendendosi visibile come target di casting per altre app.
+- **Controllo Remoto**: Architettura pronta per il controllo remoto tramite WebSocket e API REST locali.
 
 ### 🤖 AI Assistant
-- **Ricerca intelligente**: Chiedi all'AI cosa vuoi guardare
-- **Raccomandazioni personalizzate**: Basate sulla cronologia di visione
-- **Suggerimenti contestuali**: Diversi per Live, Movies e Series
-- **Caching Intelligente**: Risposte AI salvate localmente per ridurre latenza e costi
+- **Ricerca intelligente**: Chiedi all'AI cosa vuoi guardare con linguaggio naturale.
+- **Raccomandazioni personalizzate**: Basate sulla cronologia di visione e preferenze.
+- **Suggerimenti contestuali**: Diversi per Live, Movies e Series.
+- **Caching Intelligente**: Risposte AI salvate localmente per ridurre latenza e costi API.
 
 ### 👤 Profili Utente
-- **Multi-profilo**: Supporto per più utenti
-- **Cronologia separata**: Ogni profilo ha la sua cronologia
-- **Progresso salvato**: Riprendi da dove avevi interrotto
+- **Multi-profilo**: Supporto per più utenti con preferenze separate.
+- **Cronologia separata**: Ogni profilo mantiene la propria cronologia di visione.
+- **Progresso salvato**: Riprendi esattamente da dove avevi interrotto.
 
 ### 🔧 Ottimizzazioni Tecniche
-- **Virtualizzazione Liste**: Rendering efficiente per playlist con migliaia di canali
-- **Memoization**: Riduzione drastica dei re-render inutili
-- **Buffering differenziato**: Configurazioni separate per Live/VOD/Series
-- **Cache immagini**: Download intelligente delle copertine
-- **Avvio rapido**: Streaming ottimizzato per partenza immediata
-- **Network Monitor**: Visualizzazione velocità di rete e stato buffer in tempo reale
+- **Virtualizzazione Liste**: Rendering efficiente per playlist con migliaia di canali (react-window).
+- **Memoization**: Riduzione drastica dei re-render inutili per fluidità UI.
+- **Buffering differenziato**: Configurazioni separate per Live/VOD/Series.
+- **Cache immagini**: Download intelligente delle copertine per risparmio banda.
+- **Avvio rapido**: Streaming ottimizzato per partenza immediata.
+- **Network Monitor**: Visualizzazione velocità di rete e stato buffer in tempo reale (Debug Overlay).
 
 ---
 
@@ -64,8 +62,8 @@ npm install
 ```
 
 Il comando `npm install` esegue automaticamente lo script `patch-ffmpeg.js` che:
-- Scarica la distribuzione Electron con codec HEVC da BranchBit
-- Applica la patch solo se necessario (non riscarica se già installata)
+- Scarica la distribuzione Electron con codec HEVC da BranchBit.
+- Applica la patch solo se necessario (non riscarica se già installata).
 
 ---
 
@@ -145,24 +143,25 @@ npm run android:run
 - ✅ Fullscreen
 - ✅ Supporto HTTP cleartext per stream IPTV
 - ✅ Deep link `streamai://`
-- ❌ Casting (solo su Electron)
+- ❌ Casting (solo su Electron per ora)
 - ❌ Download locale (solo su Electron)
 
 ---
 
 ## ⌨️ Scorciatoie da Tastiera
 
+L'applicazione è completamente controllabile via tastiera per un'esperienza "Lean-back" (TV).
+
 | Tasto | Azione |
 |-------|--------|
-| `Spazio` / `Enter` | Play/Pausa |
-| `←` | -10s (VOD) / Canale precedente (Live) |
-| `→` | +10s (VOD) / Canale successivo (Live) |
-| `↑` | Volume + / Lista episodi (Series) |
-| `↓` | Volume - |
+| `Spazio` / `Invio` / `P` | Play/Pausa |
+| `←` / `→` | Seeking -/+ 10 secondi |
+| `↑` / `↓` | Volume +/- 10% |
 | `M` | Mute/Unmute |
-| `F` | Fullscreen |
-| `P` | Picture-in-Picture |
-| `Esc` | Chiudi lista/menu |
+| `F` | Fullscreen Toggle |
+| `C` | Menu Casting (Dispositivi) |
+| `L` | Mostra/Nascondi Playlist (Live/Serie) |
+| `Esc` | Indietro / Chiudi menu / Esci da Fullscreen |
 
 ---
 
@@ -185,16 +184,16 @@ Per le raccomandazioni AI, configura la chiave API in uno dei seguenti modi:
 ```
 streamai-iptv/
 ├── components/          # Componenti React
-│   ├── VideoPlayerNew.tsx # Player principale (Video.js + Nativo)
+│   ├── VideoPlayerNew.tsx # Player principale (Video.js + Nativo + OSD)
 │   ├── AIRecommender.tsx # Assistente AI
 │   ├── ChannelList.tsx  # Lista canali virtualizzata
-│   ├── SeriesDetail.tsx # Dettaglio serie
+│   ├── CastDevicePicker.tsx # Menu selezione dispositivi Cast
 │   └── ...
-├── services/            # Servizi
+├── services/            # Servizi (Business Logic)
 │   ├── geminiService.ts # Integrazione Gemini AI
-│   ├── profileService.ts # Gestione profili
-│   ├── xtream.ts        # API Xtream Codes
-│   ├── nativeVideoPlayer.ts # Bridge per player nativo
+│   ├── deviceDiscovery.ts # Scansione rete (mDNS, SSDP, ARP)
+│   ├── advertisingService.js # (Electron Main) Annuncio servizi rete
+│   ├── platformService.ts # Astrazione piattaforma
 │   └── ...
 ├── scripts/             # Script di build
 │   ├── patch-ffmpeg.js  # Patch codec HEVC

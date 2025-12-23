@@ -11,24 +11,26 @@ Questo file serve come guida e contesto per gli agenti AI che collaborano allo s
 - **Mobile Runtime:** Capacitor 7 (Android)
 - **Styling:** Tailwind CSS
 - **Video Player:** 
-  - *Web/Desktop:* Video.js
+  - *Web/Desktop:* Video.js (con OSD custom e Timeline interattiva)
   - *Android:* Capacitor Video Player (ExoPlayer nativo)
 - **AI:** Google Gemini API (@google/genai)
-- **Networking:** Bonjour (mDNS), Node-SSDP (UPnP/DIAL)
+- **Networking:** 
+  - *Discovery:* Scansione attiva subnet /24 (HTTP, WebSocket)
+  - *Advertising:* mDNS (Bonjour), SSDP, DIAL (via `advertisingService.js`)
 - **Icons:** Lucide React
 
 ## 📂 Struttura Directory Chiave
 - `/components`: Componenti UI.
-  - `VideoPlayerNew.tsx`: Player unificato che gestisce sia Video.js che il player nativo Android.
+  - `VideoPlayerNew.tsx`: Player unificato. Gestisce Video.js, OSD, Timeline, scorciatoie tastiera e bridge verso player nativo Android.
   - `ChannelList.tsx`: Lista canali virtualizzata (react-window) per alte prestazioni.
   - `AIRecommender.tsx`: Interfaccia utente per l'assistente AI.
+  - `CastDevicePicker.tsx`: UI per la selezione dei dispositivi di casting.
 - `/services`: Logica di business (Singleton pattern).
   - `platformService.ts`: Astrazione per gestire differenze tra Electron, Web e Capacitor.
   - `geminiService.ts`: Logica di interazione con Google Gemini.
   - `xtream.ts`: Client API per server IPTV Xtream Codes.
-  - `cacheService.ts`: Gestione caching locale (LocalStorage/IndexedDB).
   - `deviceDiscovery.ts`: Logica di scansione rete per trovare dispositivi Cast/DLNA.
-  - `advertisingService.js`: (Electron Main Process) Servizio per annunciare l'app via mDNS/SSDP.
+  - `advertisingService.js`: (Electron Main Process) Servizio per annunciare l'app via mDNS/SSDP. **Deve essere incluso nella build.**
 - `/android`: Progetto nativo Android (Gradle).
 - `/scripts`: Script di automazione (es. patching FFmpeg per Electron).
 
@@ -53,10 +55,10 @@ Queste funzionalità definiscono l'identità di StreamAI e devono essere preserv
 - **Requisito:** L'app deve essere controllabile al 100% senza mouse/touch (Telecomando TV/Tastiera).
 - **Mappatura Standard:**
   - `Spazio` / `Invio` / `P`: Play/Pausa
-  - `Freccia Sinistra/Destra`: Avanza avanti/indietro (Seeking)
-  - `Freccia Su/Giù`: Alza/Abbassa volume
+  - `Freccia Sinistra/Destra`: Avanza avanti/indietro (Seeking +/- 10s)
+  - `Freccia Su/Giù`: Alza/Abbassa volume (+/- 10%)
   - `M`: Mute/Unmute
-  - `F`: Fullscreen
+  - `F`: Fullscreen Toggle
   - `C`: Cast (apre menu dispositivi)
   - `L`: Lista canali (LIVE) o Lista episodi (SERIE TV)
   - `Esc`: Indietro/Chiudi menu
@@ -65,7 +67,8 @@ Queste funzionalità definiscono l'identità di StreamAI e devono essere preserv
 - **Filosofia:** "Write Once, Run Everywhere". L'aspetto visivo deve essere coerente su Linux, Windows e Android.
 - **Regole:**
   - Usa Tailwind CSS per il responsive design.
-  - Evita layout radicalmente diversi per mobile se non per adattamento spazi.
+  - **OSD (On-Screen Display):** Feedback visivo obbligatorio per ogni azione utente (Volume, Seek, Play/Pausa).
+  - **Timeline:** Deve mostrare tooltip al passaggio del mouse e anteprima della posizione (ghost bar).
   - Mantieni sempre la classe `tv-focus` per la navigazione spaziale.
 
 ## 📏 Convenzioni di Codice (Coding Standards)
@@ -98,7 +101,7 @@ Queste funzionalità definiscono l'identità di StreamAI e devono essere preserv
 1.  **Codec HEVC:** Su Electron, usiamo una build custom di FFmpeg scaricata via `scripts/patch-ffmpeg.js`. Non modificare questo script senza cautela.
 2.  **Player Android:** Su Android, il tag `<video>` HTML5 ha performance scarse per IPTV. Usare sempre il player nativo tramite `nativeVideoPlayer.ts` quando `platformService.isNative` è true.
 3.  **Mixed Content:** L'app deve poter riprodurre stream HTTP (non sicuri) anche se l'app è servita in contesto sicuro. Questo è configurato in `electron/main.js` e `android/app/src/main/AndroidManifest.xml` (usesCleartextTraffic).
-4.  **Electron Build:** Assicurarsi che la cartella `services` sia inclusa in `package.json` -> `build.files` affinché `advertisingService.js` sia disponibile nella build di produzione.
+4.  **Electron Build:** Assicurarsi che la cartella `services` sia inclusa in `package.json` -> `build.files` affinché `advertisingService.js` sia disponibile nella build di produzione (ASAR).
 
 ## 🚀 Comandi Utili
 - `npm run dev`: Avvio sviluppo Electron.
