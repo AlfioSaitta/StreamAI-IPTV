@@ -72,7 +72,7 @@
     ],
     "linux": {
       "target": [
-        "tar.gz"
+          "pacman"
       ],
       "category": "Video",
       "maintainer": "StreamAI",
