@@ -1,6 +1,5 @@
 
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { FixedSizeList as List } from 'react-window';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Category, Channel, StreamType, WatchHistoryItem } from '../types.ts';
 import { Search, Play, Info, ChevronRight, LogOut, Clock, RefreshCw, BookmarkPlus, BookmarkCheck, Settings, X } from 'lucide-react';
 import CachedImage from './CachedImage.tsx';

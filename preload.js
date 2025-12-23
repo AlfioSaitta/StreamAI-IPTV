@@ -31,5 +31,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (event, command) => callback(command);
     ipcRenderer.on('remote-control-command', handler);
     return () => ipcRenderer.removeListener('remote-control-command', handler);
+  },
+  onRequestStatusBroadcast: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on('request-status-broadcast', handler);
+    return () => ipcRenderer.removeListener('request-status-broadcast', handler);
   }
 });

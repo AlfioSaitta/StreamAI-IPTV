@@ -181,12 +181,53 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     }
   };
 
+  // Ref per debouncing broadcast
+  const lastBroadcastRef = useRef<number>(0);
+
+  // Broadcast status to remote devices
+  const broadcastStatus = useCallback((force = false) => {
+    if (!platformService.isElectron || !window.electronAPI?.updatePlaybackStatus || !playerRef.current || playerRef.current.isDisposed()) return;
+    
+    // Throttle broadcast: non più di una volta ogni 500ms, a meno che non sia forzato
+    const now = Date.now();
+    if (!force && now - lastBroadcastRef.current < 500) return;
+    lastBroadcastRef.current = now;
+
+    const player = playerRef.current;
+    
+    // Extract series info if possible
+    let seriesInfo = {};
+    if (channel?.type === 'series') {
+      const name = channel.name;
+      const sMatch = name.match(/S(\d+)/i);
+      const eMatch = name.match(/E(\d+)/i);
+      if (sMatch || eMatch) {
+        seriesInfo = {
+          season: sMatch ? parseInt(sMatch[1]) : undefined,
+          episode: eMatch ? parseInt(eMatch[1]) : undefined
+        };
+      }
+    }
+
+    window.electronAPI.updatePlaybackStatus({
+      channelName: channel?.name,
+      cleanName: channel?.cleanName,
+      logo: channel?.logo,
+      group: channel?.group,
+      currentTime: player.currentTime() || 0,
+      duration: player.duration() || 0,
+      isPlaying: !player.paused(),
+      type: channel?.type,
+      ...seriesInfo
+    });
+  }, [channel]);
+
   // --- INITIALIZATION & EVENT HANDLING ---
 
   useEffect(() => {
     if (!channel) return;
 
-    // Reset state for new channel
+    // Reset state for a new channel
     setIsPlaying(false);
     setIsBuffering(true);
     setCurrentTime(0);
@@ -233,26 +274,46 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       sources: [{ src: source, type: sourceType }],
     });
     playerRef.current = player;
+    
+    // Initial broadcast to announce existence
+    broadcastStatus();
 
     player.on('play', () => { 
       if (!player.isDisposed()) {
         setIsPlaying(true); 
         setIsBuffering(false); 
+        if ('mediaSession' in navigator) {
+          navigator.mediaSession.playbackState = 'playing';
+        }
+        broadcastStatus();
       }
     });
     player.on('pause', () => {
-      if (!player.isDisposed()) setIsPlaying(false);
+      if (!player.isDisposed()) {
+        setIsPlaying(false);
+        if ('mediaSession' in navigator) {
+          navigator.mediaSession.playbackState = 'paused';
+        }
+        broadcastStatus();
+      }
     });
     player.on('waiting', () => {
       if (!player.isDisposed()) setIsBuffering(true);
     });
     player.on('playing', () => {
-      if (!player.isDisposed()) setIsBuffering(false);
+      if (!player.isDisposed()) {
+        setIsBuffering(false);
+        broadcastStatus();
+      }
+    });
+    player.on('seeked', () => {
+      if (!player.isDisposed()) broadcastStatus();
     });
     player.on('volumechange', () => {
       if (!player.isDisposed()) {
         setVolume(player.volume() || 0);
         setIsMuted(player.muted() || false);
+        broadcastStatus();
       }
     });
     player.on('timeupdate', () => {
@@ -264,7 +325,10 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       }
     });
     player.on('durationchange', () => {
-      if (!player.isDisposed()) setDuration(player.duration() || 0);
+      if (!player.isDisposed()) {
+        setDuration(player.duration() || 0);
+        broadcastStatus();
+      }
     });
     player.on('fullscreenchange', () => {
       if (!player.isDisposed()) setIsFullscreen(player.isFullscreen() || false);
@@ -280,8 +344,12 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         player.currentTime(dur * initialProgress);
       }
       player.play().catch(e => console.warn("Autoplay bloccato:", e));
+      broadcastStatus();
     });
-    player.on('ended', () => { if (onNext) onNext(); });
+    player.on('ended', () => { 
+      if (onNext) onNext(); 
+      broadcastStatus();
+    });
     player.on('error', () => {
        const err = player.error();
        console.error("VideoJS Error:", err);
@@ -292,6 +360,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
        } else {
           setError('Errore di riproduzione');
        }
+       broadcastStatus();
     });
 
     // PiP Events
@@ -327,16 +396,10 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
              setNetworkSpeed(stats.bandwidth / 1024 / 1024); // Mbps
           }
 
-          // Check if player is playing safely
-          if (!player.paused() && window.electronAPI?.updatePlaybackStatus) {
-            window.electronAPI.updatePlaybackStatus({
-              channelName: channel.name,
-              currentTime: player.currentTime() || 0,
-              duration: player.duration() || 0,
-            });
-          }
+          // Periodic broadcast (meno frequente per risparmiare risorse)
+          broadcastStatus();
         }
-      }, 2000);
+      }, 5000);
     }
 
     return () => {
@@ -349,12 +412,68 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         playerRef.current = null;
       }
     };
-  }, [channel, initialProgress, onBack, onNext, onProgress]);
+  }, [channel, initialProgress, onBack, onNext, onProgress, broadcastStatus]);
+
+  // Media Session API integration
+  useEffect(() => {
+    if (!('mediaSession' in navigator) || !channel) return;
+
+    navigator.mediaSession.metadata = new window.MediaMetadata({
+      title: channel.cleanName || channel.name,
+      artist: channel.group || 'StreamAI IPTV',
+      artwork: [
+        { src: channel.logo || 'icon.png', sizes: '512x512', type: 'image/png' }
+      ]
+    });
+
+    const actionHandlers: [MediaSessionAction, () => void][] = [
+      ['play', togglePlay],
+      ['pause', togglePlay],
+      ['previoustrack', () => onPrev?.()],
+      ['nexttrack', () => onNext?.()],
+      ['seekbackward', () => skip(-10)],
+      ['seekforward', () => skip(10)],
+    ];
+
+    for (const [action, handler] of actionHandlers) {
+      try {
+        navigator.mediaSession.setActionHandler(action, handler);
+      } catch (error) {
+        console.warn(`MediaSession action ${action} non supportata.`);
+      }
+    }
+
+    return () => {
+      actionHandlers.forEach(([action]) => {
+        try {
+          navigator.mediaSession.setActionHandler(action, null);
+        } catch (error) {}
+      });
+    };
+  }, [channel, togglePlay, skip, onPrev, onNext]);
+
+  // Update Media Session position state
+  useEffect(() => {
+    if (!('mediaSession' in navigator) || !playerRef.current) return;
+    
+    try {
+      if (duration > 0) {
+        navigator.mediaSession.setPositionState({
+          duration: duration,
+          playbackRate: 1,
+          position: currentTime
+        });
+      }
+      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+    } catch (error) {
+      console.warn("Errore aggiornamento MediaSession position state:", error);
+    }
+  }, [currentTime, duration, isPlaying]);
 
   // Remote Control Handler
   useEffect(() => {
     if (platformService.isElectron && window.electronAPI && window.electronAPI.onRemoteControlCommand) {
-      const unsubscribe = window.electronAPI.onRemoteControlCommand((command: any) => {
+      const unsubCommand = window.electronAPI.onRemoteControlCommand((command: any) => {
         const player = playerRef.current;
         if (!player || player.isDisposed()) return;
 
@@ -363,11 +482,62 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
           case 'pause': player.pause(); break;
           case 'seek': if (typeof command.value === 'number') player.currentTime(command.value); break;
           case 'skip': if (typeof command.value === 'number') player.currentTime((player.currentTime() || 0) + command.value); break;
+          case 'volume': 
+            if (typeof command.value === 'number') {
+              const newVol = Math.max(0, Math.min(1, command.value));
+              player.volume(newVol);
+              setVolume(newVol);
+              if (newVol > 0) {
+                player.muted(false);
+                setIsMuted(false);
+              } else {
+                player.muted(true);
+                setIsMuted(true);
+              }
+            }
+            break;
+          case 'volumeUp': {
+            const upVol = Math.min(1, (player.volume() || 0) + 0.1);
+            player.volume(upVol);
+            setVolume(upVol);
+            if (upVol > 0) {
+              player.muted(false);
+              setIsMuted(false);
+            }
+            break;
+          }
+          case 'volumeDown': {
+            const downVol = Math.max(0, (player.volume() || 0) - 0.1);
+            player.volume(downVol);
+            setVolume(downVol);
+            if (downVol === 0) {
+              player.muted(true);
+              setIsMuted(true);
+            }
+            break;
+          }
+          case 'mute':
+            const newMuted = !player.muted();
+            player.muted(newMuted);
+            setIsMuted(newMuted);
+            if (!newMuted && player.volume() === 0) {
+              player.volume(0.5);
+              setVolume(0.5);
+            }
+            break;
         }
       });
-      return unsubscribe;
+
+      const unsubRequest = window.electronAPI.onRequestStatusBroadcast(() => {
+        broadcastStatus();
+      });
+
+      return () => {
+        unsubCommand();
+        unsubRequest();
+      };
     }
-  }, []);
+  }, [broadcastStatus]);
 
   // --- UI EFFECTS ---
 
