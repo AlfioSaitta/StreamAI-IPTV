@@ -4,7 +4,7 @@ import { Channel, XtreamCredentials, WatchHistoryItem } from '../types.ts';
 import { getSeriesInfo } from '../services/xtream.ts';
 import { MetadataService } from '../services/metadata.ts';
 import { useLanguage } from '../contexts/LanguageContext.tsx';
-import { Play, ArrowLeft, Film } from 'lucide-react';
+import { ArrowLeft, Film } from 'lucide-react';
 import LoadingState from './shared/LoadingState.tsx';
 import ErrorState from './shared/ErrorState.tsx';
 import WatchlistButton from './shared/WatchlistButton.tsx';
@@ -157,7 +157,7 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
       
       {/* Background */}
       <div className="absolute inset-0 z-0 h-[80vh]">
-          <img src={backdrop} alt="" className="w-full h-full object-cover opacity-40" />
+          <img src={backdrop || ''} alt="" className="w-full h-full object-cover opacity-40" />
           <div className="absolute inset-0 bg-gradient-to-t from-[#141414] via-[#141414]/60 to-transparent" />
           <div className="absolute inset-0 bg-gradient-to-r from-[#141414] via-[#141414]/80 to-transparent" />
       </div>
@@ -172,7 +172,7 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
                   <ArrowLeft className="w-4 h-4" /> {t.back}
               </button>
               
-              <img src={poster} className="w-2/3 md:w-3/4 rounded-md shadow-2xl mb-8 self-center md:self-start" alt="Cover" />
+              <img src={poster || ''} className="w-2/3 md:w-3/4 rounded-md shadow-2xl mb-8 self-center md:self-start" alt="Cover" />
 
               <h1 className="text-4xl md:text-5xl font-bold text-white mb-4 leading-tight">{seriesName}</h1>
 

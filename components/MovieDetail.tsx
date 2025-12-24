@@ -27,8 +27,6 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
   const [error, setError] = useState<string | null>(null);
   const [liked, setLiked] = useState(false);
 
-  const isInWatchlist = watchlistIds.includes(movie.id);
-
   useEffect(() => {
     const fetchDetails = async () => {
       try {
