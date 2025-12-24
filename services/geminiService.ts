@@ -17,7 +17,39 @@ const apiKey = getApiKey();
 let aiInstance: any = null;
 let currentKey: string | null = null;
 
+// Circuit Breaker State
+const SUSPENSION_KEY = 'ai_service_suspended_until';
+const SUSPENSION_DURATION = 30 * 60 * 1000; // 30 minutes
+
+const isSuspended = (): boolean => {
+  const suspendedUntil = localStorage.getItem(SUSPENSION_KEY);
+  if (!suspendedUntil) return false;
+  
+  const now = Date.now();
+  if (now < parseInt(suspendedUntil)) {
+    return true;
+  } else {
+    localStorage.removeItem(SUSPENSION_KEY);
+    return false;
+  }
+};
+
+const suspendService = () => {
+  const until = Date.now() + SUSPENSION_DURATION;
+  localStorage.setItem(SUSPENSION_KEY, until.toString());
+  console.warn(`[AI Service] Suspended for 30 minutes due to critical error.`);
+};
+
+export const isAiAvailable = (): boolean => {
+  return !isSuspended() && (!!apiKey || !!(import.meta as any).env?.VITE_GEMINI_API_KEY);
+};
+
 const getAI = async (customApiKey?: string) => {
+  if (isSuspended()) {
+    console.log("[AI Service] Service is currently suspended.");
+    return null;
+  }
+
   const activeKey = customApiKey || apiKey;
   
   // Se la chiave è cambiata, ricrea l'istanza
@@ -36,6 +68,65 @@ const getAI = async (customApiKey?: string) => {
   }
 };
 
+export interface MovieEnrichment {
+  cast: string[];
+  similarMovies: string[];
+  funFact?: string;
+}
+
+export const getMovieEnrichment = async (
+  movieTitle: string,
+  useCache: boolean = true
+): Promise<MovieEnrichment | null> => {
+  if (isSuspended()) return null;
+
+  const cacheKey = `ai_enrich_${movieTitle.toLowerCase().trim().replace(/[^a-z0-9]/g, '')}`;
+  
+  if (useCache) {
+    try {
+      const cached = await CacheService.getApiData(cacheKey);
+      if (cached) return cached;
+    } catch (e) {
+      console.warn("Cache error:", e);
+    }
+  }
+
+  const ai = await getAI();
+  if (!ai) return null;
+
+  const prompt = `Analizza il film "${movieTitle}".
+Restituisci un JSON con questi campi:
+- "cast": array di stringhe con i 5 attori principali.
+- "similarMovies": array di stringhe con 5 titoli di film simili per genere o atmosfera.
+- "funFact": una curiosità breve e interessante sul film (in italiano).
+
+Rispondi SOLO con il JSON.`;
+
+  try {
+    const result = await ai.models.generateContent({
+      model: "gemini-2.0-flash",
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      config: { temperature: 0.1 }
+    });
+
+    const text = result?.text || "";
+    const jsonMatch = text.match(/\{[\s\S]*?\}/);
+    
+    if (jsonMatch) {
+      const data = JSON.parse(jsonMatch[0]) as MovieEnrichment;
+      if (useCache) CacheService.saveApiData(cacheKey, data);
+      return data;
+    }
+  } catch (e: any) {
+    console.error("AI Enrichment error:", e);
+    // Se è un errore server (5xx) o di quota (429), sospendi il servizio
+    if (e.message?.includes('500') || e.message?.includes('503') || e.message?.includes('429')) {
+      suspendService();
+    }
+  }
+  return null;
+};
+
 export const getRecommendations = async (
   channels: Channel[], 
   userPreference: string,
@@ -44,6 +135,10 @@ export const getRecommendations = async (
   useCache: boolean = true,
   customApiKey?: string
 ): Promise<Recommendation[]> => {
+  if (isSuspended()) {
+    return [{ channelName: "AI non disponibile", reason: "Servizio temporaneamente sospeso." }];
+  }
+
   // 0. Check Cache
   const cacheKey = `ai_recommend_${context}_${userPreference.toLowerCase().trim()}`;
   if (useCache) {
@@ -146,6 +241,13 @@ ${JSON.stringify(selectedItems)}`;
   } catch (error: any) {
     console.error("Gemini API Error:", error);
     const errorMessage = error?.message || "";
+    
+    // Circuit Breaker Trigger
+    if (errorMessage.includes("500") || errorMessage.includes("503") || errorMessage.includes("429") || errorMessage.includes("fetch failed")) {
+      suspendService();
+      return [{ channelName: "Servizio Sospeso", reason: "L'AI è temporaneamente non disponibile. Riprova più tardi." }];
+    }
+
     if (errorMessage.includes("404") || errorMessage.includes("not found")) {
       return [
         { channelName: "Errore Configurazione", reason: "Il modello AI non è stato trovato. Verifica la versione API." }

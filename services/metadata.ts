@@ -121,6 +121,14 @@ export const MetadataService = {
       console.warn(`Failed to get details for ${title}:`, err);
       return null;
     }
+   * Convenience method to search and get details in one go.
+   */
+  getDetailsByTitle: async (title: string, type: 'movie' | 'series', year?: string, language: string = 'it') => {
+    const searchResult = await MetadataService.searchTMDB(title, type, year, language);
+    if (searchResult?.id) {
+      return await MetadataService.getDetails(searchResult.id, type, language);
+    }
+    return null;
   },
 
   /**

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Sparkles, Loader2, Play, Search, X, Tv, Film, Clapperboard } from 'lucide-react';
-import { getRecommendations } from '../services/geminiService.ts';
+import { getRecommendations, isAiAvailable } from '../services/geminiService.ts';
 import { Channel, Recommendation, StreamType, WatchHistoryItem } from '../types.ts';
 
 interface AIRecommenderProps {
@@ -18,6 +18,11 @@ const AIRecommender: React.FC<AIRecommenderProps> = ({ channels, onPlayChannel, 
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Check if AI is available (Circuit Breaker)
+  if (!isAiAvailable()) {
+    return null;
+  }
 
   // Focus input when opened
   useEffect(() => {

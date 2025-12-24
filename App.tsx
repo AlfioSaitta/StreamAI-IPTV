@@ -18,6 +18,7 @@ import { i18n } from './services/i18n.ts';
 import { Category, Channel, XtreamCredentials, StreamType, Profile } from './types.ts';
 import { Server, Wifi } from 'lucide-react';
 import { platformService } from './services/platformService.ts';
+import { isAiAvailable } from './services/geminiService.ts';
 
 // Componente per visualizzare lo stato di riproduzione in rete
 const NetworkStatusBanner = () => {
@@ -511,7 +512,7 @@ function App() {
           />
         )}
 
-        {!currentChannel && !selectedSeries && (liveCategories.length > 0 || vodCategories.length > 0) && (
+        {!currentChannel && !selectedSeries && (liveCategories.length > 0 || vodCategories.length > 0) && isAiAvailable() && (
             <AIRecommender
               channels={getCurrentCategories().flatMap(c => c.channels)}
               onPlayChannel={handlePlayRecommended}
