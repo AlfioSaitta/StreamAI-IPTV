@@ -101,6 +101,29 @@ export const MetadataService = {
   },
 
   /**
+   * Helper to get details by searching for a title first, then fetching full details.
+   * This encapsulates the common pattern of search-then-fetch used across components.
+   * 
+   * @param title - The title to search for (cleanName or name)
+   * @param type - 'movie' or 'series'
+   * @param year - Optional year to narrow down search results
+   * @param language - Language code for results (default: 'it')
+   * @returns Full TMDB details if found, null otherwise
+   */
+  getDetailsByTitle: async (title: string, type: 'movie' | 'series', year?: string, language: string = 'it') => {
+    try {
+      const result = await MetadataService.searchTMDB(title, type, year, language);
+      if (result?.id) {
+        return await MetadataService.getDetails(result.id, type, language);
+      }
+      return null;
+    } catch (err) {
+      console.warn(`Failed to get details for ${title}:`, err);
+      return null;
+    }
+  },
+
+  /**
    * Helper to get a high-quality image URL
    */
   getImageUrl: (path: string | null | undefined, size: 'w500' | 'w780' | 'w1280' | 'original' = 'w500') => {

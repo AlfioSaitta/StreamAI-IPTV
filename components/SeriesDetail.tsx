@@ -65,12 +65,10 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
         if (firstSeason) setActiveSeason(firstSeason);
 
         const fetchTmdb = async () => {
-            let result = null;
-            if (series.cleanName) result = await MetadataService.searchTMDB(series.cleanName, 'series', series.year, language);
-            if (!result && series.name) result = await MetadataService.searchTMDB(series.name, 'series', series.year, language);
-            if (result && result.id) {
-                const fullDetails = await MetadataService.getDetails(result.id, 'series', language);
-                setTmdbData(fullDetails);
+            const searchTitle = series.cleanName || series.name;
+            const details = await MetadataService.getDetailsByTitle(searchTitle, 'series', series.year, language);
+            if (details) {
+                setTmdbData(details);
             }
         };
         fetchTmdb();

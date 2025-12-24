@@ -13,6 +13,16 @@ interface MediaImages {
   poster: string | null;
 }
 
+/**
+ * Custom hook for resolving media images (backdrop and poster).
+ * 
+ * The fallback order differs between movies and series due to data source priorities:
+ * - Movies: Prefer logo from IPTV server (often higher quality) → TMDB backdrop → TMDB images
+ * - Series: Prefer TMDB backdrop (more consistent) → server cover → logo fallback
+ * 
+ * This difference reflects the typical data quality patterns in IPTV servers where
+ * movie logos are often well-maintained, while series benefit from TMDB's standardized data.
+ */
 export const useMediaImages = ({ 
   tmdbData, 
   fallbackLogo, 

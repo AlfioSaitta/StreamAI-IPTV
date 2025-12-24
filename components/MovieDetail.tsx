@@ -38,10 +38,7 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
           details = await MetadataService.getDetails(movie.tmdbId, 'movie', language);
         } else {
           const searchTitle = movie.cleanName || movie.name;
-          const result = await MetadataService.searchTMDB(searchTitle, 'movie', movie.year, language);
-          if (result?.id) {
-            details = await MetadataService.getDetails(result.id, 'movie', language);
-          }
+          details = await MetadataService.getDetailsByTitle(searchTitle, 'movie', movie.year, language);
         }
 
         setTmdbData(details);
