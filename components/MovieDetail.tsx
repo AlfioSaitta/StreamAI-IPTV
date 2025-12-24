@@ -2,6 +2,12 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Channel, WatchHistoryItem } from '../types.ts';
 import { MetadataService } from '../services/metadata.ts';
 import { useLanguage } from '../contexts/LanguageContext.tsx';
+import { Play, X, ThumbsUp } from 'lucide-react';
+import LoadingState from './shared/LoadingState.tsx';
+import ErrorState from './shared/ErrorState.tsx';
+import WatchlistButton from './shared/WatchlistButton.tsx';
+import { useMediaImages } from '../hooks/useMediaImages.ts';
+import { useMediaMetadata } from '../hooks/useMediaMetadata.ts';
 import { Play, X, BookmarkPlus, BookmarkCheck, ThumbsUp, Loader2, Sparkles, Film, Users } from 'lucide-react';
 import { getMovieEnrichment, MovieEnrichment, isAiAvailable } from '../services/geminiService.ts';
 
@@ -35,6 +41,14 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
         setError(null);
         setTmdbData(null);
 
+        let details = null;
+        if (movie.tmdbId) {
+          details = await MetadataService.getDetails(movie.tmdbId, 'movie', language);
+        } else {
+          const searchTitle = movie.cleanName || movie.name;
+          details = await MetadataService.getDetailsByTitle(searchTitle, 'movie', movie.year, language);
+        }
+
         const movieTitle = movie.cleanName || movie.name;
         
         // Use the new convenience method
@@ -52,6 +66,17 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
     fetchDetails();
   }, [movie, language, t]);
 
+  // Use shared hooks for images and metadata
+  const { backdrop, poster } = useMediaImages({ 
+    tmdbData, 
+    fallbackLogo: movie.logo, 
+    type: 'movie' 
+  });
+
+  const { cast, director, genre, rating, plot } = useMediaMetadata({ 
+    tmdbData, 
+    channel: movie 
+  });
   // 2. Fetch AI Enrichment (Background & Optional)
   useEffect(() => {
     const fetchAiData = async () => {
@@ -170,21 +195,11 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
   const hasProgress = progress > 0.01;
 
   if (loading) {
-    return (
-      <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[90] flex flex-col items-center justify-center text-white">
-        <Loader2 className="w-14 h-14 animate-spin text-red-500 mb-4" />
-        <p className="text-lg text-gray-300">{t.loading}</p>
-      </div>
-    );
+    return <LoadingState message={t.loading} variant="movie" />;
   }
 
   if (error) {
-    return (
-      <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[90] flex flex-col items-center justify-center text-white px-8 text-center">
-        <p className="text-2xl text-red-400 mb-6">{error}</p>
-        <button onClick={onClose} className="tv-focus px-6 py-3 bg-white/10 rounded-lg hover:bg-white/20 border border-white/10">{t.close}</button>
-      </div>
-    );
+    return <ErrorState message={error} buttonText={t.close} onButtonClick={onClose} variant="movie" />;
   }
 
   return (
@@ -247,13 +262,13 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
                 </button>
               )}
 
-              <button
-                onClick={() => onToggleWatchlist(movie.id)}
-                className="tv-focus flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white px-5 py-3 rounded-lg border border-white/15 transition-colors"
-              >
-                {isInWatchlist ? <BookmarkCheck className="w-5 h-5" /> : <BookmarkPlus className="w-5 h-5" />}
-                <span className="text-sm font-semibold">{isInWatchlist ? t.removeFromList : t.addToList}</span>
-              </button>
+              <WatchlistButton
+                isInWatchlist={watchlistIds.includes(movie.id)}
+                onToggle={() => onToggleWatchlist(movie.id)}
+                addText={t.addToList}
+                removeText={t.removeFromList}
+                variant="movie"
+              />
 
               <button
                 onClick={() => setLiked(prev => !prev)}
