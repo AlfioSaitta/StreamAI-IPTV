@@ -4,7 +4,12 @@ import { Channel, XtreamCredentials, WatchHistoryItem } from '../types.ts';
 import { getSeriesInfo } from '../services/xtream.ts';
 import { MetadataService } from '../services/metadata.ts';
 import { useLanguage } from '../contexts/LanguageContext.tsx';
-import { Play, ArrowLeft, Loader2, Film, BookmarkPlus, BookmarkCheck } from 'lucide-react';
+import { Play, ArrowLeft, Film } from 'lucide-react';
+import LoadingState from './shared/LoadingState.tsx';
+import ErrorState from './shared/ErrorState.tsx';
+import WatchlistButton from './shared/WatchlistButton.tsx';
+import { useMediaImages } from '../hooks/useMediaImages.ts';
+import { useMediaMetadata } from '../hooks/useMediaMetadata.ts';
 
 interface SeriesDetailProps {
   series: Channel;
@@ -121,31 +126,30 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
   };
 
   if (loading) {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center bg-[#141414] text-white h-full z-50 fixed inset-0">
-        <Loader2 className="w-16 h-16 animate-spin text-red-600 mb-6" />
-        <p className="text-2xl text-gray-400">{t.loading}</p>
-      </div>
-    );
+    return <LoadingState message={t.loading} variant="series" />;
   }
 
   if (error) {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center bg-[#141414] text-white h-full z-50 fixed inset-0">
-        <p className="text-3xl text-red-400 mb-8">{error}</p>
-        <button onClick={onBack} className="tv-focus text-xl bg-gray-800 px-8 py-4 rounded-lg">{t.back}</button>
-      </div>
-    );
+    return <ErrorState message={error} buttonText={t.back} onButtonClick={onBack} variant="series" />;
   }
 
   const seasons = Object.keys(episodes).sort((a, b) => Number(a) - Number(b));
   const currentEpisodes = episodes[activeSeason] || [];
-  const isInWatchlist = watchlistIds.includes(series.id);
 
-  const backdrop = MetadataService.getImageUrl(tmdbData?.backdrop_path, 'original') || info?.backdrop_path?.[0] || info?.cover || series.logo;
-  const poster = info?.cover || MetadataService.getImageUrl(tmdbData?.poster_path) || series.logo;
-  const plot = info?.plot || series.description || tmdbData?.overview;
-  const rating = info?.rating || info?.rating_5based || (tmdbData?.vote_average ? String(tmdbData.vote_average).substring(0,3) : null);
+  // Use shared hooks for images and metadata
+  const { backdrop, poster } = useMediaImages({ 
+    tmdbData, 
+    fallbackLogo: series.logo, 
+    type: 'series',
+    serverCover: info?.cover
+  });
+
+  const { rating, plot } = useMediaMetadata({ 
+    tmdbData, 
+    channel: series,
+    serverInfo: info
+  });
+
   const seriesName = info?.name || series.name || tmdbData?.name;
 
   return (
@@ -179,13 +183,13 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
               </div>
 
               <div className="flex items-center gap-3 mb-8">
-                  <button
-                    onClick={() => onToggleWatchlist(series.id)}
-                    className="tv-focus flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg border border-white/10 transition-colors"
-                  >
-                      {isInWatchlist ? <BookmarkCheck className="w-4 h-4" /> : <BookmarkPlus className="w-4 h-4" />}
-                      <span className="text-sm font-semibold">{isInWatchlist ? t.removeFromList : t.addToList}</span>
-                  </button>
+                  <WatchlistButton
+                    isInWatchlist={watchlistIds.includes(series.id)}
+                    onToggle={() => onToggleWatchlist(series.id)}
+                    addText={t.addToList}
+                    removeText={t.removeFromList}
+                    variant="series"
+                  />
               </div>
 
               <p className="text-lg text-gray-300 leading-relaxed font-light mb-8">{plot}</p>

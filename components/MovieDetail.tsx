@@ -2,7 +2,12 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Channel, WatchHistoryItem } from '../types.ts';
 import { MetadataService } from '../services/metadata.ts';
 import { useLanguage } from '../contexts/LanguageContext.tsx';
-import { Play, X, BookmarkPlus, BookmarkCheck, ThumbsUp, Loader2 } from 'lucide-react';
+import { Play, X, ThumbsUp } from 'lucide-react';
+import LoadingState from './shared/LoadingState.tsx';
+import ErrorState from './shared/ErrorState.tsx';
+import WatchlistButton from './shared/WatchlistButton.tsx';
+import { useMediaImages } from '../hooks/useMediaImages.ts';
+import { useMediaMetadata } from '../hooks/useMediaMetadata.ts';
 
 interface MovieDetailProps {
   movie: Channel;
@@ -53,57 +58,17 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
     fetchDetails();
   }, [movie, language, t]);
 
-  const backdrop = useMemo(() => {
-    return (
-      movie.logo ||
-      MetadataService.getImageUrl(tmdbData?.backdrop_path, 'original') ||
-      tmdbData?.images?.backdrops?.[0]?.file_path && MetadataService.getImageUrl(tmdbData.images.backdrops[0].file_path, 'original')
-    );
-  }, [tmdbData, movie.logo]);
+  // Use shared hooks for images and metadata
+  const { backdrop, poster } = useMediaImages({ 
+    tmdbData, 
+    fallbackLogo: movie.logo, 
+    type: 'movie' 
+  });
 
-  const poster = useMemo(() => {
-    return (
-      movie.logo ||
-      MetadataService.getImageUrl(tmdbData?.poster_path) ||
-      tmdbData?.images?.posters?.[0]?.file_path && MetadataService.getImageUrl(tmdbData.images.posters[0].file_path)
-    );
-  }, [tmdbData, movie.logo]);
-
-  // Priorità ai dati del server Xtream, TMDB come fallback
-  const plot = movie.description || tmdbData?.overview || '';
-
-  const cast = useMemo(() => {
-    // Prima usa i dati del server
-    if (movie.cast) return movie.cast;
-    // Fallback a TMDB
-    const castList = tmdbData?.credits?.cast?.slice(0, 6).map((c: any) => c.name) || [];
-    return castList.join(', ');
-  }, [tmdbData, movie.cast]);
-
-  const director = useMemo(() => {
-    // Prima usa i dati del server
-    if (movie.director) return movie.director;
-    // Fallback a TMDB
-    const crew = tmdbData?.credits?.crew || [];
-    const dir = crew.find((c: any) => c.job === 'Director');
-    return dir?.name;
-  }, [tmdbData, movie.director]);
-
-  const genre = useMemo(() => {
-    // Prima usa i dati del server
-    if (movie.genre) return movie.genre;
-    // Fallback a TMDB
-    if (tmdbData?.genres?.length) return tmdbData.genres.map((g: any) => g.name).join(' • ');
-    return null;
-  }, [tmdbData, movie.genre]);
-
-  const rating = useMemo(() => {
-    // Prima usa i dati del server
-    if (movie.rating) return movie.rating;
-    // Fallback a TMDB
-    if (tmdbData?.vote_average) return (Number(tmdbData.vote_average).toFixed(1));
-    return null;
-  }, [tmdbData, movie.rating]);
+  const { cast, director, genre, rating, plot } = useMediaMetadata({ 
+    tmdbData, 
+    channel: movie 
+  });
 
   const year = movie.year || tmdbData?.release_date?.split('-')[0];
 
@@ -140,21 +105,11 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
   const hasProgress = progress > 0.01;
 
   if (loading) {
-    return (
-      <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[90] flex flex-col items-center justify-center text-white">
-        <Loader2 className="w-14 h-14 animate-spin text-red-500 mb-4" />
-        <p className="text-lg text-gray-300">{t.loading}</p>
-      </div>
-    );
+    return <LoadingState message={t.loading} variant="movie" />;
   }
 
   if (error) {
-    return (
-      <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[90] flex flex-col items-center justify-center text-white px-8 text-center">
-        <p className="text-2xl text-red-400 mb-6">{error}</p>
-        <button onClick={onClose} className="tv-focus px-6 py-3 bg-white/10 rounded-lg hover:bg-white/20 border border-white/10">{t.close}</button>
-      </div>
-    );
+    return <ErrorState message={error} buttonText={t.close} onButtonClick={onClose} variant="movie" />;
   }
 
   return (
@@ -217,13 +172,13 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
                 </button>
               )}
 
-              <button
-                onClick={() => onToggleWatchlist(movie.id)}
-                className="tv-focus flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white px-5 py-3 rounded-lg border border-white/15 transition-colors"
-              >
-                {isInWatchlist ? <BookmarkCheck className="w-5 h-5" /> : <BookmarkPlus className="w-5 h-5" />}
-                <span className="text-sm font-semibold">{isInWatchlist ? t.removeFromList : t.addToList}</span>
-              </button>
+              <WatchlistButton
+                isInWatchlist={watchlistIds.includes(movie.id)}
+                onToggle={() => onToggleWatchlist(movie.id)}
+                addText={t.addToList}
+                removeText={t.removeFromList}
+                variant="movie"
+              />
 
               <button
                 onClick={() => setLiked(prev => !prev)}
