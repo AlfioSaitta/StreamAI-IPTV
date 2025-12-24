@@ -101,6 +101,17 @@ export const MetadataService = {
   },
 
   /**
+   * Convenience method to search and get details in one go.
+   */
+  getDetailsByTitle: async (title: string, type: 'movie' | 'series', year?: string, language: string = 'it') => {
+    const searchResult = await MetadataService.searchTMDB(title, type, year, language);
+    if (searchResult?.id) {
+      return await MetadataService.getDetails(searchResult.id, type, language);
+    }
+    return null;
+  },
+
+  /**
    * Helper to get a high-quality image URL
    */
   getImageUrl: (path: string | null | undefined, size: 'w500' | 'w780' | 'w1280' | 'original' = 'w500') => {
