@@ -9,10 +9,22 @@ interface LoadingStateProps {
 const LoadingState: React.FC<LoadingStateProps> = ({ message, variant = 'movie' }) => {
   const isMovie = variant === 'movie';
   
+  const containerClasses = isMovie 
+    ? 'fixed inset-0 bg-black/80 backdrop-blur-md z-[90] flex flex-col items-center justify-center text-white'
+    : 'fixed inset-0 bg-[#141414] z-50 flex flex-col items-center justify-center text-white';
+  
+  const spinnerClasses = isMovie
+    ? 'w-14 h-14 text-red-500 mb-4 animate-spin'
+    : 'w-16 h-16 text-red-600 mb-6 animate-spin';
+  
+  const messageClasses = isMovie
+    ? 'text-lg text-gray-300'
+    : 'text-2xl text-gray-400';
+  
   return (
-    <div className={`fixed inset-0 ${isMovie ? 'bg-black/80 backdrop-blur-md z-[90]' : 'bg-[#141414] z-50'} flex flex-col items-center justify-center text-white`}>
-      <Loader2 className={`${isMovie ? 'w-14 h-14 text-red-500 mb-4' : 'w-16 h-16 text-red-600 mb-6'} animate-spin`} />
-      <p className={isMovie ? 'text-lg text-gray-300' : 'text-2xl text-gray-400'}>{message}</p>
+    <div className={containerClasses}>
+      <Loader2 className={spinnerClasses} />
+      <p className={messageClasses}>{message}</p>
     </div>
   );
 };

@@ -30,39 +30,39 @@ export const useMediaImages = ({
   serverCover 
 }: UseMediaImagesProps): MediaImages => {
   const backdrop = useMemo(() => {
-    if (type === 'movie') {
-      return (
-        fallbackLogo ||
-        MetadataService.getImageUrl(tmdbData?.backdrop_path, 'original') ||
-        (tmdbData?.images?.backdrops?.[0]?.file_path && MetadataService.getImageUrl(tmdbData.images.backdrops[0].file_path, 'original')) ||
-        null
-      );
-    } else {
-      return (
-        MetadataService.getImageUrl(tmdbData?.backdrop_path, 'original') ||
-        serverCover ||
-        fallbackLogo ||
-        null
-      );
-    }
+    // Define fallback priority arrays for clarity
+    const movieBackdropFallbacks = [
+      fallbackLogo,
+      MetadataService.getImageUrl(tmdbData?.backdrop_path, 'original'),
+      tmdbData?.images?.backdrops?.[0]?.file_path && MetadataService.getImageUrl(tmdbData.images.backdrops[0].file_path, 'original')
+    ];
+    
+    const seriesBackdropFallbacks = [
+      MetadataService.getImageUrl(tmdbData?.backdrop_path, 'original'),
+      serverCover,
+      fallbackLogo
+    ];
+    
+    const fallbacks = type === 'movie' ? movieBackdropFallbacks : seriesBackdropFallbacks;
+    return fallbacks.find(img => img) || null;
   }, [tmdbData, fallbackLogo, type, serverCover]);
 
   const poster = useMemo(() => {
-    if (type === 'movie') {
-      return (
-        fallbackLogo ||
-        MetadataService.getImageUrl(tmdbData?.poster_path) ||
-        (tmdbData?.images?.posters?.[0]?.file_path && MetadataService.getImageUrl(tmdbData.images.posters[0].file_path)) ||
-        null
-      );
-    } else {
-      return (
-        serverCover ||
-        MetadataService.getImageUrl(tmdbData?.poster_path) ||
-        fallbackLogo ||
-        null
-      );
-    }
+    // Define fallback priority arrays for clarity
+    const moviePosterFallbacks = [
+      fallbackLogo,
+      MetadataService.getImageUrl(tmdbData?.poster_path),
+      tmdbData?.images?.posters?.[0]?.file_path && MetadataService.getImageUrl(tmdbData.images.posters[0].file_path)
+    ];
+    
+    const seriesPosterFallbacks = [
+      serverCover,
+      MetadataService.getImageUrl(tmdbData?.poster_path),
+      fallbackLogo
+    ];
+    
+    const fallbacks = type === 'movie' ? moviePosterFallbacks : seriesPosterFallbacks;
+    return fallbacks.find(img => img) || null;
   }, [tmdbData, fallbackLogo, type, serverCover]);
 
   return { backdrop, poster };
