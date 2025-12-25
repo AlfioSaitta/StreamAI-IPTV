@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import ChannelList from './components/ChannelList.tsx';
@@ -276,7 +275,12 @@ function App() {
       }
 
       if (channel.type === 'movie') {
-          setSelectedMovie(channel);
+          if (selectedMovie && selectedMovie.id === channel.id) {
+              setSelectedMovie(null);
+              setTimeout(() => setSelectedMovie(channel), 0);
+          } else {
+              setSelectedMovie(channel);
+          }
           setCurrentChannel(null);
           setSelectedSeries(null);
           return;
@@ -501,13 +505,14 @@ function App() {
 
         {selectedMovie && (
           <MovieDetail
+              key={selectedMovie.id}
               movie={selectedMovie}
               onClose={() => setSelectedMovie(null)}
               onPlay={(ch, opts) => handlePlayMovie(ch, opts)}
               watchlistIds={activeProfile.watchlist}
               onToggleWatchlist={handleToggleWatchlist}
               allChannels={allChannels}
-              onShowDetails={(ch) => setSelectedMovie(ch)}
+              onShowDetails={handleShowDetails}
               history={activeProfile.history}
           />
         )}

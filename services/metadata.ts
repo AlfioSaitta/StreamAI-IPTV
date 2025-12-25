@@ -18,7 +18,7 @@ export const MetadataService = {
 
     // Remove common IPTV prefixes:
     // [IT], (US), IT:, |IT|, US -, IT - 
-    name = name.replace(/^(\[[^\]]+\]|\([^\)]+\)|\|[^\|]+\||[A-Z0-9]{2,4}\s*[:\-])\s*/gi, '');
+    name = name.replace(/^([[^\]]+]|([^)]*)|\|[^|]+\||[A-Z0-9]{2,4}\s*[:\-])\s*/gi, '');
 
     // Remove file extensions
     name = name.replace(/\.(mkv|mp4|avi|ts|m3u8)$/i, '');
@@ -29,7 +29,7 @@ export const MetadataService = {
       'H265', 'H264', 'HEVC', 'AAC', 'DTS', 'AC3', 'BLURAY', 'WEBDL', 'HDR',
       'HC', 'RIP', 'SUB', 'ITA', 'ENG'
     ];
-    const regex = new RegExp(`[\\s\\.\\-\\_](${techTags.join('|')})([\\s\\.\\-\\_]|$)`, 'gi');
+    const regex = new RegExp(`[\s.\-_](${techTags.join('|')})([\s.\-_]|$)`, 'gi');
     name = name.replace(regex, '');
 
     // Remove years in parentheses if they are at the end (e.g. "Title (2022)")
@@ -37,7 +37,7 @@ export const MetadataService = {
     name = name.replace(/\s*\(?\d{4}\)?\s*$/, '');
 
     // Clean up extra whitespace/dots/dashes leftovers
-    name = name.replace(/[\.\-_]/g, ' ');
+    name = name.replace(/[.\-_]/g, ' ');
     name = name.replace(/\s+/g, ' ');
 
     return name.trim();
@@ -121,14 +121,6 @@ export const MetadataService = {
       console.warn(`Failed to get details for ${title}:`, err);
       return null;
     }
-   * Convenience method to search and get details in one go.
-   */
-  getDetailsByTitle: async (title: string, type: 'movie' | 'series', year?: string, language: string = 'it') => {
-    const searchResult = await MetadataService.searchTMDB(title, type, year, language);
-    if (searchResult?.id) {
-      return await MetadataService.getDetails(searchResult.id, type, language);
-    }
-    return null;
   },
 
   /**
@@ -137,5 +129,62 @@ export const MetadataService = {
   getImageUrl: (path: string | null | undefined, size: 'w500' | 'w780' | 'w1280' | 'original' = 'w500') => {
     if (!path) return null;
     return `https://image.tmdb.org/t/p/${size}${path}`;
-  }
+  },
+
+  /**
+   * Restituisce un array di contenuti simili coerenti (film o serie) per suggerimenti.
+   * Usa i dati TMDB già ottenuti da getDetails.
+   * Se non ci sono risultati, prova a suggerire titoli dello stesso genere.
+   * @param details - Oggetto dettagli TMDB (output di getDetails o getDetailsByTitle)
+   * @param type - 'movie' o 'series'
+   * @returns Array di oggetti { id, title, poster, overview, type }
+   */
+  getSimilar: (details: any, type: 'movie' | 'series') => {
+    if (!details) return [];
+    // Unisci similar e recommendations, filtra duplicati per id
+    const similarArr = [
+      ...(details.similar?.results || []),
+      ...(details.recommendations?.results || [])
+    ];
+    const seen = new Set();
+    let normalized = similarArr.filter(item => {
+      if (!item?.id || seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    }).map(item => ({
+      id: item.id,
+      title: item.title || item.name || '',
+      poster: item.poster_path ? MetadataService.getImageUrl(item.poster_path, 'w500') : null,
+      overview: item.overview || '',
+      popularity: item.popularity || 0,
+      type: type
+    }));
+    // Ordina per popolarità decrescente
+    normalized = normalized.sort((a, b) => b.popularity - a.popularity);
+    // Se non ci sono risultati, prova a suggerire titoli dello stesso genere
+    if (normalized.length === 0 && Array.isArray(details.genres) && details.genres.length > 0 && details.id) {
+      // Cerca tra recommendations tutti i titoli con almeno un genere in comune
+      const genreIds = details.genres.map((g: any) => g.id);
+      const allCandidates = [
+        ...(details.recommendations?.results || []),
+        ...(details.similar?.results || [])
+      ];
+      const genreSeen = new Set();
+      normalized = allCandidates.filter(item => {
+        if (!item?.id || item.id === details.id || genreSeen.has(item.id)) return false;
+        genreSeen.add(item.id);
+        if (!Array.isArray(item.genre_ids)) return false;
+        return item.genre_ids.some((gid: number) => genreIds.includes(gid));
+      }).map(item => ({
+        id: item.id,
+        title: item.title || item.name || '',
+        poster: item.poster_path ? MetadataService.getImageUrl(item.poster_path, 'w500') : null,
+        overview: item.overview || '',
+        popularity: item.popularity || 0,
+        type: type
+      })).sort((a, b) => b.popularity - a.popularity);
+    }
+    // Rimuovi la proprietà popularity prima di restituire
+    return normalized.map(({popularity, ...rest}) => rest);
+  },
 };

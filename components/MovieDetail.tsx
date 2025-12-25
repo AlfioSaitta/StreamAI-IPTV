@@ -2,13 +2,12 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Channel, WatchHistoryItem } from '../types.ts';
 import { MetadataService } from '../services/metadata.ts';
 import { useLanguage } from '../contexts/LanguageContext.tsx';
-import { Play, X, ThumbsUp } from 'lucide-react';
+import { Play, X, ThumbsUp, Sparkles } from 'lucide-react';
 import LoadingState from './shared/LoadingState.tsx';
 import ErrorState from './shared/ErrorState.tsx';
 import WatchlistButton from './shared/WatchlistButton.tsx';
 import { useMediaImages } from '../hooks/useMediaImages.ts';
 import { useMediaMetadata } from '../hooks/useMediaMetadata.ts';
-import { Play, X, BookmarkPlus, BookmarkCheck, ThumbsUp, Loader2, Sparkles, Film, Users } from 'lucide-react';
 import { getMovieEnrichment, MovieEnrichment, isAiAvailable } from '../services/geminiService.ts';
 
 interface MovieDetailProps {
@@ -31,8 +30,6 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
   const [liked, setLiked] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
 
-  const isInWatchlist = watchlistIds.includes(movie.id);
-
   // 1. Fetch TMDB Data (Fast & Essential)
   useEffect(() => {
     const fetchDetails = async () => {
@@ -41,20 +38,14 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
         setError(null);
         setTmdbData(null);
 
-        let details = null;
         if (movie.tmdbId) {
-          details = await MetadataService.getDetails(movie.tmdbId, 'movie', language);
+          const details = await MetadataService.getDetails(movie.tmdbId, 'movie', language);
+          setTmdbData(details);
         } else {
           const searchTitle = movie.cleanName || movie.name;
-          details = await MetadataService.getDetailsByTitle(searchTitle, 'movie', movie.year, language);
+          const details = await MetadataService.getDetailsByTitle(searchTitle, 'movie', movie.year, language);
+          setTmdbData(details);
         }
-
-        const movieTitle = movie.cleanName || movie.name;
-        
-        // Use the new convenience method
-        const details = await MetadataService.getDetailsByTitle(movieTitle, 'movie', movie.year, language);
-        setTmdbData(details);
-
       } catch (err) {
         console.error(err);
         setError(t.loading);
@@ -77,6 +68,7 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
     tmdbData, 
     channel: movie 
   });
+
   // 2. Fetch AI Enrichment (Background & Optional)
   useEffect(() => {
     const fetchAiData = async () => {
@@ -102,52 +94,6 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
     return () => clearTimeout(timer);
   }, [movie]);
 
-  const backdrop = useMemo(() => {
-    return (
-      movie.logo ||
-      MetadataService.getImageUrl(tmdbData?.backdrop_path, 'original') ||
-      tmdbData?.images?.backdrops?.[0]?.file_path && MetadataService.getImageUrl(tmdbData.images.backdrops[0].file_path, 'original')
-    );
-  }, [tmdbData, movie.logo]);
-
-  const poster = useMemo(() => {
-    return (
-      movie.logo ||
-      MetadataService.getImageUrl(tmdbData?.poster_path) ||
-      tmdbData?.images?.posters?.[0]?.file_path && MetadataService.getImageUrl(tmdbData.images.posters[0].file_path)
-    );
-  }, [tmdbData, movie.logo]);
-
-  // Priorità ai dati del server Xtream, TMDB come fallback
-  const plot = movie.description || tmdbData?.overview || '';
-
-  const cast = useMemo(() => {
-    if (movie.cast) return movie.cast;
-    const tmdbCast = tmdbData?.credits?.cast?.slice(0, 6).map((c: any) => c.name) || [];
-    if (tmdbCast.length > 0) return tmdbCast.join(', ');
-    if (aiData?.cast) return aiData.cast.join(', ');
-    return null;
-  }, [tmdbData, movie.cast, aiData]);
-
-  const director = useMemo(() => {
-    if (movie.director) return movie.director;
-    const crew = tmdbData?.credits?.crew || [];
-    const dir = crew.find((c: any) => c.job === 'Director');
-    return dir?.name;
-  }, [tmdbData, movie.director]);
-
-  const genre = useMemo(() => {
-    if (movie.genre) return movie.genre;
-    if (tmdbData?.genres?.length) return tmdbData.genres.map((g: any) => g.name).join(' • ');
-    return null;
-  }, [tmdbData, movie.genre]);
-
-  const rating = useMemo(() => {
-    if (movie.rating) return movie.rating;
-    if (tmdbData?.vote_average) return (Number(tmdbData.vote_average).toFixed(1));
-    return null;
-  }, [tmdbData, movie.rating]);
-
   const year = movie.year || tmdbData?.release_date?.split('-')[0];
 
   const findMatchingChannel = useCallback((title: string) => {
@@ -161,22 +107,23 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
     );
   }, [allChannels]);
 
-  const similarChannels = useMemo(() => {
-    const source = tmdbData?.recommendations?.results?.length
-      ? tmdbData.recommendations.results
-      : tmdbData?.similar?.results || [];
+  const isVod = movie.type === 'movie' || movie.type === 'series';
 
-    const matches: Channel[] = [];
-    source.forEach((item: any) => {
-      const title = item.title || item.name;
-      const match = findMatchingChannel(title);
-      if (match && !matches.find(m => m.id === match.id)) {
-        matches.push(match);
-      }
-    });
-
-    return matches.slice(0, 12);
-  }, [tmdbData, findMatchingChannel]);
+  // Similar content (TMDB, solo con match locale, robusto)
+  const similarContent = useMemo(() => {
+    if (!tmdbData || !isVod) return [];
+    const sim = MetadataService.getSimilar(tmdbData, movie.type === 'series' ? 'series' : 'movie');
+    // Mostra solo i suggerimenti che hanno un canale locale corrispondente e id diverso dal corrente
+    return sim.map(item => {
+      const match = allChannels.find(ch => {
+        if (ch.id === movie.id) return false;
+        const t1 = MetadataService.cleanTitle(ch.cleanName || ch.name).toLowerCase();
+        const t2 = MetadataService.cleanTitle(item.title).toLowerCase();
+        return t1 === t2 || t1.includes(t2) || t2.includes(t1);
+      });
+      return match ? { ...item, channel: match } : null;
+    }).filter(Boolean);
+  }, [tmdbData, allChannels, movie.id, movie.type, isVod]);
 
   const aiSimilarChannels = useMemo(() => {
     if (!aiData?.similarMovies) return [];
@@ -330,25 +277,27 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
           </div>
         )}
 
-        {/* TMDB Similar Movies */}
-        {similarChannels.length > 0 && (
+        {/* TMDB Similar Movies/Series: solo se VOD */}
+        {isVod && similarContent.length > 0 && (
           <div className="mt-12">
             <h3 className="text-2xl font-bold mb-4">{t.similarContent}</h3>
             <div className="flex gap-4 overflow-x-auto no-scrollbar pb-4">
-              {similarChannels.map(ch => (
+              {similarContent.map(sim => (
                 <button
-                  key={ch.id}
-                  onClick={() => onShowDetails ? onShowDetails(ch) : onPlay(ch)}
-                  className="tv-focus flex-none w-[180px] md:w-[200px] rounded-lg overflow-hidden bg-white/5 border border-white/10 hover:border-white/30 shadow-lg text-left"
+                  key={sim.id}
+                  onClick={() => sim.channel && onShowDetails && onShowDetails(sim.channel)}
+                  className={`tv-focus flex-none w-[180px] md:w-[200px] rounded-lg overflow-hidden bg-white/5 border border-white/10 hover:border-white/30 shadow-lg text-left ${!sim.channel ? 'opacity-60 cursor-not-allowed' : ''}`}
+                  disabled={!sim.channel}
                 >
-                  {ch.logo ? (
-                    <img src={ch.logo} alt={ch.name} className="w-full h-48 object-cover" />
+                  {sim.poster ? (
+                    <img src={sim.poster} alt={sim.title} className="w-full h-48 object-cover" />
                   ) : (
-                    <div className="w-full h-48 flex items-center justify-center text-gray-500 text-sm">{ch.cleanName || ch.name}</div>
+                    <div className="w-full h-48 flex items-center justify-center text-gray-500 text-sm">{sim.title}</div>
                   )}
                   <div className="p-3">
-                    <p className="text-sm font-semibold line-clamp-2">{ch.cleanName || ch.name}</p>
-                    {ch.year && <p className="text-xs text-gray-400 mt-1">{ch.year}</p>}
+                    <p className="text-sm font-semibold line-clamp-2">{sim.title}</p>
+                    {sim.channel?.year && <p className="text-xs text-gray-400 mt-1">{sim.channel.year}</p>}
+                    {sim.overview && <p className="text-xs text-gray-400 mt-1 line-clamp-3">{sim.overview}</p>}
                   </div>
                 </button>
               ))}
@@ -361,3 +310,4 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
 };
 
 export default MovieDetail;
+
