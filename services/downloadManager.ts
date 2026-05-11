@@ -107,7 +107,7 @@ export const DownloadManager = {
   },
 
   // Download effettivo
-  download: async (url: string, priority: number): Promise<string | null> => {
+  download: async (url: string, _priority: number): Promise<string | null> => {
     // Se in pausa, ritorna URL originale
     if (DownloadManager.paused) {
       return url;

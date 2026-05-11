@@ -1,6 +1,6 @@
 # 📺 StreamAI IPTV Player
 
-**StreamAI** è un player IPTV di nuova generazione sviluppato con **React 19**, **TypeScript**, **Electron** e **Tailwind CSS**. 
+**StreamAI** è un player IPTV di nuova generazione sviluppato con **React 18**, **TypeScript**, **Electron** e **Tailwind CSS**. 
 Si distingue per l'integrazione con **Google Gemini AI**, che offre raccomandazioni intelligenti sui contenuti basate sulle preferenze dell'utente, e per un ecosistema di networking avanzato per il casting e il controllo remoto.
 
 ---
@@ -59,6 +59,9 @@ cd streamai-iptv
 
 # Installa le dipendenze (include patch automatica per codec HEVC)
 npm install
+
+# Configura le variabili locali opzionali
+cp .env.example .env
 ```
 
 Il comando `npm install` esegue automaticamente lo script `patch-ffmpeg.js` che:
@@ -82,6 +85,12 @@ npm start
 ```bash
 # Solo build Vite
 npm run build
+
+# Type-check TypeScript
+npm run typecheck
+
+# Type-check + build
+npm run check
 
 # Build + pacchetto Linux (.tar.gz)
 npm run dist:linux
@@ -133,12 +142,32 @@ npm run android:run
 
 ### Output APK
 - **Debug**: `android/app/build/outputs/apk/debug/app-debug.apk`
-- **Release**: `android/app/build/outputs/apk/release/app-release-unsigned.apk`
+- **Release firmata**: `android/app/build/outputs/apk/release/StreamAI-IPTV.apk`
+
+### Firma Android Release
+
+Lo script `scripts/android-build-release.sh` non contiene password hardcoded. Configura i segreti tramite variabili ambiente:
+
+```bash
+export STREAMAI_ANDROID_KEYSTORE_FILE="/percorso/streamai-release.keystore"
+export STREAMAI_ANDROID_KEYSTORE_ALIAS="streamai"
+export STREAMAI_ANDROID_KEYSTORE_PASSWORD="password-keystore"
+export STREAMAI_ANDROID_KEY_PASSWORD="password-chiave"
+npm run android:build:release
+```
+
+Se devi generare un nuovo keystore locale, abilitalo esplicitamente:
+
+```bash
+export STREAMAI_ANDROID_GENERATE_KEYSTORE=1
+npm run android:build:release
+```
+
+I file `*.keystore`, `*.jks`, APK/AAB e gli asset Android generati sono esclusi dal versionamento.
 
 ### Funzionalità Android
 - ✅ Streaming Live/VOD/Series
-- ✅ Player video HTML5 con HLS.js
-- ✅ Player Nativo (ExoPlayer) per prestazioni superiori
+- ✅ Player nativo (ExoPlayer tramite `capacitor-video-player`) per prestazioni superiori
 - ✅ Picture-in-Picture
 - ✅ Fullscreen
 - ✅ Supporto HTTP cleartext per stream IPTV
@@ -165,17 +194,24 @@ L'applicazione è completamente controllabile via tastiera per un'esperienza "Le
 
 ---
 
-## 🔐 Configurazione API Gemini
+## 🔐 Configurazione API e sicurezza
 
-Per le raccomandazioni AI, configura la chiave API in uno dei seguenti modi:
+Le chiavi API non devono essere inserite nel codice sorgente. Copia `.env.example` in `.env` e valorizza solo le chiavi che vuoi usare:
 
-1. **Variabile d'ambiente** (consigliato):
-   ```bash
-   export VITE_GEMINI_API_KEY="tua-chiave-api"
-   ```
+```bash
+VITE_GEMINI_API_KEY="tua-chiave-gemini"
+VITE_TMDB_API_KEY="tua-chiave-tmdb"
+```
 
-2. **Direttamente nel codice** (solo sviluppo):
-   Modifica `services/geminiService.ts`
+Variabili opzionali di hardening/debug:
+
+```bash
+# Abilita fallback Electron meno restrittivi solo per provider IPTV problematici
+STREAMAI_INSECURE_ELECTRON=1
+
+# Abilita debug WebView Android durante lo sviluppo
+STREAMAI_ANDROID_DEBUG=true
+```
 
 ---
 

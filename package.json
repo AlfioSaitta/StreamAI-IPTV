@@ -9,6 +9,8 @@
     "dev": "electron .",
     "dev:quiet": "electron . 2>/dev/null",
     "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run build",
     "dist:linux": "vite build && electron-builder --linux",
     "android:sync": "vite build && npx cap sync android",
     "android:open": "npx cap open android",

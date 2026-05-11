@@ -20,7 +20,7 @@ const ProfileSelection: React.FC<ProfileSelectionProps> = ({ onSelectProfile }) 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim()) return;
-    const newProfile = ProfileService.create(newName.trim());
+    ProfileService.create(newName.trim());
     setProfiles(ProfileService.getAll());
     setIsCreating(false);
     setNewName('');

@@ -11,6 +11,18 @@ node_modules
 dist
 dist-ssr
 *.local
+.env
+.env.*
+!.env.example
+
+# Generated outputs / signing material
+android/app/build/
+android/app/src/main/assets/public/
+android/streamai-release.keystore
+android/**/*.keystore
+android/**/*.jks
+*.apk
+*.aab
 
 # Editor directories and files
 .vscode/*

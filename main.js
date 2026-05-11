@@ -11,6 +11,13 @@ const { advertisingService } = require('./services/advertisingService.js'); // I
 // Rileva il sistema operativo
 const isLinux = process.platform === 'linux';
 const isWayland = process.env.XDG_SESSION_TYPE === 'wayland' || process.env.WAYLAND_DISPLAY;
+const allowInsecureElectron = ['1', 'true', 'yes'].includes(String(process.env.STREAMAI_INSECURE_ELECTRON || '').toLowerCase());
+
+function isIptvRequest(url = '') {
+  return url.includes('.m3u8') || url.includes('.ts') || url.includes('/live/') ||
+    url.includes('/movie/') || url.includes('/series/') || url.includes('player_api.php') ||
+    url.includes(':8080') || url.includes(':8000') || url.includes(':25461');
+}
 
 // ============================================
 // CONFIGURAZIONE DI RETE PER STATUS SHARING E REMOTE CONTROL
@@ -27,10 +34,20 @@ let wsClients = new Set(); // Client WebSocket connessi
 // CONFIGURAZIONE AVVIO APP
 // ============================================
 app.commandLine.appendSwitch('unlimited-storage');
-app.commandLine.appendSwitch('ignore-certificate-errors');
-app.commandLine.appendSwitch('ignore-ssl-errors', 'true');
-app.commandLine.appendSwitch('allow-running-insecure-content');
-app.commandLine.appendSwitch('disable-web-security');
+
+// Fallback insicuro solo opt-in per provider IPTV problematici.
+if (allowInsecureElectron) {
+  console.warn('[Security] STREAMAI_INSECURE_ELECTRON abilitato: SSL/CORS meno restrittivi per provider IPTV problematici.');
+  app.commandLine.appendSwitch('ignore-certificate-errors');
+  app.commandLine.appendSwitch('ignore-ssl-errors', 'true');
+  app.commandLine.appendSwitch('ignore-urlfetcher-cert-requests');
+  app.commandLine.appendSwitch('allow-insecure-localhost');
+  app.commandLine.appendSwitch('allow-running-insecure-content');
+  app.commandLine.appendSwitch('disable-web-security');
+  app.commandLine.appendSwitch('disable-site-isolation-trials');
+}
+app.commandLine.appendSwitch('ssl-version-min', 'tls1');
+app.commandLine.appendSwitch('cipher-suite-blacklist', '');
 
 // ============================================
 // GESTIONE FEATURES (ENABLE/DISABLE)
@@ -73,12 +90,46 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: false,
+      webSecurity: !allowInsecureElectron,
       experimentalFeatures: true,
       preload: path.join(__dirname, 'preload.js'),
-      allowRunningInsecureContent: true,
+      allowRunningInsecureContent: allowInsecureElectron,
     },
     autoHideMenuBar: true
+  });
+
+  if (allowInsecureElectron) {
+    mainWindow.webContents.session.setCertificateVerifyProc((request, callback) => {
+      callback(0);
+    });
+
+    mainWindow.webContents.on('certificate-error', (event, url, error, certificate, callback) => {
+      event.preventDefault();
+      callback(true);
+    });
+  }
+
+  mainWindow.webContents.session.webRequest.onBeforeSendHeaders((details, callback) => {
+    if (isIptvRequest(details.url) || allowInsecureElectron) {
+      delete details.requestHeaders['Upgrade-Insecure-Requests'];
+      details.requestHeaders['Cache-Control'] = 'no-cache';
+      details.requestHeaders['Pragma'] = 'no-cache';
+      details.requestHeaders['User-Agent'] = 'StreamAI IPTV';
+      details.requestHeaders['Accept'] = '*/*';
+    }
+    callback({ requestHeaders: details.requestHeaders });
+  });
+
+  mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+    const responseHeaders = details.responseHeaders || {};
+    if (isIptvRequest(details.url) || allowInsecureElectron) {
+      delete responseHeaders['Content-Security-Policy'];
+      delete responseHeaders['content-security-policy'];
+      delete responseHeaders['X-Frame-Options'];
+      delete responseHeaders['x-frame-options'];
+      responseHeaders['Access-Control-Allow-Origin'] = ['*'];
+    }
+    callback({ responseHeaders });
   });
 
   mainWindow.loadFile(path.join(__dirname, 'dist', 'index.html'));

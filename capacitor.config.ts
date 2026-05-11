@@ -7,7 +7,7 @@ const config: CapacitorConfig = {
   android: {
     allowMixedContent: true,
     captureInput: true,
-    webContentsDebuggingEnabled: true,
+    webContentsDebuggingEnabled: process.env.STREAMAI_ANDROID_DEBUG === 'true',
   },
   ios: {
     contentInset: 'always',

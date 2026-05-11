@@ -28,10 +28,25 @@ echo "Java version: $($JAVA_HOME/bin/java -version 2>&1 | head -1)"
 # Directory del progetto
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ANDROID_DIR="$PROJECT_DIR/android"
-KEYSTORE_FILE="$ANDROID_DIR/streamai-release.keystore"
+KEYSTORE_FILE="${STREAMAI_ANDROID_KEYSTORE_FILE:-$ANDROID_DIR/streamai-release.keystore}"
+KEYSTORE_ALIAS="${STREAMAI_ANDROID_KEYSTORE_ALIAS:-streamai}"
+KEYSTORE_PASSWORD_ENV="STREAMAI_ANDROID_KEYSTORE_PASSWORD"
+KEY_PASSWORD_ENV="STREAMAI_ANDROID_KEY_PASSWORD"
 APK_UNSIGNED="$ANDROID_DIR/app/build/outputs/apk/release/app-release-unsigned.apk"
 APK_SIGNED="$ANDROID_DIR/app/build/outputs/apk/release/app-release-signed.apk"
 APK_FINAL="$ANDROID_DIR/app/build/outputs/apk/release/StreamAI-IPTV.apk"
+
+if [ -z "${!KEYSTORE_PASSWORD_ENV:-}" ]; then
+    echo "ERRORE: configura STREAMAI_ANDROID_KEYSTORE_PASSWORD prima della build release."
+    echo "Esempio: export STREAMAI_ANDROID_KEYSTORE_PASSWORD='...'"
+    exit 1
+fi
+
+# Se non indicata, la password della chiave coincide con quella del keystore.
+# I tool di firma leggono i segreti dall'ambiente, evitando di esporli nella process list.
+if [ -z "${!KEY_PASSWORD_ENV:-}" ]; then
+    export STREAMAI_ANDROID_KEY_PASSWORD="${!KEYSTORE_PASSWORD_ENV}"
+fi
 
 # Esegui la build
 echo "Building web assets..."
@@ -43,8 +58,14 @@ npx cap sync android
 echo "Building Android APK..."
 cd "$ANDROID_DIR" && ./gradlew assembleRelease -Dorg.gradle.java.home="$JAVA_HOME"
 
-# Genera il keystore se non esiste
+# Genera il keystore se non esiste solo su richiesta esplicita
 if [ ! -f "$KEYSTORE_FILE" ]; then
+    if [ "${STREAMAI_ANDROID_GENERATE_KEYSTORE:-}" != "1" ]; then
+        echo "ERRORE: keystore non trovato: $KEYSTORE_FILE"
+        echo "Imposta STREAMAI_ANDROID_GENERATE_KEYSTORE=1 per generarlo, oppure configura STREAMAI_ANDROID_KEYSTORE_FILE."
+        exit 1
+    fi
+
     echo ""
     echo "Generazione keystore per la firma dell'APK..."
     keytool -genkeypair -v \
@@ -52,9 +73,9 @@ if [ ! -f "$KEYSTORE_FILE" ]; then
         -keyalg RSA \
         -keysize 2048 \
         -validity 10000 \
-        -alias streamai \
-        -storepass streamai123 \
-        -keypass streamai123 \
+        -alias "$KEYSTORE_ALIAS" \
+        -storepass:env "$KEYSTORE_PASSWORD_ENV" \
+        -keypass:env "$KEY_PASSWORD_ENV" \
         -dname "CN=StreamAI, OU=Development, O=StreamAI, L=Unknown, ST=Unknown, C=IT"
     echo "Keystore creato: $KEYSTORE_FILE"
 fi
@@ -82,9 +103,9 @@ if command -v apksigner &> /dev/null || [ -f "$ANDROID_HOME/build-tools/34.0.0/a
 
         "$APKSIGNER" sign \
             --ks "$KEYSTORE_FILE" \
-            --ks-pass pass:streamai123 \
-            --key-pass pass:streamai123 \
-            --ks-key-alias streamai \
+            --ks-pass "env:$KEYSTORE_PASSWORD_ENV" \
+            --key-pass "env:$KEY_PASSWORD_ENV" \
+            --ks-key-alias "$KEYSTORE_ALIAS" \
             --out "$APK_FINAL" \
             "$APK_UNSIGNED"
         echo "APK firmato con apksigner"
@@ -95,9 +116,9 @@ else
         -sigalg SHA256withRSA \
         -digestalg SHA-256 \
         -keystore "$KEYSTORE_FILE" \
-        -storepass streamai123 \
-        -keypass streamai123 \
-        "$APK_UNSIGNED" streamai
+        -storepass:env "$KEYSTORE_PASSWORD_ENV" \
+        -keypass:env "$KEY_PASSWORD_ENV" \
+        "$APK_UNSIGNED" "$KEYSTORE_ALIAS"
 
     cp "$APK_UNSIGNED" "$APK_FINAL"
     echo "APK firmato con jarsigner"

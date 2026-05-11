@@ -26,6 +26,10 @@ interface ElectronAPI {
   }) => Promise<{ success: boolean; error?: string; status?: string }>;
   scanIp: (ipOrSubnet: string) => Promise<DiscoveredDevice[]>;
   probeDeviceServices: (ip: string) => Promise<CastService[]>;
+  updatePlaybackStatus?: (status: unknown) => void;
+  onNetworkPlaybackStatus?: (callback: (status: { deviceId: string; channelName: string }) => void) => () => void;
+  onRemoteControlCommand?: (callback: (command: unknown) => void) => () => void;
+  onRequestStatusBroadcast?: (callback: () => void) => () => void;
   isElectron: boolean;
 }
 
@@ -624,7 +628,7 @@ class DeviceDiscoveryService {
   /**
    * Send via AirPlay protocol
    */
-  private async sendViaAirPlay(device: DiscoveredDevice, mediaUrl: string, title: string, port: number = 7000): Promise<boolean> {
+  private async sendViaAirPlay(device: DiscoveredDevice, mediaUrl: string, _title: string, port: number = 7000): Promise<boolean> {
     try {
       // AirPlay uses a simple HTTP POST to /play
       await fetch(`http://${device.ip}:${port}/play`, {
@@ -814,7 +818,7 @@ class DeviceDiscoveryService {
   /**
    * Send via DLNA/UPnP
    */
-  private async sendViaDLNA(device: DiscoveredDevice, mediaUrl: string, title: string, port?: number): Promise<boolean> {
+  private async sendViaDLNA(device: DiscoveredDevice, mediaUrl: string, _title: string, port?: number): Promise<boolean> {
     const setURIBody = `<?xml version="1.0" encoding="utf-8"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
   <s:Body>
@@ -872,14 +876,6 @@ class DeviceDiscoveryService {
     return false;
   }
 
-  /**
-   * Open device web interface
-   */
-  private openDeviceInterface(device: DiscoveredDevice, mediaUrl: string): boolean {
-    const url = `http://${device.ip}:${device.port}/?play=${encodeURIComponent(mediaUrl)}`;
-    window.open(url, '_blank');
-    return true;
-  }
 }
 
 // Singleton

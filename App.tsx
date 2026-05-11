@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import ChannelList from './components/ChannelList.tsx';
 import VideoPlayer from './components/VideoPlayerNew.tsx';
@@ -21,12 +21,12 @@ import { isAiAvailable } from './services/geminiService.ts';
 
 // Componente per visualizzare lo stato di riproduzione in rete
 const NetworkStatusBanner = () => {
-  const [networkStatus, setNetworkStatus] = useState<any>(null);
+  const [networkStatus, setNetworkStatus] = useState<{ deviceId: string; channelName: string } | null>(null);
   const timeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (platformService.isElectron && window.electronAPI) {
-      const unsubscribe = window.electronAPI.onNetworkPlaybackStatus((status) => {
+    if (platformService.isElectron && window.electronAPI?.onNetworkPlaybackStatus) {
+      const unsubscribe = window.electronAPI.onNetworkPlaybackStatus((status: { deviceId: string; channelName: string }) => {
         setNetworkStatus(status);
         
         // Nascondi il banner dopo 10 secondi

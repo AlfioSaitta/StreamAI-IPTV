@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { XtreamCredentials } from '../types.ts';
-import { Server, User, Key, LogIn, AlertCircle, X } from 'lucide-react';
+import { Server, User, Key, AlertCircle, X } from 'lucide-react';
 
 interface XtreamLoginProps {
   onLogin: (creds: XtreamCredentials) => Promise<void>;

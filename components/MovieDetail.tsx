@@ -122,7 +122,7 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
         return t1 === t2 || t1.includes(t2) || t2.includes(t1);
       });
       return match ? { ...item, channel: match } : null;
-    }).filter(Boolean);
+    }).filter((item): item is NonNullable<typeof item> => item !== null);
   }, [tmdbData, allChannels, movie.id, movie.type, isVod]);
 
   const aiSimilarChannels = useMemo(() => {

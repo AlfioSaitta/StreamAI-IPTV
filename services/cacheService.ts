@@ -64,7 +64,6 @@ export const CacheService = {
           CacheService.storageInfo.quota = quota;
 
           const usageMB = (usage / 1024 / 1024).toFixed(2);
-          const quotaMB = (quota / 1024 / 1024).toFixed(2);
           const quotaGB = (quota / 1024 / 1024 / 1024).toFixed(2);
           const percentUsed = quota > 0 ? ((usage / quota) * 100).toFixed(1) : 0;
 

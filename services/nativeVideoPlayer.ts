@@ -1,5 +1,4 @@
 import { platformService } from './platformService';
-import { Capacitor } from '@capacitor/core';
 
 // Interfaccia per il plugin capacitor-video-player
 export interface CapacitorVideoPlayerPlugin {

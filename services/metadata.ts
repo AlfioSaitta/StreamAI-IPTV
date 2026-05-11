@@ -1,10 +1,8 @@
 // Simple in-memory cache to avoid hitting rate limits
 const tmdbCache = new Map<string, any>();
 
-// Public demo key for fallback (The Movie Database)
-// In production, use process.env.TMDB_API_KEY
-const DEFAULT_KEY = '8dc93996529b459170b83ccdd133eb59';
-const TMDB_API_KEY = process.env.TMDB_API_KEY || DEFAULT_KEY;
+// Configura la chiave in .env come VITE_TMDB_API_KEY. Non inserire chiavi nel codice sorgente.
+const TMDB_API_KEY = import.meta.env.VITE_TMDB_API_KEY || '';
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 
 export const MetadataService = {
@@ -18,7 +16,7 @@ export const MetadataService = {
 
     // Remove common IPTV prefixes:
     // [IT], (US), IT:, |IT|, US -, IT - 
-    name = name.replace(/^([[^\]]+]|([^)]*)|\|[^|]+\||[A-Z0-9]{2,4}\s*[:\-])\s*/gi, '');
+    name = name.replace(/^(\[[^\]]+]|[(][^)]+[)]|\|[^|]+\||[A-Z0-9]{2,4}\s*[:-])\s*/gi, '');
 
     // Remove file extensions
     name = name.replace(/\.(mkv|mp4|avi|ts|m3u8)$/i, '');
@@ -29,7 +27,7 @@ export const MetadataService = {
       'H265', 'H264', 'HEVC', 'AAC', 'DTS', 'AC3', 'BLURAY', 'WEBDL', 'HDR',
       'HC', 'RIP', 'SUB', 'ITA', 'ENG'
     ];
-    const regex = new RegExp(`[\s.\-_](${techTags.join('|')})([\s.\-_]|$)`, 'gi');
+    const regex = new RegExp(`[\\s._-](${techTags.join('|')})([\\s._-]|$)`, 'gi');
     name = name.replace(regex, '');
 
     // Remove years in parentheses if they are at the end (e.g. "Title (2022)")
@@ -37,7 +35,7 @@ export const MetadataService = {
     name = name.replace(/\s*\(?\d{4}\)?\s*$/, '');
 
     // Clean up extra whitespace/dots/dashes leftovers
-    name = name.replace(/[.\-_]/g, ' ');
+    name = name.replace(/[._-]/g, ' ');
     name = name.replace(/\s+/g, ' ');
 
     return name.trim();

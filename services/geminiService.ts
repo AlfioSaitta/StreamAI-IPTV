@@ -1,14 +1,12 @@
 import { Channel, Recommendation, StreamType, WatchHistoryItem } from "../types.ts";
 import { CacheService } from "./cacheService.ts";
 
-// API Key - usa variabile d'ambiente o fallback
+// API Key - usa solo variabile d'ambiente Vite. Non inserire chiavi nel codice sorgente.
 const getApiKey = (): string => {
-  // Vite env
-  if (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_GEMINI_API_KEY) {
-    return (import.meta as any).env.VITE_GEMINI_API_KEY;
+  if (import.meta.env?.VITE_GEMINI_API_KEY) {
+    return import.meta.env.VITE_GEMINI_API_KEY;
   }
-  // Fallback
-  return 'AIzaSyAnK6tUgMqre_oZIcQxPog4JPXxxCT65Ho';
+  return '';
 };
 
 const apiKey = getApiKey();
@@ -41,7 +39,7 @@ const suspendService = () => {
 };
 
 export const isAiAvailable = (): boolean => {
-  return !isSuspended() && (!!apiKey || !!(import.meta as any).env?.VITE_GEMINI_API_KEY);
+  return !isSuspended() && !!getApiKey();
 };
 
 const getAI = async (customApiKey?: string) => {

@@ -247,7 +247,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
 
   const handleAudioTrackChange = (trackId: string) => {
     if (playerRef.current) {
-      const tracks = playerRef.current.audioTracks();
+      const tracks = playerRef.current.audioTracks() as any;
       for (let i = 0; i < tracks.length; i++) {
         const track = tracks[i];
         track.enabled = track.id === trackId;
@@ -495,7 +495,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       if (initialProgress && initialProgress > 0.05 && initialProgress < 0.95) {
         player.currentTime(dur * initialProgress);
       }
-      player.play().catch(e => console.warn("Autoplay bloccato:", e));
+      player.play()?.catch(e => console.warn("Autoplay bloccato:", e));
       broadcastStatus();
     });
     player.on('ended', () => { 
@@ -522,7 +522,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     videoEl.addEventListener('leavepictureinpicture', handleLeavePiP);
 
     // Audio Track Change Event
-    const tracks = player.audioTracks();
+    const tracks = player.audioTracks() as any;
     const updateAudioTracksList = () => {
       const tracksList = [];
       for (let i = 0; i < tracks.length; i++) {
@@ -624,7 +624,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
 
   // Remote Control Handler
   useEffect(() => {
-    if (platformService.isElectron && window.electronAPI && window.electronAPI.onRemoteControlCommand) {
+    if (platformService.isElectron && window.electronAPI?.onRemoteControlCommand && window.electronAPI.onRequestStatusBroadcast) {
       const unsubCommand = window.electronAPI.onRemoteControlCommand((command: any) => {
         const player = playerRef.current;
         if (!player || player.isDisposed()) return;
@@ -981,7 +981,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
               setIsCastLoading(false);
               return false;
             }
-            const loaded = await castSession.loadMedia(channel.url, channel.cleanName || channel.name, channel.logo);
+            const loaded = await castSession.loadMedia(channel.url, channel.cleanName || channel.name);
             setIsCastLoading(false);
             if (loaded && playerRef.current && !playerRef.current.isDisposed()) {
               playerRef.current.pause();

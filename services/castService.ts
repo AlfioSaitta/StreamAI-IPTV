@@ -76,7 +76,7 @@ class CastServiceClass {
     methods.push('external');
 
     // Share API (per condividere il link)
-    if (navigator.share) {
+    if ('share' in navigator) {
       methods.push('share');
     }
 
