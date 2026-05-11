@@ -181,6 +181,7 @@ function setupNetworkStatusListener() {
 
 let lastStatus = null;
 let broadcastSocket = null;
+let broadcastSocketReady = false;
 
 function getLocalInterfaces() {
   const interfaces = os.networkInterfaces();
@@ -199,10 +200,20 @@ function getBroadcastSocket() {
   if (broadcastSocket) return broadcastSocket;
   
   broadcastSocket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+  broadcastSocketReady = false;
+  broadcastSocket.bind(0, () => {
+    try {
+      broadcastSocket.setBroadcast(true);
+      broadcastSocketReady = true;
+    } catch (err) {
+      console.error(`[NetworkStatus] Impossibile abilitare broadcast UDP: ${err.message}`);
+    }
+  });
   broadcastSocket.on('error', (err) => {
     console.error(`[NetworkStatus] Errore socket broadcast: ${err.message}`);
-    broadcastSocket.close();
+    try { broadcastSocket.close(); } catch {}
     broadcastSocket = null;
+    broadcastSocketReady = false;
   });
   
   return broadcastSocket;
@@ -211,7 +222,7 @@ function getBroadcastSocket() {
 ipcMain.on('playback-status-update', (event, status) => {
   lastStatus = status;
   const socket = getBroadcastSocket();
-  if (!socket) return;
+  if (!socket || !broadcastSocketReady) return;
 
   const validInterfaces = getLocalInterfaces();
   
@@ -230,7 +241,6 @@ ipcMain.on('playback-status-update', (event, status) => {
       });
 
       const broadcastAddr = iface.address.split('.').slice(0, 3).join('.') + '.255';
-      socket.setBroadcast(true);
       socket.send(message, 0, message.length, UDP_STATUS_PORT, broadcastAddr, (err) => {
         // Silenzioso se fallisce
       });
@@ -344,6 +354,12 @@ app.on('will-quit', () => {
   if (wss) {
     console.log('[WebSocketServer] Chiusura server WebSocket');
     wss.close();
+  }
+
+  if (broadcastSocket) {
+    try { broadcastSocket.close(); } catch {}
+    broadcastSocket = null;
+    broadcastSocketReady = false;
   }
 });
 
