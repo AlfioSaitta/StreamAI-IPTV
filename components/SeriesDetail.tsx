@@ -124,6 +124,26 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
     onPlayEpisode(currentChannel, fullPlaylist);
   };
 
+  const seasons = Object.keys(episodes).sort((a, b) => Number(a) - Number(b));
+  const currentEpisodes = episodes[activeSeason] || [];
+
+  // Use shared hooks for images and metadata. Devono restare prima dei return condizionali
+  // per rispettare l'ordine stabile degli hook React tra loading e schermata dettagli.
+  const { backdrop, poster } = useMediaImages({
+    tmdbData,
+    fallbackLogo: series.logo,
+    type: 'series',
+    serverCover: info?.cover
+  });
+
+  const { rating, plot } = useMediaMetadata({
+    tmdbData,
+    channel: series,
+    serverInfo: info
+  });
+
+  const seriesName = info?.name || series.name || tmdbData?.name;
+
   if (loading) {
     return <LoadingState message={t.loading} variant="series" />;
   }
@@ -131,25 +151,6 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
   if (error) {
     return <ErrorState message={error} buttonText={t.back} onButtonClick={onBack} variant="series" />;
   }
-
-  const seasons = Object.keys(episodes).sort((a, b) => Number(a) - Number(b));
-  const currentEpisodes = episodes[activeSeason] || [];
-
-  // Use shared hooks for images and metadata
-  const { backdrop, poster } = useMediaImages({ 
-    tmdbData, 
-    fallbackLogo: series.logo, 
-    type: 'series',
-    serverCover: info?.cover
-  });
-
-  const { rating, plot } = useMediaMetadata({ 
-    tmdbData, 
-    channel: series,
-    serverInfo: info
-  });
-
-  const seriesName = info?.name || series.name || tmdbData?.name;
 
   return (
     <div ref={containerRef} className="fixed inset-0 bg-[#141414] text-white overflow-y-auto z-40 outline-none safe-area-screen" tabIndex={-1} role="dialog" aria-modal="true" aria-label={`Dettagli ${seriesName}`}>
