@@ -90,6 +90,7 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [localRefreshMessage, setLocalRefreshMessage] = useState<string | null>(null);
+  const [aiCacheMessage, setAiCacheMessage] = useState<string | null>(null);
   const screenRef = useRef<HTMLDivElement>(null);
 
   useInitialTvFocus(true, screenRef, '[data-initial-focus="true"]');
@@ -150,6 +151,11 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
       setPreferences(prev => ({ ...prev, contentLastRefreshError: message }));
       setLocalRefreshMessage(message);
     }
+  };
+
+  const handleClearAiCache = async () => {
+    await CacheService.clearApiByPrefix('ai_');
+    setAiCacheMessage('Cache AI svuotata. Le prossime raccomandazioni Gemini verranno rigenerate.');
   };
 
   const formatLastRefresh = (timestamp?: number) => {
@@ -372,6 +378,25 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
               enabled={preferences.aiCaching}
               onChange={(v) => handlePreferenceChange('aiCaching', v)}
             />
+          </div>
+
+          <div className="border-t border-white/10 my-6" />
+
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <Sparkles className="w-5 h-5 text-gray-400 mt-0.5" />
+              <div>
+                <h3 className="font-medium text-white">Svuota cache AI</h3>
+                <p className="text-sm text-gray-400 mt-1">Cancella solo risposte Gemini e arricchimenti AI salvati per questo dispositivo.</p>
+                {aiCacheMessage && <p className="text-xs text-green-300 mt-2">{aiCacheMessage}</p>}
+              </div>
+            </div>
+            <button
+              onClick={handleClearAiCache}
+              className="tv-focus touch-target bg-purple-600/20 hover:bg-purple-600 text-purple-300 hover:text-white border border-purple-500/30 px-4 py-2 rounded-lg transition-all font-medium"
+            >
+              Svuota cache AI
+            </button>
           </div>
 
           <div className="border-t border-white/10 my-6" />

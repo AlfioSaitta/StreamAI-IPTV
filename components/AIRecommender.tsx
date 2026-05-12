@@ -11,9 +11,11 @@ interface AIRecommenderProps {
   history: WatchHistoryItem[];
   aiCaching?: boolean;
   geminiApiKey?: string;
+  profileId?: string;
+  profileLanguage?: string;
 }
 
-const AIRecommender: React.FC<AIRecommenderProps> = ({ channels, onPlayChannel, activeTab, history, aiCaching = true, geminiApiKey }) => {
+const AIRecommender: React.FC<AIRecommenderProps> = ({ channels, onPlayChannel, activeTab, history, aiCaching = true, geminiApiKey, profileId, profileLanguage = 'it' }) => {
   const [prompt, setPrompt] = useState('');
   const [loading, setLoading] = useState(false);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
@@ -60,7 +62,10 @@ const AIRecommender: React.FC<AIRecommenderProps> = ({ channels, onPlayChannel, 
     setRecommendations([]);
     setPrompt(query);
     
-    const results = await getRecommendations(channels, query, activeTab, history, aiCaching, geminiApiKey);
+    const results = await getRecommendations(channels, query, activeTab, history, aiCaching, geminiApiKey, {
+      language: profileLanguage,
+      profileId
+    });
     setRecommendations(results);
     setLoading(false);
   };

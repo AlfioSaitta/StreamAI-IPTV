@@ -1,5 +1,34 @@
+import { CacheService } from './cacheService.ts';
+import {
+  cleanTitle,
+  extractYear,
+  isLikelyTitleMatch,
+  pickBestMetadataCandidate
+} from './metadataUtils.ts';
+
 // Simple in-memory cache to avoid hitting rate limits
 const tmdbCache = new Map<string, any>();
+const tmdbInFlight = new Map<string, Promise<any>>();
+const TMDB_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const TMDB_CACHE_MAX_ENTRIES = 500;
+
+const normalizeTmdbLanguage = (language: string): string => {
+  if (language.includes('-')) return language;
+  const defaults: Record<string, string> = {
+    it: 'it-IT',
+    en: 'en-US',
+    es: 'es-ES',
+    fr: 'fr-FR',
+    de: 'de-DE',
+    pt: 'pt-PT',
+    ru: 'ru-RU',
+    ja: 'ja-JP',
+    ko: 'ko-KR',
+    zh: 'zh-CN',
+    ar: 'ar-SA'
+  };
+  return defaults[language] || 'en-US';
+};
 
 // Configura la chiave in .env come VITE_TMDB_API_KEY. Non inserire chiavi nel codice sorgente.
 const TMDB_API_KEY = import.meta.env.VITE_TMDB_API_KEY || '';
@@ -7,41 +36,14 @@ const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 
 export const MetadataService = {
   isConfigured: (): boolean => Boolean(TMDB_API_KEY),
+  extractYear,
+  isTitleMatch: isLikelyTitleMatch,
 
   /**
    * Cleans raw IPTV names to get a search-friendly title.
    * Example: "[EN] The Matrix (1999) FHD.mkv" -> "The Matrix"
    */
-  cleanTitle: (rawName: string): string => {
-    if (!rawName) return '';
-    let name = rawName;
-
-    // Remove common IPTV prefixes:
-    // [IT], (US), IT:, |IT|, US -, IT - 
-    name = name.replace(/^(\[[^\]]+]|[(][^)]+[)]|\|[^|]+\||[A-Z0-9]{2,4}\s*[:-])\s*/gi, '');
-
-    // Remove file extensions
-    name = name.replace(/\.(mkv|mp4|avi|ts|m3u8)$/i, '');
-
-    // Remove quality tags and codecs (case insensitive, surrounded by word boundaries or separators)
-    const techTags = [
-      'FHD', 'HD', 'SD', '4K', 'UHD', '1080p', '720p', '480p', 
-      'H265', 'H264', 'HEVC', 'AAC', 'DTS', 'AC3', 'BLURAY', 'WEBDL', 'HDR',
-      'HC', 'RIP', 'SUB', 'ITA', 'ENG'
-    ];
-    const regex = new RegExp(`[\\s._-](${techTags.join('|')})([\\s._-]|$)`, 'gi');
-    name = name.replace(regex, '');
-
-    // Remove years in parentheses if they are at the end (e.g. "Title (2022)")
-    // or just a year at the end "Title 2022"
-    name = name.replace(/\s*\(?\d{4}\)?\s*$/, '');
-
-    // Clean up extra whitespace/dots/dashes leftovers
-    name = name.replace(/[._-]/g, ' ');
-    name = name.replace(/\s+/g, ' ');
-
-    return name.trim();
-  },
+  cleanTitle,
 
   /**
    * Searches TMDB for a movie or series.
@@ -50,28 +52,56 @@ export const MetadataService = {
     if (!TMDB_API_KEY) return null;
     
     // Normalize query
-    const cleanQuery = query.trim();
-    if (!cleanQuery) return null;
+    const cleanQuery = cleanTitle(query).trim();
+    if (!cleanQuery || cleanQuery.length < 2) return null;
 
-    const cacheKey = `search_${type}_${cleanQuery}_${year || ''}_${language}`;
+    const expectedYear = year || extractYear(query);
+    const normalizedLanguage = normalizeTmdbLanguage(language);
+    const cacheKey = `tmdb_search_${type}_${cleanQuery.toLowerCase()}_${expectedYear || ''}_${normalizedLanguage}`;
     if (tmdbCache.has(cacheKey)) return tmdbCache.get(cacheKey);
+    if (tmdbInFlight.has(cacheKey)) return tmdbInFlight.get(cacheKey);
 
-    try {
+    const request = (async () => {
+      const cached = await CacheService.getApiData(cacheKey, { maxAgeMs: TMDB_CACHE_TTL_MS });
+      if (cached !== null) {
+        tmdbCache.set(cacheKey, cached);
+        return cached;
+      }
+
       const searchType = type === 'series' ? 'tv' : 'movie';
-      let url = `${TMDB_BASE_URL}/search/${searchType}?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(cleanQuery)}&language=${language}`;
-      if (year) url += `&primary_release_year=${year}`;
+      const languagesToTry = Array.from(new Set([normalizedLanguage, 'en-US']));
 
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(res.statusText);
-      const data = await res.json();
-      
-      // Get first result
-      const result = data.results?.[0] || null;
-      tmdbCache.set(cacheKey, result);
-      return result;
-    } catch (e) {
-      console.warn(`TMDB Search failed for ${query}:`, e);
+      for (const lang of languagesToTry) {
+        let url = `${TMDB_BASE_URL}/search/${searchType}?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(cleanQuery)}&language=${lang}&include_adult=false`;
+        if (expectedYear) url += type === 'series' ? `&first_air_date_year=${expectedYear}` : `&primary_release_year=${expectedYear}`;
+
+        try {
+          const res = await fetch(url);
+          if (!res.ok) {
+            console.warn(`TMDB Search failed for ${query} (${lang}): ${res.statusText}`);
+            continue;
+          }
+          const data = await res.json();
+          const result = pickBestMetadataCandidate(data.results || [], cleanQuery, expectedYear);
+          if (result) {
+            tmdbCache.set(cacheKey, result);
+            await CacheService.saveApiData(cacheKey, result);
+            CacheService.pruneApiCache('tmdb_', TMDB_CACHE_MAX_ENTRIES).catch(() => undefined);
+            return result;
+          }
+        } catch (e) {
+          console.warn(`TMDB Search failed for ${query} (${lang}):`, e);
+        }
+      }
+
       return null;
+    })();
+
+    tmdbInFlight.set(cacheKey, request);
+    try {
+      return await request;
+    } finally {
+      tmdbInFlight.delete(cacheKey);
     }
   },
 
@@ -83,20 +113,37 @@ export const MetadataService = {
 
     const cacheKey = `details_${type}_${tmdbId}_${language}`;
     if (tmdbCache.has(cacheKey)) return tmdbCache.get(cacheKey);
+    if (tmdbInFlight.has(cacheKey)) return tmdbInFlight.get(cacheKey);
 
-    try {
+    const request = (async () => {
+      const cached = await CacheService.getApiData(`tmdb_${cacheKey}`, { maxAgeMs: TMDB_CACHE_TTL_MS });
+      if (cached !== null) {
+        tmdbCache.set(cacheKey, cached);
+        return cached;
+      }
+
       const searchType = type === 'series' ? 'tv' : 'movie';
-      const url = `${TMDB_BASE_URL}/${searchType}/${tmdbId}?api_key=${TMDB_API_KEY}&append_to_response=credits,images,similar,recommendations&language=${language}`;
+      const normalizedLanguage = normalizeTmdbLanguage(language);
+      const url = `${TMDB_BASE_URL}/${searchType}/${tmdbId}?api_key=${TMDB_API_KEY}&append_to_response=credits,images,similar,recommendations&language=${normalizedLanguage}`;
 
       const res = await fetch(url);
       if (!res.ok) throw new Error(res.statusText);
       const data = await res.json();
       
       tmdbCache.set(cacheKey, data);
+      await CacheService.saveApiData(`tmdb_${cacheKey}`, data);
+      CacheService.pruneApiCache('tmdb_', TMDB_CACHE_MAX_ENTRIES).catch(() => undefined);
       return data;
+    })();
+
+    tmdbInFlight.set(cacheKey, request);
+    try {
+      return await request;
     } catch (e) {
       console.warn(`TMDB Details failed for ID ${tmdbId}:`, e);
       return null;
+    } finally {
+      tmdbInFlight.delete(cacheKey);
     }
   },
 

@@ -330,6 +330,28 @@ Lo stato dell'ultimo aggiornamento riuscito e dell'eventuale ultimo errore viene
 
 ---
 
+## 🤖 AI e metadata contestuali
+
+L'assistente AI usa il profilo corrente per generare consigli più pertinenti:
+
+- prompt diversi per **Live**, **Film** e **Serie**;
+- lingua del profilo nelle risposte;
+- cronologia recente e generi preferiti stimati dai contenuti guardati;
+- esclusione dei contenuti visti di recente quando il catalogo offre alternative;
+- ranking locale prima della chiamata Gemini, così vengono inviati meno titoli e più rilevanti.
+
+La cache AI ha TTL e chiavi separate per profilo, lingua, tipo contenuto e catalogo. In **Impostazioni → AI** è disponibile **Svuota cache AI**, che cancella solo risposte Gemini e arricchimenti AI senza rimuovere immagini o catalogo Xtream.
+
+I metadata TMDB usano cache con TTL, deduplica delle richieste simultanee e fallback lingua verso `en-US`. Il matching titoli IPTV pulisce prefissi/qualità/codec, gestisce l'anno, supporta un fuzzy matching leggero e riduce i falsi positivi sui titoli corti.
+
+Test rapido matching metadata:
+
+```bash
+node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/test-metadata-matching.mjs
+```
+
+---
+
 ## 📡 Discovery e casting LAN
 
 Il menu **Trasmetti** usa discovery progressivo e cancellabile:

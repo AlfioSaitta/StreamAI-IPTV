@@ -384,30 +384,30 @@ npm run analyze
 
 ### P5.1 Gemini più contestuale
 
-**File principali:** `services/geminiService.ts`, `components/AIRecommender.tsx`, `services/cacheService.ts`.
+**File principali:** `services/geminiService.ts`, `components/AIRecommender.tsx`, `services/cacheService.ts`, `App.tsx`.
 
-- [ ] Prompt diversi per Live, Movies e Series.
-- [ ] Includere lingua profilo.
-- [ ] Includere cronologia recente.
-- [ ] Includere generi preferiti.
-- [ ] Evitare suggerimenti già visti di recente.
-- [ ] Limitare numero titoli inviati a Gemini.
-- [ ] Ranking locale prima della chiamata AI.
-- [ ] Mostrare stato `AI non configurata` quando manca chiave.
-- [ ] Mostrare stato `AI sospesa` se circuit breaker attivo.
+- [x] Prompt diversi per Live, Movies e Series.
+- [x] Includere lingua profilo.
+- [x] Includere cronologia recente.
+- [x] Includere generi preferiti stimati da cronologia/categorie.
+- [x] Evitare suggerimenti già visti di recente.
+- [x] Limitare numero titoli inviati a Gemini.
+- [x] Ranking locale prima della chiamata AI.
+- [x] Mostrare stato `AI non configurata` quando manca chiave.
+- [x] Mostrare stato `AI sospesa` se circuit breaker attivo.
 
 ---
 
 ### P5.2 Cache AI e TMDB
 
-- [ ] TTL cache Gemini.
-- [ ] Invalidation se cambia profilo.
-- [ ] Invalidation se cambia lingua.
-- [ ] Limite dimensione cache.
-- [ ] Pulsante `Svuota cache AI`.
-- [ ] Cache TMDB con TTL.
-- [ ] Evitare chiamate TMDB duplicate.
-- [ ] Fallback lingua TMDB.
+- [x] TTL cache Gemini.
+- [x] Invalidation se cambia profilo.
+- [x] Invalidation se cambia lingua.
+- [x] Limite dimensione cache.
+- [x] Pulsante `Svuota cache AI`.
+- [x] Cache TMDB con TTL.
+- [x] Evitare chiamate TMDB duplicate.
+- [x] Fallback lingua TMDB.
 
 ---
 
@@ -415,12 +415,21 @@ npm run analyze
 
 **File principale:** `services/metadata.ts`.
 
-- [ ] Migliorare pulizia titoli IPTV.
-- [ ] Gestire anno nel match.
-- [ ] Fuzzy matching leggero.
-- [ ] Gestire titoli multi-lingua.
-- [ ] Evitare falsi positivi con titoli corti.
-- [ ] Test unitari su casi reali.
+- [x] Migliorare pulizia titoli IPTV.
+- [x] Gestire anno nel match.
+- [x] Fuzzy matching leggero.
+- [x] Gestire titoli multi-lingua.
+- [x] Evitare falsi positivi con titoli corti.
+- [x] Test unitari su casi reali.
+
+**Verifiche P5 2026-05-12:**
+
+- [x] Test metadata matching `node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/test-metadata-matching.mjs` OK.
+- [x] `npm run typecheck` OK.
+- [x] `npm run build` OK.
+- [x] `npm run check` OK.
+- [x] Smoke Electron `timeout 20s npm run start`: avvio WebSocket, advertising HTTP/mDNS/SSDP e shutdown controllato senza `Uncaught Exception`.
+- [x] Warning Vite chunk > 500 kB invariato/conosciuto da P1, non introdotto come blocco P5.
 
 ---
 

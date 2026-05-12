@@ -103,14 +103,12 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
 
   const findMatchingChannel = useCallback((title: string) => {
     if (!title) return null;
-    const cleaned = MetadataService.cleanTitle(title).toLowerCase();
 
     return (
-      allChannels.find(ch => MetadataService.cleanTitle(ch.cleanName || ch.name).toLowerCase() === cleaned && ch.type === 'movie') ||
-      allChannels.find(ch => MetadataService.cleanTitle(ch.cleanName || ch.name).toLowerCase().includes(cleaned) && ch.type === 'movie') ||
+      allChannels.find(ch => ch.type === 'movie' && MetadataService.isTitleMatch(ch.cleanName || ch.name, title, movie.year, ch.year)) ||
       null
     );
-  }, [allChannels]);
+  }, [allChannels, movie.year]);
 
   const isVod = movie.type === 'movie' || movie.type === 'series';
 
@@ -122,9 +120,7 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
     return sim.map(item => {
       const match = allChannels.find(ch => {
         if (ch.id === movie.id) return false;
-        const t1 = MetadataService.cleanTitle(ch.cleanName || ch.name).toLowerCase();
-        const t2 = MetadataService.cleanTitle(item.title).toLowerCase();
-        return t1 === t2 || t1.includes(t2) || t2.includes(t1);
+        return MetadataService.isTitleMatch(ch.cleanName || ch.name, item.title, movie.year, ch.year);
       });
       return match ? { ...item, channel: match } : null;
     }).filter((item): item is NonNullable<typeof item> => item !== null);

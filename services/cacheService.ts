@@ -4,6 +4,10 @@ const DB_VERSION = 1;
 const STORE_API = 'api_responses';
 const STORE_IMAGES = 'images';
 
+interface ApiCacheOptions {
+  maxAgeMs?: number;
+}
+
 // Cache LRU in memoria per URL delle immagini (evita letture ripetute da IndexedDB)
 const IMAGE_URL_CACHE_MAX = 500;
 const imageUrlCache = new Map<string, string>(); // url -> objectUrl
@@ -22,6 +26,7 @@ const addToUrlCache = (url: string, objectUrl: string) => {
   imageUrlCache.set(url, objectUrl);
 };
 
+// noinspection JSUnusedGlobalSymbols
 export const CacheService = {
   dbPromise: null as Promise<IDBDatabase> | null,
 
@@ -119,17 +124,83 @@ export const CacheService = {
     });
   },
 
-  getApiData: async (key: string) => {
+  getApiData: async (key: string, options: ApiCacheOptions = {}) => {
     const db = await CacheService.openDB();
     return new Promise<any>((resolve) => {
-      const tx = db.transaction(STORE_API, 'readonly');
+      const tx = db.transaction(STORE_API, options.maxAgeMs ? 'readwrite' : 'readonly');
       const store = tx.objectStore(STORE_API);
       const request = store.get(key);
       request.onsuccess = () => {
           const result = request.result;
-          resolve(result ? result.data : null);
+          if (!result) {
+            resolve(null);
+            return;
+          }
+
+          if (options.maxAgeMs && Date.now() - Number(result.timestamp || 0) > options.maxAgeMs) {
+            store.delete(key);
+            resolve(null);
+            return;
+          }
+
+          resolve(result.data ?? null);
       };
       request.onerror = () => resolve(null);
+    });
+  },
+
+  pruneApiCache: async (prefix: string, maxEntries: number) => {
+    const db = await CacheService.openDB();
+    return new Promise<void>((resolve) => {
+      const tx = db.transaction(STORE_API, 'readwrite');
+      const store = tx.objectStore(STORE_API);
+      const request = store.getAllKeys();
+      request.onsuccess = () => {
+        const keys = request.result.filter((key): key is string => typeof key === 'string' && key.startsWith(prefix));
+        if (keys.length <= maxEntries) {
+          resolve();
+          return;
+        }
+
+        const entries: Array<{ key: string; timestamp: number }> = [];
+        let pending = keys.length;
+        keys.forEach((key) => {
+          const itemRequest = store.get(key);
+          itemRequest.onsuccess = () => {
+            entries.push({ key, timestamp: Number(itemRequest.result?.timestamp || 0) });
+            pending--;
+            if (pending === 0) {
+              entries
+                .sort((a, b) => a.timestamp - b.timestamp)
+                .slice(0, Math.max(0, entries.length - maxEntries))
+                .forEach(entry => store.delete(entry.key));
+              resolve();
+            }
+          };
+          itemRequest.onerror = () => {
+            pending--;
+            if (pending === 0) resolve();
+          };
+        });
+      };
+      request.onerror = () => resolve();
+    });
+  },
+
+  clearApiByPrefix: async (prefixes: string | string[]) => {
+    const prefixList = Array.isArray(prefixes) ? prefixes : [prefixes];
+    const db = await CacheService.openDB();
+    return new Promise<void>((resolve) => {
+      const tx = db.transaction(STORE_API, 'readwrite');
+      const store = tx.objectStore(STORE_API);
+      const request = store.getAllKeys();
+      request.onsuccess = () => {
+        request.result
+          .filter((key): key is string => typeof key === 'string' && prefixList.some(prefix => key.startsWith(prefix)))
+          .forEach(key => store.delete(key));
+      };
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
     });
   },
 

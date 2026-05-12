@@ -716,6 +716,8 @@ function App() {
               history={activeProfile.history}
               aiCaching={activeProfile.preferences?.aiCaching}
               geminiApiKey={activeProfile.preferences?.geminiApiKey}
+              profileId={activeProfile.id}
+              profileLanguage={activeProfile.preferences?.language || DEFAULT_PREFERENCES.language}
             />
         )}
 
