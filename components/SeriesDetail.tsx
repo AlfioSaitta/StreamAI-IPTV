@@ -153,13 +153,13 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
   }
 
   return (
-    <div ref={containerRef} className="fixed inset-0 bg-[#141414] text-white overflow-y-auto z-40 outline-none safe-area-screen" tabIndex={-1} role="dialog" aria-modal="true" aria-label={`Dettagli ${seriesName}`}>
+    <div ref={containerRef} className="fixed inset-0 bg-[var(--bg-primary)] text-white overflow-y-auto z-40 outline-none safe-area-screen" tabIndex={-1} role="dialog" aria-modal="true" aria-label={`Dettagli ${seriesName}`}>
 
       {/* Background */}
       <div className="absolute inset-0 z-0 h-[80vh]">
           <img src={backdrop || ''} alt="" className="w-full h-full object-cover opacity-40" />
-          <div className="absolute inset-0 bg-gradient-to-t from-[#141414] via-[#141414]/60 to-transparent" />
-          <div className="absolute inset-0 bg-gradient-to-r from-[#141414] via-[#141414]/80 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-t from-[var(--bg-primary)] via-[var(--bg-primary)]/60 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-r from-[var(--bg-primary)] via-[var(--bg-primary)]/80 to-transparent" />
       </div>
 
       <div className="relative z-10 flex flex-col md:flex-row min-h-screen pt-20 px-8 md:px-16 gap-12">

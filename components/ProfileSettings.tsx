@@ -31,6 +31,7 @@ interface ProfileSettingsProps {
   onRefreshContent?: () => Promise<{ lastRefreshAt?: number } | void>;
   isContentRefreshing?: boolean;
   contentRefreshMessage?: string;
+  onShowShortcuts?: () => void;
 }
 
 const LANGUAGES = [
@@ -243,9 +244,9 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
   );
 
   return (
-    <div ref={screenRef} className="min-h-screen bg-[#141414] text-white safe-area-screen">
+    <div ref={screenRef} className="min-h-screen bg-[var(--bg-primary)] text-white safe-area-screen">
       {/* Header */}
-      <div className="sticky top-0 z-50 bg-gradient-to-b from-[#141414] via-[#141414] to-transparent pb-8">
+      <div className="sticky top-0 z-50 bg-gradient-to-b from-[var(--bg-primary)] via-[var(--bg-primary)] to-transparent pb-8">
         <div className="max-w-4xl mx-auto px-6 pt-8">
           <div className="flex items-center justify-between">
             <button

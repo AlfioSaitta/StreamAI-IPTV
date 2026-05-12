@@ -520,10 +520,10 @@ const ChannelList: React.FC<ChannelListProps> = ({
   const reloadPage = () => window.location.reload();
 
   return (
-    <div ref={screenRef} className="min-h-screen bg-[#141414] font-sans pb-20 safe-area-screen">
+    <div ref={screenRef} className="min-h-screen bg-[var(--bg-primary)] font-sans pb-20 safe-area-screen">
 
       {/* --- NAVBAR --- */}
-      <nav className={`fixed top-0 w-full z-50 transition-all duration-500 px-4 md:px-12 py-3 flex items-center justify-between ${scrolled ? 'bg-[#141414] shadow-xl' : 'bg-gradient-to-b from-black/90 via-black/50 to-transparent'}`}>
+      <nav className={`fixed top-0 w-full z-50 transition-all duration-500 px-4 md:px-12 py-3 flex items-center justify-between ${scrolled ? 'bg-[var(--bg-primary)] shadow-xl' : 'bg-gradient-to-b from-black/90 via-black/50 to-transparent'}`}>
          <div className="flex items-center gap-8">
              <h1 className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-red-600 to-red-500 tracking-tighter cursor-pointer drop-shadow-sm" onClick={() => {window.scrollTo({top:0, behavior:'smooth'})}}>STREAMAI</h1>
              
@@ -606,8 +606,8 @@ const ChannelList: React.FC<ChannelListProps> = ({
                     alt="Hero" 
                     className="w-full h-full object-cover object-top transition-transform duration-[10s] group-hover:scale-105"
                   />
-                  <div className="absolute inset-0 bg-gradient-to-r from-[#141414] via-[#141414]/50 to-transparent" />
-                  <div className="absolute inset-0 bg-gradient-to-t from-[#141414] via-transparent to-transparent" />
+                  <div className="absolute inset-0 bg-gradient-to-r from-[var(--bg-primary)] via-[var(--bg-primary)]/50 to-transparent" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-[var(--bg-primary)] via-transparent to-transparent" />
               </div>
 
               <div className="absolute bottom-[20%] left-4 md:left-12 max-w-2xl z-10 animate-slide-up">
