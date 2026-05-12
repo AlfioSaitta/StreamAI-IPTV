@@ -22,6 +22,8 @@ export interface Channel {
   cast?: string;
   director?: string;
   tmdbId?: number; // Store TMDB ID if found
+  /** EPG channel identifier (from M3U `tvg-id` or Xtream `epg_channel_id`). */
+  tvgId?: string;
 }
 
 export interface Category {
@@ -44,6 +46,26 @@ export interface XtreamContent {
   live: Category[];
   vod: Category[];
   series: Category[];
+}
+
+/**
+ * A single EPG programme entry (parsed from XMLTV).
+ * Times are epoch milliseconds (UTC) so the UI can do plain arithmetic
+ * regardless of provider timezone.
+ */
+export interface EpgProgramme {
+  /** Channel id matching `Channel.tvgId` (XMLTV `<programme channel=...>`). */
+  channelId: string;
+  /** Start time, epoch ms UTC. */
+  start: number;
+  /** End time, epoch ms UTC. */
+  stop: number;
+  /** Programme title (already entity-decoded). */
+  title: string;
+  /** Optional long description. */
+  description?: string;
+  /** Optional category/genre. */
+  category?: string;
 }
 
 /**

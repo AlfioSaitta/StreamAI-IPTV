@@ -18,12 +18,14 @@ export const parseM3U = (content: string): Category[] => {
       
       const logoMatch = info.match(/tvg-logo="([^"]*)"/);
       const groupMatch = info.match(/group-title="([^"]*)"/);
+      const tvgIdMatch = info.match(/tvg-id="([^"]*)"/);
 
       currentChannel = {
         id: crypto.randomUUID(),
         name: displayName,
         logo: logoMatch ? logoMatch[1] : undefined,
         group: groupMatch ? groupMatch[1] : 'Uncategorized',
+        tvgId: tvgIdMatch && tvgIdMatch[1] ? tvgIdMatch[1] : undefined,
       };
     } else if (!line.startsWith('#')) {
       // This is the URL line

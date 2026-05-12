@@ -138,7 +138,11 @@ export const loginXtream = async (creds: XtreamCredentials, forceRefresh = false
             year: year,
             genre: stream.genre,
             cast: stream.cast,
-            director: stream.director
+            director: stream.director,
+            // D.1 EPG: keep the provider-supplied tvg id for live streams
+            tvgId: type === 'live'
+              ? (typeof stream.epg_channel_id === 'string' && stream.epg_channel_id ? stream.epg_channel_id : undefined)
+              : undefined,
           };
 
           if (categoryMap[catId]) {
