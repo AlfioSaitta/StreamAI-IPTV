@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useDeferredValue } from 'react';
 import { Category, Channel, StreamType, WatchHistoryItem } from '../types.ts';
 import { Search, Play, Info, ChevronRight, LogOut, Clock, RefreshCw, BookmarkPlus, BookmarkCheck, Settings, X, Tv, SearchX, Server } from 'lucide-react';
 import CachedImage from './CachedImage.tsx';
@@ -254,13 +254,17 @@ const ChannelList: React.FC<ChannelListProps> = ({
   const indexedBaseCategories = useMemo(() => indexCategories(categories), [categories]);
   const indexedAllChannels = useMemo(() => indexChannels(allChannels), [allChannels]);
 
-  // Debounce search term per performance
+  // Debounce search term per performance (limita lavoro di filtering)
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedSearchTerm(searchTerm);
     }, 300);
     return () => clearTimeout(timer);
   }, [searchTerm]);
+
+  // Deferred value: lascia che React deprioritizzi il re-render della lista
+  // mentre l'utente continua a digitare, riducendo input lag su 10k+ canali.
+  const deferredSearchTerm = useDeferredValue(debouncedSearchTerm);
 
   // Performance: Lazy Loading Rows
   const [visibleRows, setVisibleRows] = useState(INITIAL_VISIBLE_ROWS);
@@ -458,7 +462,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
 
   useEffect(() => {
       setVisibleRows(INITIAL_VISIBLE_ROWS);
-  }, [activeTab, debouncedSearchTerm, indexedBaseCategories]);
+  }, [activeTab, deferredSearchTerm, indexedBaseCategories]);
 
 
   // Usa homeCategories per la Home, altrimenti le categorie normali
@@ -467,10 +471,10 @@ const ChannelList: React.FC<ChannelListProps> = ({
   }, [activeTab, homeCategories, indexedBaseCategories]);
 
   const filteredCategories = useMemo(() => {
-    if (!debouncedSearchTerm) return activeCategories;
+    if (!deferredSearchTerm) return activeCategories;
 
     // Ottimizza la ricerca: cerca solo se il termine ha almeno 2 caratteri
-    if (debouncedSearchTerm.length < 2) return activeCategories;
+    if (deferredSearchTerm.length < 2) return activeCategories;
 
     // Determina quali canali cercare in base alla tab attiva
     let channelsToSearch: IndexedChannel[];
@@ -490,14 +494,14 @@ const ChannelList: React.FC<ChannelListProps> = ({
         break;
     }
 
-    const searchChannels = searchIndexedChannels(channelsToSearch, debouncedSearchTerm, SEARCH_RESULT_LIMIT);
+    const searchChannels = searchIndexedChannels(channelsToSearch, deferredSearchTerm, SEARCH_RESULT_LIMIT);
 
     if (searchChannels.length > 0) {
         // Limita i risultati per performance
         return [{ name: t.search + ` (${searchChannels.length})`, channels: searchChannels.slice(0, 100) }];
     }
     return [];
-  }, [activeCategories, debouncedSearchTerm, indexedAllChannels, activeTab, indexedVodCategories, indexedSeriesCategories, indexedLiveCategories, t]);
+  }, [activeCategories, deferredSearchTerm, indexedAllChannels, activeTab, indexedVodCategories, indexedSeriesCategories, indexedLiveCategories, t]);
 
   const displayedCategories = filteredCategories.slice(0, visibleRows);
 
