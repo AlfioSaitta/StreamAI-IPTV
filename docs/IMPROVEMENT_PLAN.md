@@ -324,44 +324,59 @@ npm run analyze
 
 ### P4.1 Focus management TV
 
-**File principali:** `App.tsx`, `components/ChannelList.tsx`, `components/MovieDetail.tsx`, `components/SeriesDetail.tsx`, `components/ProfileSettings.tsx`, `components/CastDevicePicker.tsx`.
+**File principali:** `App.tsx`, `components/ChannelList.tsx`, `components/MovieDetail.tsx`, `components/SeriesDetail.tsx`, `components/ProfileSettings.tsx`, `components/CastDevicePicker.tsx`, `components/VideoPlayerNew.tsx`, `hooks/useTvFocus.ts`.
 
-- [ ] Definire focus iniziale per ogni schermata.
-- [ ] Ripristinare focus dopo chiusura modale.
-- [ ] Focus trap nei modali.
-- [ ] Gestione coerente di `Esc`.
-- [ ] Gestione coerente tasto Back Android.
-- [ ] Evidenza visiva più forte per `.tv-focus`.
-- [ ] Test navigazione senza mouse.
+- [x] Definire focus iniziale per ogni schermata.
+- [x] Ripristinare focus dopo chiusura modale.
+- [x] Focus trap nei modali.
+- [x] Gestione coerente di `Esc`.
+- [x] Gestione coerente tasto Back Android.
+- [x] Evidenza visiva più forte per `.tv-focus`.
+- [ ] Da verificare: test navigazione senza mouse su tastiera/telecomando reale.
 
 **Criteri di completamento:**
 
-- [ ] Tutte le schermate principali utilizzabili da tastiera/telecomando.
-- [ ] Nessun focus perso dopo cambio schermata o modale.
+- [x] Lato codice: schermate principali con focus iniziale, navigazione spaziale o focus trap dove applicabile.
+- [x] Lato codice: ripristino focus dopo chiusura modali principali.
+- [x] Lato codice: navigazione spaziale centralizzata e limitata al container attivo per evitare focus dietro modali/overlay.
+- [ ] Da verificare: test end-to-end con telecomando/TV box reale.
 
 ---
 
 ### P4.2 Stati vuoti, loading ed errori
 
-- [ ] Schermata nessun canale.
-- [ ] Schermata server Xtream non raggiungibile.
-- [ ] Messaggio credenziali errate/scadute.
-- [ ] Stato TMDB non configurato.
-- [ ] Stato Gemini non configurato.
-- [ ] Stato nessun device cast trovato.
-- [ ] Skeleton loading per poster e righe catalogo.
-- [ ] Retry visibile per operazioni fallite.
+- [x] Schermata nessun canale.
+- [x] Schermata server Xtream non raggiungibile.
+- [x] Messaggio credenziali errate/scadute.
+- [x] Stato TMDB non configurato.
+- [x] Stato Gemini non configurato.
+- [x] Stato nessun device cast trovato.
+- [x] Skeleton loading per poster e righe catalogo.
+- [x] Retry visibile per operazioni fallite.
 
 ---
 
 ### P4.3 Ottimizzazioni Android/TV box
 
-- [ ] Layout landscape ottimizzato.
-- [ ] Controlli touch più grandi.
-- [ ] Gestione safe area/notch.
-- [ ] Riduzione overlay HTML sopra player nativo se crea problemi.
-- [ ] Profilo prestazioni per TV box Android meno potenti.
-- [ ] Documentare device testati.
+- [ ] Da verificare: layout landscape ottimizzato su device reale.
+- [x] Controlli touch più grandi.
+- [x] Gestione safe area/notch.
+- [x] Riduzione overlay HTML sopra player nativo: shell nativa dedicata, controlli minimali, safe area e target touch grandi.
+- [x] Profilo prestazioni per TV box Android meno potenti: classi `platform-native`/`tv-low-power`, blur disabilitati e animazioni alleggerite.
+- [x] Documentare matrice test/limiti: README aggiornato con checklist P4 e gate hardware.
+- [ ] Da verificare: compilare matrice device reali testati con modello, Android/API level, telecomando e risultato.
+
+**Verifiche P4 2026-05-12:**
+
+- [x] `npm run typecheck` OK.
+- [x] `npm run build` OK.
+- [x] `npm run check` OK.
+- [x] Smoke Electron `timeout 20s npm run start`: avvio WebSocket, advertising HTTP/mDNS/SSDP e shutdown controllato senza `Uncaught Exception`.
+- [x] Warning Vite chunk > 500 kB invariato/conosciuto da P1, non introdotto come blocco P4.
+- [x] Correzione post-verifica: focus trap Film/Serie attivo solo dopo loading/error, navigazione spaziale container-safe, player controls con `tv-focus`/`touch-target`, profilo CSS low-power Android/TV box.
+- [x] Ambiente Android ricontrollato: presente Java 25 runtime, `javac` assente; build/test Android reale resta gate con JDK 17 completo e device/emulatore.
+- [ ] Da verificare: navigazione completa con telecomando fisico o tastiera su display TV.
+- [ ] Da verificare: Android/TV box reale per safe area, landscape e dimensione controlli.
 
 ---
 

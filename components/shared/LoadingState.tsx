@@ -10,9 +10,9 @@ const LoadingState: React.FC<LoadingStateProps> = ({ message, variant = 'movie' 
   const isMovie = variant === 'movie';
   
   const containerClasses = isMovie 
-    ? 'fixed inset-0 bg-black/80 backdrop-blur-md z-[90] flex flex-col items-center justify-center text-white'
-    : 'fixed inset-0 bg-[#141414] z-50 flex flex-col items-center justify-center text-white';
-  
+    ? 'fixed inset-0 bg-black/80 backdrop-blur-md z-[90] flex flex-col items-center justify-center text-white safe-area-screen'
+    : 'fixed inset-0 bg-[#141414] z-50 flex flex-col items-center justify-center text-white safe-area-screen';
+
   const spinnerClasses = isMovie
     ? 'w-14 h-14 text-red-500 mb-4 animate-spin'
     : 'w-16 h-16 text-red-600 mb-6 animate-spin';

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Channel, WatchHistoryItem } from '../types.ts';
 import { MetadataService } from '../services/metadata.ts';
 import { useLanguage } from '../contexts/LanguageContext.tsx';
@@ -9,6 +9,7 @@ import WatchlistButton from './shared/WatchlistButton.tsx';
 import { useMediaImages } from '../hooks/useMediaImages.ts';
 import { useMediaMetadata } from '../hooks/useMediaMetadata.ts';
 import { getMovieEnrichment, MovieEnrichment, isAiAvailable } from '../services/geminiService.ts';
+import { useFocusTrap } from '../hooks/useTvFocus.ts';
 
 interface MovieDetailProps {
   movie: Channel;
@@ -19,9 +20,10 @@ interface MovieDetailProps {
   allChannels: Channel[];
   onShowDetails?: (channel: Channel) => void;
   history: WatchHistoryItem[];
+  geminiApiKey?: string;
 }
 
-const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watchlistIds, onToggleWatchlist, allChannels, onShowDetails, history }) => {
+const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watchlistIds, onToggleWatchlist, allChannels, onShowDetails, history, geminiApiKey }) => {
   const { language, t } = useLanguage();
   const [loading, setLoading] = useState(true);
   const [tmdbData, setTmdbData] = useState<any>(null);
@@ -29,6 +31,9 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
   const [error, setError] = useState<string | null>(null);
   const [liked, setLiked] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
+  const modalRef = useRef<HTMLDivElement>(null);
+
+  useFocusTrap(!loading && !error, modalRef, { onEscape: onClose, initialSelector: '[data-initial-focus="true"]' });
 
   // 1. Fetch TMDB Data (Fast & Essential)
   useEffect(() => {
@@ -72,15 +77,15 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
   // 2. Fetch AI Enrichment (Background & Optional)
   useEffect(() => {
     const fetchAiData = async () => {
-      if (!movie || !isAiAvailable()) return;
-      
+      if (!movie || !isAiAvailable(geminiApiKey)) return;
+
       try {
         setAiLoading(true);
         setAiData(null);
         const movieTitle = movie.cleanName || movie.name;
         
         // Non-blocking call
-        const enrichment = await getMovieEnrichment(movieTitle);
+        const enrichment = await getMovieEnrichment(movieTitle, true, geminiApiKey);
         setAiData(enrichment);
       } catch (e) {
         console.warn("AI Enrichment failed silently:", e);
@@ -92,7 +97,7 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
     // Start AI fetch only after initial render to prioritize UI
     const timer = setTimeout(fetchAiData, 100);
     return () => clearTimeout(timer);
-  }, [movie]);
+  }, [movie, geminiApiKey]);
 
   const year = movie.year || tmdbData?.release_date?.split('-')[0];
 
@@ -150,7 +155,7 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
   }
 
   return (
-    <div className="fixed inset-0 z-[90] text-white overflow-y-auto bg-[#0b0b0bcc] backdrop-blur-md">
+    <div ref={modalRef} className="fixed inset-0 z-[90] text-white overflow-y-auto bg-[#0b0b0bcc] backdrop-blur-md safe-area-screen" role="dialog" aria-modal="true" aria-label={`Dettagli ${movie.cleanName || movie.name}`}>
       {/* Background */}
       {backdrop && (
         <div className="absolute inset-0 opacity-50">
@@ -162,7 +167,7 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
 
       <div className="relative z-10 min-h-screen px-6 md:px-16 pt-14 pb-20">
         <div className="flex justify-end mb-6">
-          <button onClick={onClose} className="tv-focus w-10 h-10 rounded-full bg-black/50 border border-white/10 flex items-center justify-center hover:bg-white/10" aria-label="Chiudi modale">
+          <button onClick={onClose} className="tv-focus touch-target w-10 h-10 rounded-full bg-black/50 border border-white/10 flex items-center justify-center hover:bg-white/10" aria-label="Chiudi modale">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -190,12 +195,18 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
                 <span className="border border-white/20 px-2 py-0.5 rounded text-[11px]">HD</span>
                 {genre && <span className="text-gray-300">{genre}</span>}
               </div>
+              {!MetadataService.isConfigured() && (
+                <div className="rounded-xl border border-yellow-500/30 bg-yellow-950/30 px-4 py-3 text-sm text-yellow-100">
+                  TMDB non configurato: poster, trama e suggerimenti arricchiti possono usare solo i dati del provider IPTV. Imposta <code className="text-yellow-200">VITE_TMDB_API_KEY</code> per abilitarli.
+                </div>
+              )}
             </div>
 
             <div className="flex flex-wrap gap-3">
               <button
                 onClick={() => { onPlay(movie, hasProgress ? { resetProgress: true } : undefined); onClose(); }}
                 className="tv-focus flex items-center gap-3 bg-white text-black px-6 py-3 rounded-lg font-bold text-lg shadow-lg hover:bg-gray-200"
+                data-initial-focus="true"
               >
                 <Play className="w-5 h-5 fill-black" /> {hasProgress ? t.watchNow : t.play}
               </button>

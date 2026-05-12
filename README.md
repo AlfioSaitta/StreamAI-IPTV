@@ -43,6 +43,12 @@ Si distingue per l'integrazione con **Google Gemini AI**, che offre raccomandazi
 - **Avvio rapido**: Streaming ottimizzato per partenza immediata.
 - **Network Monitor**: Visualizzazione velocità di rete e stato buffer in tempo reale (Debug Overlay).
 
+### 🕹️ UX TV, telecomando e Android
+- **Focus TV centralizzato**: schermate principali, modali, dettagli film/serie, impostazioni, login Xtream e menu cast hanno focus iniziale e navigazione con frecce.
+- **Focus trap nei modali**: `Esc` chiude overlay/menu coerentemente e il focus torna all'elemento precedente quando possibile.
+- **Stati vuoti/errore espliciti**: catalogo vuoto, nessun risultato, server Xtream non raggiungibile, credenziali errate/scadute, TMDB/Gemini non configurati e nessun device cast trovato hanno messaggi e azioni visibili.
+- **Android/TV box**: safe-area/notch, target touch più grandi, shell dedicata per player nativo e profilo low-power che riduce blur/animazioni su device meno potenti.
+
 ---
 
 ## 🚀 Requisiti
@@ -221,6 +227,13 @@ L'applicazione è completamente controllabile via tastiera per un'esperienza "Le
 | `L` | Mostra/Nascondi Playlist (Live/Serie) |
 | `Esc` | Indietro / Chiudi menu / Esci da Fullscreen |
 
+### Navigazione TV/telecomando
+
+- Le frecce direzionali spostano il focus tra elementi `tv-focus` visibili nella schermata corrente.
+- Nei modali, il focus resta intrappolato nel pannello aperto; `Tab` cicla gli elementi e `Esc` chiude il pannello dove consentito.
+- I controlli principali del player, del menu cast, delle impostazioni e dei dettagli contenuto hanno target minimi adatti a telecomando/touch.
+- Su Android il tasto fisico **Back** chiude player, dettagli, impostazioni o login prima di tornare alla Home/uscire dall'app.
+
 ---
 
 ## 🔐 Configurazione API e sicurezza
@@ -330,6 +343,24 @@ Il menu **Trasmetti** usa discovery progressivo e cancellabile:
 Gli stati di cast distinguono connessione, buffering, errore e disconnessione. In caso di fallimento viene mostrato un messaggio nella UI e l'URL viene copiato negli appunti come fallback pratico per VLC/Kodi/IPTV player.
 
 Se la porta DIAL locale è occupata, Electron prova automaticamente le porte successive a partire da `STREAMAI_ADVERTISING_PORT`.
+
+---
+
+## ✅ Checklist collaudo UX TV/Android
+
+Validazioni consigliate prima del rilascio su hardware reale:
+
+1. Navigare senza mouse in selezione profilo, Home, Live, Film, Serie, dettagli film/serie e impostazioni.
+2. Aprire e chiudere con `Esc` login Xtream, dettagli film, dettagli serie, menu cast, Info stream e menu audio.
+3. Verificare ripristino focus dopo chiusura player/modali.
+4. Su Android/TV box, verificare landscape, safe-area/notch, dimensione target touch e tasto fisico Back.
+5. Su device meno potenti, controllare fluidità scroll righe catalogo, apertura modali e overlay player nativo.
+
+Matrice device da compilare durante il collaudo:
+
+| Device | Android/API | Input | Esito | Note |
+|--------|-------------|-------|-------|------|
+| Da verificare | Da verificare | Telecomando/tastiera | Da verificare | Richiede hardware reale |
 
 ---
 

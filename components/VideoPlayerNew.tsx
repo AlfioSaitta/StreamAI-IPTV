@@ -1192,7 +1192,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
 
   if (isUsingNativePlayer) {
     return (
-      <div className="relative w-full h-full bg-black flex flex-col items-center justify-center p-8 text-center">
+      <div className="native-player-shell relative w-full h-full bg-black flex flex-col items-center justify-center p-8 text-center safe-area-screen android-tv-surface">
         <div className="mb-6 relative">
           <div className="absolute inset-0 bg-blue-500/20 rounded-full animate-ping" style={{ animationDuration: '2s' }}></div>
           <div className="relative bg-gradient-to-br from-blue-600 to-blue-800 p-6 rounded-full shadow-lg shadow-blue-500/30"><Tv className="w-16 h-16 text-white" /></div>
@@ -1208,21 +1208,26 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
             <p className="text-sm text-red-100 mb-4">{playbackError.message}</p>
             <div className="flex flex-wrap gap-3">
               {playbackError.canRetry && (
-                <button onClick={retryPlaybackNow} className="tv-focus px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white font-medium">
+                <button onClick={retryPlaybackNow} className="tv-focus touch-target px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white font-medium">
                   Riprova ({playbackError.retryCount}/{MAX_PLAYBACK_RETRIES})
                 </button>
               )}
-              <button onClick={onBack} className="tv-focus px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white">Indietro</button>
+              <button onClick={onBack} className="tv-focus touch-target px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white">Indietro</button>
             </div>
           </div>
         )}
-        <button
-          onClick={togglePiP}
-          disabled={!nativePiPSupported}
-          className={`tv-focus px-5 py-2 rounded-lg flex items-center gap-2 ${nativePiPSupported ? 'bg-white/10 hover:bg-white/20 text-white' : 'bg-white/5 text-gray-500 cursor-not-allowed'}`}
-        >
-          <PictureInPicture2 className="w-5 h-5" /> {nativePiPSupported ? 'PiP' : 'PiP non disponibile'}
-        </button>
+        <div className="flex flex-wrap items-center justify-center gap-3 rounded-2xl border border-white/10 bg-black/35 px-4 py-3">
+          <button onClick={onBack} className="tv-focus touch-target px-5 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white">
+            Indietro
+          </button>
+          <button
+            onClick={togglePiP}
+            disabled={!nativePiPSupported}
+            className={`tv-focus touch-target px-5 py-2 rounded-lg flex items-center gap-2 ${nativePiPSupported ? 'bg-white/10 hover:bg-white/20 text-white' : 'bg-white/5 text-gray-500 cursor-not-allowed'}`}
+          >
+            <PictureInPicture2 className="w-5 h-5" /> {nativePiPSupported ? 'PiP' : 'PiP non disponibile'}
+          </button>
+        </div>
       </div>
     );
   }
@@ -1311,14 +1316,14 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         <div className={`absolute top-0 right-0 bottom-0 w-80 bg-black/90 backdrop-blur-xl border-l border-white/10 z-[60] transform transition-transform duration-300 flex flex-col ${showPlaylist ? 'translate-x-0' : 'translate-x-full'}`}>
             <div className="p-4 border-b border-white/10 flex items-center justify-between">
                 <h3 className="font-bold text-white">Canali ({playlist.length})</h3>
-                <button onClick={() => setShowPlaylist(false)} className="p-2 rounded-full hover:bg-white/10"><X className="w-5 h-5" /></button>
+                <button onClick={() => setShowPlaylist(false)} className="tv-focus touch-target p-2 rounded-full hover:bg-white/10"><X className="w-5 h-5" /></button>
             </div>
             <div className="flex-1 overflow-y-auto p-2 space-y-2">
                 {playlist.map(c => (
                     <button 
                       key={c.id}
                       onClick={() => onChannelSelect && onChannelSelect(c)}
-                      className={`w-full text-left p-3 rounded-lg flex items-center gap-3 transition-colors ${c.id === channel.id ? 'bg-red-600 text-white' : 'hover:bg-white/10 text-gray-300'}`}
+                      className={`tv-focus w-full text-left p-3 rounded-lg flex items-center gap-3 transition-colors ${c.id === channel.id ? 'bg-red-600 text-white' : 'hover:bg-white/10 text-gray-300'}`}
                     >
                         {c.logo && <img src={c.logo} alt={c.name} className="w-8 h-8 object-contain bg-black rounded" loading="lazy" />}
                         <span className="truncate text-sm font-medium">{c.cleanName || c.name}</span>
@@ -1333,14 +1338,14 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         <div className="absolute bottom-20 right-4 w-64 bg-black/90 backdrop-blur-xl border border-white/10 rounded-2xl p-2 z-[70] shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-200">
           <div className="p-3 border-b border-white/10 flex items-center justify-between mb-2">
             <h3 className="font-bold text-white text-sm">Tracce Audio</h3>
-            <button onClick={() => setShowAudioMenu(false)} className="p-1 rounded-full hover:bg-white/10"><X className="w-4 h-4 text-gray-400" /></button>
+            <button onClick={() => setShowAudioMenu(false)} className="tv-focus touch-target p-1 rounded-full hover:bg-white/10"><X className="w-4 h-4 text-gray-400" /></button>
           </div>
           <div className="space-y-1">
             {audioTracks.map((track) => (
               <button
                 key={track.id}
                 onClick={() => handleAudioTrackChange(track.id)}
-                className={`w-full text-left p-3 rounded-xl flex items-center justify-between transition-all ${
+                className={`tv-focus w-full text-left p-3 rounded-xl flex items-center justify-between transition-all ${
                   track.enabled 
                     ? 'bg-red-600/20 text-red-500 border border-red-500/30' 
                     : 'hover:bg-white/10 text-gray-300 border border-transparent'
@@ -1361,7 +1366,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       <div className={`absolute inset-0 z-30 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
         <div className="absolute top-0 left-0 right-0 p-4 bg-gradient-to-b from-black/80 to-transparent flex justify-between items-center">
           <div className="flex items-center gap-4">
-            <button onClick={onBack} className="p-2 rounded-full bg-white/10 hover:bg-white/20"><X className="w-6 h-6 text-white" /></button>
+            <button onClick={onBack} className="tv-focus touch-target p-2 rounded-full bg-white/10 hover:bg-white/20"><X className="w-6 h-6 text-white" /></button>
             <div>
               <h2 className="text-white font-semibold text-lg truncate max-w-md">{channel.cleanName || channel.name}</h2>
               {channel.group && <p className="text-gray-400 text-sm">{channel.group}</p>}
@@ -1370,7 +1375,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         </div>
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           {!isPlaying && !isBuffering && (
-            <button onClick={togglePlay} className="p-6 rounded-full bg-white/20 hover:bg-white/30 pointer-events-auto"><Play className="w-16 h-16 text-white" fill="white" /></button>
+            <button onClick={togglePlay} className="tv-focus p-6 rounded-full bg-white/20 hover:bg-white/30 pointer-events-auto"><Play className="w-16 h-16 text-white" fill="white" /></button>
           )}
         </div>
         <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 to-transparent">
@@ -1439,7 +1444,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
             <div className="flex items-center gap-2">
               {/* Left Controls */}
               <div className="flex items-center gap-2 group/vol">
-                <button onClick={toggleMute} className="p-2 hover:bg-white/10 rounded-full">
+                <button onClick={toggleMute} className="tv-focus touch-target p-2 hover:bg-white/10 rounded-full">
                   {isMuted || volume === 0 ? <VolumeX className="w-6 h-6 text-white" /> : <Volume2 className="w-6 h-6 text-white" />}
                 </button>
                 <div className="w-0 group-hover/vol:w-24 overflow-hidden transition-all duration-300">
@@ -1451,7 +1456,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
                 </div>
               </div>
               {(channel.type === 'movie' || channel.type === 'series') && currentTime > 30 && (
-                <button onClick={restartFromBeginning} className="p-2 hover:bg-white/10 rounded-full" title="Riparti dall'inizio">
+                <button onClick={restartFromBeginning} className="tv-focus touch-target p-2 hover:bg-white/10 rounded-full" title="Riparti dall'inizio">
                   <RotateCcw className="w-6 h-6 text-white" />
                 </button>
               )}
@@ -1459,46 +1464,46 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
 
             {/* Center Controls */}
             <div className="flex items-center gap-2">
-              {onPrev && <button onClick={onPrev} className="p-2 hover:bg-white/10 rounded-full"><SkipBack className="w-6 h-6 text-white" /></button>}
-              <button onClick={() => skip(-10)} className="p-2 hover:bg-white/10 rounded-full"><Rewind className="w-6 h-6 text-white" /></button>
-              <button onClick={togglePlay} className="p-3 bg-white/10 hover:bg-white/20 rounded-full">{isPlaying ? <Pause className="w-8 h-8 text-white" /> : <Play className="w-8 h-8 text-white" fill="white" />}</button>
-              <button onClick={() => skip(10)} className="p-2 hover:bg-white/10 rounded-full"><FastForward className="w-6 h-6 text-white" /></button>
-              {onNext && <button onClick={onNext} className="p-2 hover:bg-white/10 rounded-full"><SkipForward className="w-6 h-6 text-white" /></button>}
+              {onPrev && <button onClick={onPrev} className="tv-focus touch-target p-2 hover:bg-white/10 rounded-full"><SkipBack className="w-6 h-6 text-white" /></button>}
+              <button onClick={() => skip(-10)} className="tv-focus touch-target p-2 hover:bg-white/10 rounded-full"><Rewind className="w-6 h-6 text-white" /></button>
+              <button onClick={togglePlay} className="tv-focus touch-target p-3 bg-white/10 hover:bg-white/20 rounded-full">{isPlaying ? <Pause className="w-8 h-8 text-white" /> : <Play className="w-8 h-8 text-white" fill="white" />}</button>
+              <button onClick={() => skip(10)} className="tv-focus touch-target p-2 hover:bg-white/10 rounded-full"><FastForward className="w-6 h-6 text-white" /></button>
+              {onNext && <button onClick={onNext} className="tv-focus touch-target p-2 hover:bg-white/10 rounded-full"><SkipForward className="w-6 h-6 text-white" /></button>}
             </div>
 
             {/* Right Controls */}
             <div className="flex items-center gap-2">
               {channel.type === 'series' && (
-                <button onClick={() => setShowPlaylist(true)} className="p-2 hover:bg-white/10 rounded-full" title="Lista episodi">
+                <button onClick={() => setShowPlaylist(true)} className="tv-focus touch-target p-2 hover:bg-white/10 rounded-full" title="Lista episodi">
                   <List className="w-6 h-6 text-white" />
                 </button>
               )}
               {audioTracks.length > 1 && (
                 <button 
                   onClick={() => setShowAudioMenu(!showAudioMenu)} 
-                  className={`p-2 hover:bg-white/10 rounded-full transition-colors ${showAudioMenu ? 'text-red-500 bg-white/10' : 'text-white'}`}
+                  className={`tv-focus touch-target p-2 hover:bg-white/10 rounded-full transition-colors ${showAudioMenu ? 'text-red-500 bg-white/10' : 'text-white'}`}
                   title="Lingue Audio"
                 >
                   <Headphones className="w-6 h-6" />
                 </button>
               )}
-              <button onClick={updateStreamInfo} className="p-2 hover:bg-white/10 rounded-full" title="Info Codec">
+              <button onClick={updateStreamInfo} className="tv-focus touch-target p-2 hover:bg-white/10 rounded-full" title="Info Codec">
                 <Info className="w-6 h-6 text-white" />
               </button>
               <button
                 onClick={() => setShowDevicePicker(true)}
                 disabled={isCastLoading || castSession.isConnecting}
-                className={`p-2 hover:bg-white/10 rounded-full transition-all ${castSession.isConnected ? 'text-blue-400' : 'text-white'}`}
+                className={`tv-focus touch-target p-2 hover:bg-white/10 rounded-full transition-all ${castSession.isConnected ? 'text-blue-400' : 'text-white'}`}
                 title={castSession.isConnected ? `Casting su ${castSession.device?.name}` : 'Trasmetti'}
               >
                 {isCastLoading ? <Loader2 className="w-6 h-6 animate-spin" /> : <Cast className="w-6 h-6" />}
               </button>
               {document.pictureInPictureEnabled && (
-                <button onClick={togglePiP} className={`p-2 hover:bg-white/10 rounded-full ${isPiP ? 'text-purple-400' : 'text-white'}`} title="Picture-in-Picture">
+                <button onClick={togglePiP} className={`tv-focus touch-target p-2 hover:bg-white/10 rounded-full ${isPiP ? 'text-purple-400' : 'text-white'}`} title="Picture-in-Picture">
                   <PictureInPicture2 className="w-6 h-6" />
                 </button>
               )}
-              <button onClick={toggleFullscreen} className="p-2 hover:bg-white/10 rounded-full">
+              <button onClick={toggleFullscreen} className="tv-focus touch-target p-2 hover:bg-white/10 rounded-full">
                 {isFullscreen ? <Minimize className="w-6 h-6 text-white" /> : <Maximize className="w-6 h-6 text-white" />}
               </button>
             </div>

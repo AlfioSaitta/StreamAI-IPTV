@@ -1,9 +1,11 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Category, Channel, StreamType, WatchHistoryItem } from '../types.ts';
-import { Search, Play, Info, ChevronRight, LogOut, Clock, RefreshCw, BookmarkPlus, BookmarkCheck, Settings, X } from 'lucide-react';
+import { Search, Play, Info, ChevronRight, LogOut, Clock, RefreshCw, BookmarkPlus, BookmarkCheck, Settings, X, Tv, SearchX, Server } from 'lucide-react';
 import CachedImage from './CachedImage.tsx';
 import { useLanguage } from '../contexts/LanguageContext.tsx';
+import EmptyState from './shared/EmptyState.tsx';
+import { useInitialTvFocus, useTvSpatialNavigation } from '../hooks/useTvFocus.ts';
 
 interface ChannelListProps {
   categories: Category[];
@@ -176,6 +178,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
   onShowDetails
 }) => {
   const { t } = useLanguage();
+  const screenRef = useRef<HTMLDivElement>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [scrolled, setScrolled] = useState(false);
@@ -193,6 +196,9 @@ const ChannelList: React.FC<ChannelListProps> = ({
   // Performance: Lazy Loading Rows
   const [visibleRows, setVisibleRows] = useState(5);
   const loadMoreRef = useRef<HTMLDivElement>(null);
+
+  useInitialTvFocus(!currentChannelId, screenRef, '[data-initial-focus="true"], .tv-focus', 120);
+  useTvSpatialNavigation(true, screenRef);
 
   const progressMap = useMemo(() => {
       return history.reduce<Record<string, { progress: number, duration?: number }>>((acc, item) => {
@@ -380,78 +386,6 @@ const ChannelList: React.FC<ChannelListProps> = ({
       return () => observer.disconnect();
   }, [categories, searchTerm]);
 
-  // Spatial Navigation logic (Existing)
-  useEffect(() => {
-      const handleKeyDown = (e: KeyboardEvent) => {
-          const navKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
-          if (!navKeys.includes(e.key)) return;
-
-          e.preventDefault();
-
-          const current = document.activeElement as HTMLElement;
-          if (!current || !current.classList.contains('tv-focus')) return;
-
-          const allFocusable = Array.from(document.querySelectorAll<HTMLElement>('.tv-focus'));
-          const currentRect = current.getBoundingClientRect();
-          let bestCandidate: HTMLElement | null = null;
-          let minDistance = Infinity;
-
-          allFocusable.forEach(candidate => {
-              if (candidate === current) return;
-              const candRect = candidate.getBoundingClientRect();
-              
-              let isDirectionCorrect = false;
-              let distance = Infinity;
-              const curX = currentRect.left + currentRect.width / 2;
-              const curY = currentRect.top + currentRect.height / 2;
-              const candX = candRect.left + candRect.width / 2;
-
-              switch (e.key) {
-                  case 'ArrowRight':
-                      isDirectionCorrect = candRect.left >= currentRect.left;
-                      if (Math.abs(curY - (candRect.top + candRect.height / 2)) < 50 && candRect.left > currentRect.right - 10) {
-                          distance = candRect.left - currentRect.right;
-                      } else { isDirectionCorrect = false; }
-                      break;
-                  case 'ArrowLeft':
-                      if (Math.abs(curY - (candRect.top + candRect.height / 2)) < 50 && candRect.right < currentRect.left + 10) {
-                          isDirectionCorrect = true;
-                          distance = currentRect.left - candRect.right;
-                      }
-                      break;
-                  case 'ArrowDown':
-                      if (candRect.top > currentRect.bottom - 10) {
-                          isDirectionCorrect = true;
-                          const dx = Math.abs(curX - candX);
-                          const dy = candRect.top - currentRect.bottom;
-                          distance = Math.sqrt(dx * dx * 2 + dy * dy); 
-                      }
-                      break;
-                  case 'ArrowUp':
-                      if (candRect.bottom < currentRect.top + 10) {
-                          isDirectionCorrect = true;
-                          const dx = Math.abs(curX - candX);
-                          const dy = currentRect.top - candRect.bottom;
-                          distance = Math.sqrt(dx * dx * 2 + dy * dy);
-                      }
-                      break;
-              }
-
-              if (isDirectionCorrect && distance < minDistance) {
-                  minDistance = distance;
-                  bestCandidate = candidate;
-              }
-          });
-
-          if (bestCandidate) {
-              (bestCandidate as HTMLElement).focus();
-              (bestCandidate as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
-          }
-      };
-
-      window.addEventListener('keydown', handleKeyDown);
-      return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
 
   // Usa homeCategories per la Home, altrimenti le categorie normali
   const activeCategories = useMemo(() => {
@@ -499,11 +433,27 @@ const ChannelList: React.FC<ChannelListProps> = ({
 
   const displayedCategories = filteredCategories.slice(0, visibleRows);
 
+  const hasRowsToRender = displayedCategories.length > 0 || (!searchTerm && watchlistChannels.length > 0) || (!searchTerm && continueWatching.length > 0);
+
+  const getEmptyTitle = () => {
+      if (debouncedSearchTerm) return 'Nessun risultato trovato';
+      if (activeTab === 'live') return 'Nessun canale live disponibile';
+      if (activeTab === 'movie') return 'Nessun film disponibile';
+      if (activeTab === 'series') return 'Nessuna serie disponibile';
+      return 'Catalogo vuoto';
+  };
+
+  const getEmptyDescription = () => {
+      if (debouncedSearchTerm) return `Non ho trovato contenuti per “${debouncedSearchTerm}”. Prova con un titolo più breve o cambia sezione.`;
+      if (activeTab === 'home') return 'La lista collegata al server non contiene ancora canali, film o serie. Verifica provider e credenziali oppure riscarica la lista.';
+      return 'Questa sezione non contiene elementi nella lista attuale. Puoi cambiare sezione, collegare un altro server o riscaricare il catalogo dalle impostazioni.';
+  };
+
   const reloadPage = () => window.location.reload();
 
   return (
-    <div className="min-h-screen bg-[#141414] font-sans pb-20">
-      
+    <div ref={screenRef} className="min-h-screen bg-[#141414] font-sans pb-20 safe-area-screen">
+
       {/* --- NAVBAR --- */}
       <nav className={`fixed top-0 w-full z-50 transition-all duration-500 px-4 md:px-12 py-3 flex items-center justify-between ${scrolled ? 'bg-[#141414] shadow-xl' : 'bg-gradient-to-b from-black/90 via-black/50 to-transparent'}`}>
          <div className="flex items-center gap-8">
@@ -514,7 +464,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
                      <button
                         key={tab}
                         onClick={() => { setActiveTab(tab); window.scrollTo({top:0, behavior:'smooth'}); setVisibleRows(5); }}
-                        className={`tv-focus px-4 py-2 rounded-md transition-all outline-none focus:ring-2 focus:ring-white ${activeTab === tab ? 'bg-white/10 text-white font-bold' : 'hover:text-white hover:bg-white/5'}`}
+                        className={`tv-focus touch-target px-4 py-2 rounded-md transition-all outline-none ${activeTab === tab ? 'bg-white/10 text-white font-bold' : 'hover:text-white hover:bg-white/5'}`}
                         tabIndex={0}
                      >
                          {tab === 'home' ? t.home : tab === 'live' ? t.live : tab === 'movie' ? t.movies : t.series}
@@ -543,17 +493,17 @@ const ChannelList: React.FC<ChannelListProps> = ({
                  {searchTerm && (
                     <button
                       onClick={() => setSearchTerm('')}
-                      className="text-gray-400 hover:text-white transition-colors"
+                       className="tv-focus touch-target text-gray-400 hover:text-white transition-colors rounded-full"
                     >
                       <X className="w-4 h-4" />
                     </button>
                  )}
              </div>
              
-             <button onClick={onOpenServer} className="hidden md:block tv-focus text-xs font-bold border border-white/30 px-3 py-1.5 rounded hover:bg-white/10 tracking-wide uppercase outline-none focus:ring-2 focus:ring-white" tabIndex={0}>SERVER</button>
-             
+              <button onClick={onOpenServer} className="hidden md:block tv-focus touch-target text-xs font-bold border border-white/30 px-3 py-1.5 rounded hover:bg-white/10 tracking-wide uppercase outline-none" tabIndex={0}>SERVER</button>
+
              <div className="group relative flex items-center gap-2 cursor-pointer z-50">
-                 <button className="tv-focus rounded-lg focus:ring-2 focus:ring-white outline-none" tabIndex={0}>
+                  <button className="tv-focus touch-target rounded-lg outline-none" tabIndex={0}>
                      <div className="w-9 h-9 rounded-lg bg-cover shadow-lg" style={{ backgroundColor: profileColor }}></div>
                  </button>
                  
@@ -580,7 +530,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
       </nav>
 
       {/* --- HERO SECTION --- */}
-      {!searchTerm && featuredItem ? (
+       {!searchTerm && featuredItem ? (
           <div className="relative h-[85vh] w-full group">
               <div className="absolute inset-0">
                   <CachedImage 
@@ -612,6 +562,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
                         onClick={() => onSelectChannel(featuredItem)}
                         className="tv-focus flex items-center gap-3 bg-white text-black px-8 py-3.5 rounded font-bold text-xl hover:bg-gray-200 transition-colors shadow-[0_0_20px_rgba(255,255,255,0.2)] outline-none focus:ring-4 focus:ring-red-600"
                         tabIndex={0}
+                        data-initial-focus="true"
                       >
                           <Play className="w-6 h-6 fill-black" /> Riproduci
                       </button>
@@ -631,7 +582,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
                   </div>
               </div>
           </div>
-      ) : !searchTerm ? (
+       ) : !searchTerm && activeCategories.length > 0 ? (
           /* Hero Skeleton */
           <div className="relative h-[85vh] w-full bg-[#1a1a1a] flex items-end p-12">
                <div className="w-full max-w-2xl space-y-4">
@@ -693,28 +644,24 @@ const ChannelList: React.FC<ChannelListProps> = ({
                       />
                   );
               })
-          ) : (
-              // Loading State Skeletons
-              Array.from({length: 4}).map((_, i) => (
-                   <div key={i} className="space-y-3">
-                       <div className="h-6 w-48 rounded skeleton"></div>
-                       <div className="flex gap-4 overflow-hidden">
-                           {Array.from({length: 6}).map((_, j) => (
-                               <div key={j} className={`shrink-0 rounded-md skeleton ${activeTab === 'movie' ? 'w-[150px] aspect-[2/3]' : 'w-[300px] aspect-[16/9]'}`}></div>
-                           ))}
-                       </div>
-                   </div>
-              ))
-          )}
+          ) : !hasRowsToRender ? (
+              <EmptyState
+                icon={debouncedSearchTerm ? SearchX : activeTab === 'home' ? Server : Tv}
+                title={getEmptyTitle()}
+                description={getEmptyDescription()}
+                actions={debouncedSearchTerm ? [
+                    { label: 'Cancella ricerca', onClick: () => setSearchTerm('') },
+                    { label: 'Cambia server', onClick: onOpenServer, variant: 'secondary' }
+                ] : [
+                    { label: 'Cambia server', onClick: onOpenServer },
+                    { label: 'Torna alla Home', onClick: () => setActiveTab('home'), variant: 'secondary' }
+                ]}
+              />
+          ) : null}
 
           {/* Load More Trigger */}
           <div ref={loadMoreRef} className="h-20 w-full" />
 
-          {filteredCategories.length === 0 && debouncedSearchTerm && (
-              <div className="text-center py-20 text-gray-500 text-xl">
-                  {t.noResults} "{debouncedSearchTerm}"
-              </div>
-          )}
       </div>
 
     </div>

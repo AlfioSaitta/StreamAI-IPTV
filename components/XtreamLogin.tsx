@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { XtreamCredentials } from '../types.ts';
 import { Server, User, Key, AlertCircle, X } from 'lucide-react';
+import { useFocusTrap } from '../hooks/useTvFocus.ts';
 
 interface XtreamLoginProps {
   onLogin: (creds: XtreamCredentials) => Promise<void>;
@@ -8,11 +9,30 @@ interface XtreamLoginProps {
 }
 
 const XtreamLogin: React.FC<XtreamLoginProps> = ({ onLogin, onClose }) => {
+  const modalRef = useRef<HTMLDivElement>(null);
   const [url, setUrl] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useFocusTrap(true, modalRef, { onEscape: () => !loading && onClose(), initialSelector: '[data-initial-focus="true"]' });
+
+  const getFriendlyError = (err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err || '');
+
+    if (/auth|credential|401|403/i.test(message)) {
+      return 'Credenziali errate, scadute o account non autorizzato. Controlla username, password e stato abbonamento.';
+    }
+    if (/404/i.test(message)) {
+      return 'Server Xtream raggiunto, ma endpoint non trovato. Verifica URL e porta del provider.';
+    }
+    if (/failed to fetch|network|timeout|econnrefused|enotfound/i.test(message)) {
+      return 'Server Xtream non raggiungibile. Verifica URL, connessione Internet, VPN/firewall e che il provider sia online.';
+    }
+
+    return message || 'Connessione non riuscita. Verifica i dati del server Xtream.';
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -20,7 +40,7 @@ const XtreamLogin: React.FC<XtreamLoginProps> = ({ onLogin, onClose }) => {
     setLoading(true);
 
     if (!url || !username || !password) {
-        setError("All fields are required");
+        setError("Compila URL, username e password.");
         setLoading(false);
         return;
     }
@@ -28,17 +48,17 @@ const XtreamLogin: React.FC<XtreamLoginProps> = ({ onLogin, onClose }) => {
     try {
       await onLogin({ url: url.trim(), username: username.trim(), password: password.trim() });
       onClose();
-    } catch (err: any) {
-      setError(err.message || "Connection failed.");
+    } catch (err: unknown) {
+      setError(getFriendlyError(err));
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-6 animate-fade-in">
-      <div className="bg-gray-900/80 backdrop-blur-xl border border-white/10 w-full max-w-md p-8 rounded-3xl shadow-[0_0_100px_rgba(100,0,255,0.1)] relative animate-slide-up">
-        <button onClick={onClose} className="absolute top-6 right-6 text-gray-500 hover:text-white transition-colors">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-6 animate-fade-in safe-area-screen">
+      <div ref={modalRef} className="bg-gray-900/80 backdrop-blur-xl border border-white/10 w-full max-w-md p-8 rounded-3xl shadow-[0_0_100px_rgba(100,0,255,0.1)] relative animate-slide-up" role="dialog" aria-modal="true" aria-label="Connessione server Xtream">
+        <button onClick={onClose} disabled={loading} className="tv-focus touch-target absolute top-6 right-6 text-gray-500 hover:text-white transition-colors rounded-full disabled:opacity-50" aria-label="Chiudi login server">
             <X className="w-6 h-6" />
         </button>
 
@@ -63,9 +83,10 @@ const XtreamLogin: React.FC<XtreamLoginProps> = ({ onLogin, onClose }) => {
                         <input 
                             type={f.type} 
                             placeholder={f.pl}
-                            className="w-full bg-black/50 text-white rounded-xl py-3 pl-12 pr-4 border border-white/10 focus:border-purple-500 focus:bg-black/80 focus:ring-1 focus:ring-purple-500 outline-none transition-all placeholder:text-gray-700"
+                            className="tv-focus w-full bg-black/50 text-white rounded-xl py-3 pl-12 pr-4 border border-white/10 focus:border-purple-500 focus:bg-black/80 focus:ring-1 focus:ring-purple-500 outline-none transition-all placeholder:text-gray-700"
                             value={f.val}
                             onChange={(e) => f.set(e.target.value)}
+                            data-initial-focus={i === 0 ? 'true' : undefined}
                         />
                     </div>
                 </div>

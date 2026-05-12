@@ -8,8 +8,10 @@ import { ArrowLeft, Film } from 'lucide-react';
 import LoadingState from './shared/LoadingState.tsx';
 import ErrorState from './shared/ErrorState.tsx';
 import WatchlistButton from './shared/WatchlistButton.tsx';
+import EmptyState from './shared/EmptyState.tsx';
 import { useMediaImages } from '../hooks/useMediaImages.ts';
 import { useMediaMetadata } from '../hooks/useMediaMetadata.ts';
+import { useFocusTrap } from '../hooks/useTvFocus.ts';
 
 interface SeriesDetailProps {
   series: Channel;
@@ -41,15 +43,14 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
   
   const containerRef = useRef<HTMLDivElement>(null);
 
+  useFocusTrap(!loading && !error, containerRef, { onEscape: onBack, initialSelector: '[data-initial-focus="true"]' });
+
   // Focus helper
   const handleElementFocus = (e: React.FocusEvent<HTMLElement>) => {
       e.currentTarget.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
 
   useEffect(() => {
-    // Auto-focus container to capture keys immediately if needed
-    containerRef.current?.focus();
-    
     const fetchDetails = async () => {
       if (!series.seriesId) {
         setError("Invalid Series ID");
@@ -151,8 +152,8 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
   const seriesName = info?.name || series.name || tmdbData?.name;
 
   return (
-    <div ref={containerRef} className="fixed inset-0 bg-[#141414] text-white overflow-y-auto z-40 outline-none" tabIndex={-1}>
-      
+    <div ref={containerRef} className="fixed inset-0 bg-[#141414] text-white overflow-y-auto z-40 outline-none safe-area-screen" tabIndex={-1} role="dialog" aria-modal="true" aria-label={`Dettagli ${seriesName}`}>
+
       {/* Background */}
       <div className="absolute inset-0 z-0 h-[80vh]">
           <img src={backdrop || ''} alt="" className="w-full h-full object-cover opacity-40" />
@@ -166,6 +167,7 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
               <button 
                   onClick={onBack} 
                   className="tv-focus self-start flex items-center gap-2 text-gray-300 hover:text-white mb-8 px-3 py-1.5 rounded transition-colors text-sm font-semibold uppercase tracking-wider border border-white/20 hover:bg-white/10"
+                  data-initial-focus="true"
               >
                   <ArrowLeft className="w-4 h-4" /> {t.back}
               </button>
@@ -191,6 +193,12 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
               </div>
 
               <p className="text-lg text-gray-300 leading-relaxed font-light mb-8">{plot}</p>
+
+              {!MetadataService.isConfigured() && (
+                <div className="rounded-xl border border-yellow-500/30 bg-yellow-950/30 px-4 py-3 text-sm text-yellow-100">
+                  TMDB non configurato: metadata e immagini arricchite possono essere limitati ai dati del provider IPTV.
+                </div>
+              )}
           </div>
 
           {/* Right Panel */}
@@ -215,7 +223,15 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
 
               {/* Episodes */}
               <div className="flex flex-col gap-4">
-                {currentEpisodes.map((ep, idx) => {
+                {currentEpisodes.length === 0 ? (
+                  <EmptyState
+                    icon={Film}
+                    title="Nessun episodio disponibile"
+                    description="Il server non ha restituito episodi per questa stagione. Prova un'altra stagione o torna al catalogo."
+                    actions={[{ label: t.back, onClick: onBack }]}
+                    className="min-h-[45vh]"
+                  />
+                ) : currentEpisodes.map((ep, idx) => {
                   const historyItem = history.find(h => h.channelId === ep.id);
                   const progress = historyItem?.progress || 0;
                   

@@ -11,9 +11,9 @@ const ErrorState: React.FC<ErrorStateProps> = ({ message, buttonText, onButtonCl
   const isMovie = variant === 'movie';
   
   const containerClasses = isMovie
-    ? 'fixed inset-0 bg-black/80 backdrop-blur-md z-[90] flex flex-col items-center justify-center text-white px-8 text-center'
-    : 'fixed inset-0 bg-[#141414] z-50 flex flex-col items-center justify-center text-white';
-  
+    ? 'fixed inset-0 bg-black/80 backdrop-blur-md z-[90] flex flex-col items-center justify-center text-white px-8 text-center safe-area-screen'
+    : 'fixed inset-0 bg-[#141414] z-50 flex flex-col items-center justify-center text-white safe-area-screen';
+
   const messageClasses = isMovie
     ? 'text-2xl text-red-400 mb-6'
     : 'text-3xl text-red-400 mb-8';
@@ -25,7 +25,7 @@ const ErrorState: React.FC<ErrorStateProps> = ({ message, buttonText, onButtonCl
   return (
     <div className={containerClasses}>
       <p className={messageClasses}>{message}</p>
-      <button onClick={onButtonClick} className={buttonClasses}>
+      <button onClick={onButtonClick} className={buttonClasses} autoFocus data-initial-focus="true">
         {buttonText}
       </button>
     </div>

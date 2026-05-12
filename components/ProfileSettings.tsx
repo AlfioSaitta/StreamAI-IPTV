@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Profile, ProfilePreferences } from '../types.ts';
 import { ProfileService, DEFAULT_PREFERENCES } from '../services/profileService.ts';
 import { CacheService } from '../services/cacheService.ts';
@@ -20,6 +20,7 @@ import {
   RefreshCw,
   Clock
 } from 'lucide-react';
+import { useEscapeKey, useInitialTvFocus, useTvSpatialNavigation } from '../hooks/useTvFocus.ts';
 
 interface ProfileSettingsProps {
   profile: Profile;
@@ -89,6 +90,11 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [localRefreshMessage, setLocalRefreshMessage] = useState<string | null>(null);
+  const screenRef = useRef<HTMLDivElement>(null);
+
+  useInitialTvFocus(true, screenRef, '[data-initial-focus="true"]');
+  useEscapeKey(true, onBack);
+  useTvSpatialNavigation(true, screenRef);
 
   useEffect(() => {
     const originalPrefs = { ...DEFAULT_PREFERENCES, ...(profile.preferences || {}) };
@@ -157,7 +163,7 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
   const ToggleSwitch: React.FC<{ enabled: boolean; onChange: (v: boolean) => void }> = ({ enabled, onChange }) => (
     <button
       onClick={() => onChange(!enabled)}
-      className={`relative w-14 h-8 rounded-full transition-colors duration-200 ${
+      className={`tv-focus touch-target relative w-14 h-8 rounded-full transition-colors duration-200 ${
         enabled ? 'bg-purple-600' : 'bg-gray-700'
       }`}
     >
@@ -179,7 +185,7 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-white focus:border-purple-500 focus:outline-none transition-colors cursor-pointer min-w-[180px]"
+      className="tv-focus bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-white focus:border-purple-500 focus:outline-none transition-colors cursor-pointer min-w-[180px]"
     >
       {options.map((opt) => (
         <option key={(opt as Record<string, string>)[valueKey]} value={(opt as Record<string, string>)[valueKey]}>
@@ -190,7 +196,7 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
   );
 
   return (
-    <div className="min-h-screen bg-[#141414] text-white">
+    <div ref={screenRef} className="min-h-screen bg-[#141414] text-white safe-area-screen">
       {/* Header */}
       <div className="sticky top-0 z-50 bg-gradient-to-b from-[#141414] via-[#141414] to-transparent pb-8">
         <div className="max-w-4xl mx-auto px-6 pt-8">
@@ -198,6 +204,7 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
             <button
               onClick={onBack}
               className="tv-focus flex items-center gap-2 text-gray-400 hover:text-white transition-colors px-4 py-2 rounded-lg hover:bg-white/10"
+              data-initial-focus="true"
             >
               <ArrowLeft className="w-5 h-5" />
               <span className="font-medium">{t.back}</span>
@@ -236,7 +243,7 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
             <div className="relative">
               <button
                 onClick={() => setShowColorPicker(!showColorPicker)}
-                className="w-28 h-28 rounded-2xl flex items-center justify-center transition-transform hover:scale-105 relative group"
+                className="tv-focus w-28 h-28 rounded-2xl flex items-center justify-center transition-transform hover:scale-105 relative group"
                 style={{ backgroundColor: profileColor }}
               >
                 <User className="w-14 h-14 text-white/90" />
@@ -255,7 +262,7 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
                           setProfileColor(color);
                           setShowColorPicker(false);
                         }}
-                        className={`w-8 h-8 rounded-full transition-transform hover:scale-110 ${
+                        className={`tv-focus touch-target w-8 h-8 rounded-full transition-transform hover:scale-110 ${
                           profileColor === color ? 'ring-2 ring-white ring-offset-2 ring-offset-gray-900' : ''
                         }`}
                         style={{ backgroundColor: color }}
@@ -273,7 +280,7 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
                 type="text"
                 value={profileName}
                 onChange={(e) => setProfileName(e.target.value)}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white text-lg focus:border-purple-500 focus:outline-none transition-colors"
+                className="tv-focus w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white text-lg focus:border-purple-500 focus:outline-none transition-colors"
                 placeholder={t.profileName}
               />
             </div>
@@ -385,14 +392,14 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
                 type="password"
                 value={preferences.geminiApiKey || ''}
                 onChange={(e) => handlePreferenceChange('geminiApiKey', e.target.value)}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:border-purple-500 focus:outline-none transition-colors font-mono text-sm"
+                className="tv-focus w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:border-purple-500 focus:outline-none transition-colors font-mono text-sm"
                 placeholder="AIza..."
               />
               <a 
                 href="https://aistudio.google.com/app/apikey" 
                 target="_blank" 
                 rel="noopener noreferrer"
-                className="text-xs text-purple-400 hover:text-purple-300 transition-colors flex items-center gap-1 w-fit"
+                className="tv-focus text-xs text-purple-400 hover:text-purple-300 transition-colors flex items-center gap-1 w-fit rounded-lg px-2 py-1"
               >
                 <Globe className="w-3 h-3" />
                 {t.getApiKeyLink}
@@ -512,7 +519,7 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
                 alert(t.cacheCleared);
                 window.location.reload();
               }}
-              className="bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white border border-red-500/30 px-4 py-2 rounded-lg transition-all font-medium"
+              className="tv-focus bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white border border-red-500/30 px-4 py-2 rounded-lg transition-all font-medium"
             >
               {t.clearCache}
             </button>

@@ -2,7 +2,10 @@ import { Channel, Recommendation, StreamType, WatchHistoryItem } from "../types.
 import { CacheService } from "./cacheService.ts";
 
 // API Key - usa solo variabile d'ambiente Vite. Non inserire chiavi nel codice sorgente.
-const getApiKey = (): string => {
+const getApiKey = (customApiKey?: string): string => {
+  if (customApiKey?.trim()) {
+    return customApiKey.trim();
+  }
   if (import.meta.env?.VITE_GEMINI_API_KEY) {
     return import.meta.env.VITE_GEMINI_API_KEY;
   }
@@ -38,8 +41,14 @@ const suspendService = () => {
   console.warn(`[AI Service] Suspended for 30 minutes due to critical error.`);
 };
 
-export const isAiAvailable = (): boolean => {
-  return !isSuspended() && !!getApiKey();
+export const hasAiApiKey = (customApiKey?: string): boolean => {
+  return !!getApiKey(customApiKey);
+};
+
+export const isAiTemporarilySuspended = (): boolean => isSuspended();
+
+export const isAiAvailable = (customApiKey?: string): boolean => {
+  return !isSuspended() && hasAiApiKey(customApiKey);
 };
 
 const getAI = async (customApiKey?: string) => {
@@ -48,8 +57,8 @@ const getAI = async (customApiKey?: string) => {
     return null;
   }
 
-  const activeKey = customApiKey || apiKey;
-  
+  const activeKey = getApiKey(customApiKey) || apiKey;
+
   // Se la chiave è cambiata, ricrea l'istanza
   if (aiInstance && currentKey === activeKey) return aiInstance;
   
@@ -74,9 +83,10 @@ export interface MovieEnrichment {
 
 export const getMovieEnrichment = async (
   movieTitle: string,
-  useCache: boolean = true
+  useCache: boolean = true,
+  customApiKey?: string
 ): Promise<MovieEnrichment | null> => {
-  if (isSuspended()) return null;
+  if (isSuspended() || !hasAiApiKey(customApiKey)) return null;
 
   const cacheKey = `ai_enrich_${movieTitle.toLowerCase().trim().replace(/[^a-z0-9]/g, '')}`;
   
@@ -89,7 +99,7 @@ export const getMovieEnrichment = async (
     }
   }
 
-  const ai = await getAI();
+  const ai = await getAI(customApiKey);
   if (!ai) return null;
 
   const prompt = `Analizza il film "${movieTitle}".
@@ -108,8 +118,8 @@ Rispondi SOLO con il JSON.`;
     });
 
     const text = result?.text || "";
-    const jsonMatch = text.match(/\{[\s\S]*?\}/);
-    
+    const jsonMatch = text.match(/\{[\s\S]*?}/);
+
     if (jsonMatch) {
       const data = JSON.parse(jsonMatch[0]) as MovieEnrichment;
       if (useCache) CacheService.saveApiData(cacheKey, data);
@@ -220,7 +230,7 @@ ${JSON.stringify(selectedItems)}`;
     const text = result?.text || "";
 
     // Estrai JSON dalla risposta
-    const jsonMatch = text.match(/\[[\s\S]*?\]/);
+    const jsonMatch = text.match(/\[[\s\S]*?]/);
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]) as Recommendation[];
       const results = parsed.filter(rec =>

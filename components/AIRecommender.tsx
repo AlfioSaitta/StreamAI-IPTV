@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Sparkles, Loader2, Play, Search, X, Tv, Film, Clapperboard } from 'lucide-react';
 import { getRecommendations, isAiAvailable } from '../services/geminiService.ts';
 import { Channel, Recommendation, StreamType, WatchHistoryItem } from '../types.ts';
+import { useFocusTrap } from '../hooks/useTvFocus.ts';
 
 interface AIRecommenderProps {
   channels: Channel[];
@@ -18,18 +19,22 @@ const AIRecommender: React.FC<AIRecommenderProps> = ({ channels, onPlayChannel, 
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const aiAvailable = isAiAvailable(geminiApiKey);
 
-  // Check if AI is available (Circuit Breaker)
-  if (!isAiAvailable()) {
-    return null;
-  }
+  useFocusTrap(isOpen && aiAvailable, panelRef, { onEscape: () => setIsOpen(false), initialSelector: '[data-initial-focus="true"]' });
 
   // Focus input when opened
   useEffect(() => {
-    if (isOpen && inputRef.current) {
+    if (isOpen && aiAvailable && inputRef.current) {
         setTimeout(() => inputRef.current?.focus(), 100);
     }
-  }, [isOpen]);
+  }, [isOpen, aiAvailable]);
+
+  // Check if AI is available (Circuit Breaker)
+  if (!aiAvailable) {
+    return null;
+  }
 
   // Context-aware suggestions based on history if available
   const getSuggestions = () => {
@@ -77,7 +82,7 @@ const AIRecommender: React.FC<AIRecommenderProps> = ({ channels, onPlayChannel, 
           <div className="absolute bottom-6 right-6 z-40">
               <button
                 onClick={() => setIsOpen(true)}
-                className="flex items-center gap-3 bg-gray-900/95 backdrop-blur-xl border border-white/10 hover:border-purple-500/50 rounded-full pl-4 pr-5 py-3 shadow-2xl transition-all hover:scale-105 group"
+                className="tv-focus flex items-center gap-3 bg-gray-900/95 backdrop-blur-xl border border-white/10 hover:border-purple-500/50 rounded-full pl-4 pr-5 py-3 shadow-2xl transition-all hover:scale-105 group"
               >
                   <div className="bg-purple-500/20 p-2 rounded-full">
                       <Sparkles className="w-4 h-4 text-purple-400 animate-pulse" />
@@ -91,7 +96,7 @@ const AIRecommender: React.FC<AIRecommenderProps> = ({ channels, onPlayChannel, 
   }
 
   return (
-    <div className="absolute bottom-6 right-6 z-40 w-[420px] max-w-[95vw] bg-gray-900/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl flex flex-col overflow-hidden max-h-[70vh]">
+    <div ref={panelRef} className="absolute bottom-6 right-6 z-40 w-[420px] max-w-[95vw] bg-gray-900/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl flex flex-col overflow-hidden max-h-[70vh]" role="dialog" aria-modal="false" aria-label="Assistente AI">
 
       {/* Header con Search integrata */}
       <div className="p-3 bg-gradient-to-r from-purple-900/50 to-indigo-900/50 border-b border-white/10">
@@ -104,12 +109,13 @@ const AIRecommender: React.FC<AIRecommenderProps> = ({ channels, onPlayChannel, 
                 onChange={(e) => setPrompt(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder={`Cerca ${activeTab === 'live' ? 'canali' : activeTab === 'movie' ? 'film' : 'serie'} con AI...`}
-                className="flex-1 bg-transparent text-sm text-white placeholder-gray-500 focus:outline-none min-w-0"
+                className="tv-focus flex-1 bg-transparent text-sm text-white placeholder-gray-500 focus:outline-none min-w-0"
+                data-initial-focus="true"
             />
             {prompt ? (
                 <button
                     onClick={() => setPrompt('')}
-                    className="p-1 text-gray-500 hover:text-white transition-colors"
+                    className="tv-focus p-1 text-gray-500 hover:text-white transition-colors rounded-lg"
                 >
                     <X className="w-4 h-4" />
                 </button>
@@ -117,13 +123,13 @@ const AIRecommender: React.FC<AIRecommenderProps> = ({ channels, onPlayChannel, 
             <button
                 onClick={() => handleSearch()}
                 disabled={loading || !prompt.trim()}
-                className="p-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg disabled:opacity-50 disabled:bg-gray-700 transition-colors"
+                className="tv-focus p-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg disabled:opacity-50 disabled:bg-gray-700 transition-colors"
             >
                 <Search className="w-4 h-4" />
             </button>
             <button
                 onClick={() => setIsOpen(false)}
-                className="p-1.5 text-gray-500 hover:text-white hover:bg-white/10 rounded-lg transition-colors ml-1"
+                className="tv-focus p-1.5 text-gray-500 hover:text-white hover:bg-white/10 rounded-lg transition-colors ml-1"
             >
                 <X className="w-4 h-4" />
             </button>
@@ -136,7 +142,7 @@ const AIRecommender: React.FC<AIRecommenderProps> = ({ channels, onPlayChannel, 
                     <button
                         key={s}
                         onClick={() => handleSearch(s)}
-                        className="text-xs bg-white/5 hover:bg-purple-600 hover:text-white border border-white/10 text-gray-400 px-2.5 py-1 rounded-full transition-all"
+                        className="tv-focus text-xs bg-white/5 hover:bg-purple-600 hover:text-white border border-white/10 text-gray-400 px-2.5 py-1 rounded-full transition-all"
                     >
                         {s}
                     </button>
@@ -172,7 +178,7 @@ const AIRecommender: React.FC<AIRecommenderProps> = ({ channels, onPlayChannel, 
                         <button
                             key={idx}
                             onClick={() => onPlayChannel(rec.channelName)}
-                            className="w-full group bg-gray-800/40 hover:bg-purple-600/20 rounded-xl border border-white/5 hover:border-purple-500/30 transition-all overflow-hidden flex flex-row text-left"
+                            className="tv-focus w-full group bg-gray-800/40 hover:bg-purple-600/20 rounded-xl border border-white/5 hover:border-purple-500/30 transition-all overflow-hidden flex flex-row text-left"
                         >
                             {/* Poster/Icon */}
                             <div className="w-16 h-16 bg-gray-900 shrink-0 relative flex items-center justify-center">

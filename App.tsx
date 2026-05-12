@@ -9,15 +9,16 @@ import MovieDetail from './components/MovieDetail.tsx';
 import ProfileSelection from './components/ProfileSelection.tsx';
 import ProfileSettings from './components/ProfileSettings.tsx';
 import CodecWarning from './components/CodecWarning.tsx';
+import EmptyState from './components/shared/EmptyState.tsx';
 import { LanguageProvider } from './contexts/LanguageContext.tsx';
 import { loginXtream } from './services/xtream.ts';
 import { ProfileService, DEFAULT_PREFERENCES } from './services/profileService.ts';
 import { CacheService } from './services/cacheService.ts';
 import { i18n } from './services/i18n.ts';
 import { Category, Channel, XtreamCredentials, StreamType, Profile } from './types.ts';
-import { Server, Wifi } from 'lucide-react';
+import { Server, Wifi, Sparkles } from 'lucide-react';
 import { platformService } from './services/platformService.ts';
-import { isAiAvailable } from './services/geminiService.ts';
+import { hasAiApiKey, isAiAvailable, isAiTemporarilySuspended } from './services/geminiService.ts';
 
 const MIN_CONTENT_REFRESH_INTERVAL_MINUTES = 60;
 
@@ -59,6 +60,31 @@ const NetworkStatusBanner = () => {
       <div>
         <p className="text-sm text-gray-300">In riproduzione su <span className="font-bold text-white">{networkStatus.deviceId}</span></p>
         <p className="font-semibold truncate max-w-xs">{networkStatus.channelName}</p>
+      </div>
+    </div>
+  );
+};
+
+const AiUnavailableHint = ({ hasKey, isSuspended, onOpenSettings }: { hasKey: boolean; isSuspended: boolean; onOpenSettings: () => void }) => {
+  const message = isSuspended
+    ? 'AI sospesa temporaneamente dopo errori o quota esaurita. Riproverà automaticamente più tardi.'
+    : 'Gemini non configurato. Aggiungi una chiave API nelle impostazioni profilo per abilitare i consigli AI.';
+
+  return (
+    <div className="fixed bottom-6 right-6 z-40 max-w-sm rounded-2xl border border-white/10 bg-gray-900/95 p-4 text-gray-300 shadow-2xl backdrop-blur-xl">
+      <div className="flex items-start gap-3">
+        <div className="rounded-full bg-purple-500/20 p-2">
+          <Sparkles className="w-5 h-5 text-purple-300" />
+        </div>
+        <div className="min-w-0">
+          <p className="font-semibold text-white">{isSuspended ? 'AI temporaneamente non disponibile' : 'AI non configurata'}</p>
+          <p className="mt-1 text-sm text-gray-400">{message}</p>
+          {!hasKey && (
+            <button onClick={onOpenSettings} className="tv-focus mt-3 rounded-lg bg-purple-600 px-4 py-2 text-sm font-bold text-white hover:bg-purple-500">
+              Apri impostazioni
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -174,10 +200,59 @@ function App() {
     };
   }, []);
 
+  // Gestione coerente di Esc per tastiera e telecomandi desktop/TV.
+  useEffect(() => {
+      const handleEscape = (event: KeyboardEvent) => {
+          if (event.key !== 'Escape') return;
+
+          const state = stateRef.current;
+
+          if (state.currentChannel) return; // Il player gestisce Esc/Back autonomamente.
+
+          if (state.selectedMovie) {
+              event.preventDefault();
+              setSelectedMovie(null);
+              return;
+          }
+          if (state.selectedSeries) {
+              event.preventDefault();
+              setSelectedSeries(null);
+              return;
+          }
+          if (state.showSettings) {
+              event.preventDefault();
+              setShowSettings(false);
+              return;
+          }
+          if (state.showXtreamModal && state.activeProfile?.xtreamCreds) {
+              event.preventDefault();
+              setShowXtreamModal(false);
+              return;
+          }
+          if (state.activeTab !== 'home') {
+              event.preventDefault();
+              setActiveTab('home');
+          }
+      };
+
+      window.addEventListener('keydown', handleEscape);
+      return () => window.removeEventListener('keydown', handleEscape);
+  }, []);
+
   // Initialize Cache Persistence
   useEffect(() => {
     CacheService.init();
     platformService.init();
+
+    const deviceMemory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+    const isLowPowerTvDevice = platformService.isNative || (typeof deviceMemory === 'number' && deviceMemory <= 4);
+    document.body.classList.toggle('platform-native', platformService.isNative);
+    document.body.classList.toggle('platform-android', platformService.isAndroid);
+    document.body.classList.toggle('tv-low-power', isLowPowerTvDevice);
+
+    return () => {
+      document.body.classList.remove('platform-native', 'platform-android', 'tv-low-power');
+    };
   }, []);
 
 
@@ -576,16 +651,13 @@ function App() {
 
     if (liveCategories.length === 0 && vodCategories.length === 0 && seriesCategories.length === 0) {
         return (
-            <div className="flex-1 flex flex-col items-center justify-center bg-[#141414] text-gray-400">
-                <Server className="w-24 h-24 mb-6 opacity-20" />
-                <h2 className="text-4xl font-bold text-white mb-4">{t.welcome}</h2>
-                <p className="text-xl mb-10 max-w-md text-center font-light">{t.welcomeDesc}</p>
-                <button
-                    onClick={() => setShowXtreamModal(true)}
-                    className="tv-focus bg-red-600 text-white px-10 py-4 rounded font-bold text-xl shadow-lg hover:bg-red-700 transition-colors"
-                >
-                    {t.connectServer}
-                </button>
+            <div className="flex-1 flex items-center justify-center bg-[#141414] safe-area-screen">
+                <EmptyState
+                    icon={Server}
+                    title={t.welcome}
+                    description={`${t.welcomeDesc} Se hai già configurato un provider ma il catalogo resta vuoto, verifica che il server sia raggiungibile e che le credenziali siano ancora valide.`}
+                    actions={[{ label: t.connectServer, onClick: () => setShowXtreamModal(true) }]}
+                />
             </div>
         );
     }
@@ -632,10 +704,11 @@ function App() {
               allChannels={allChannels}
               onShowDetails={handleShowDetails}
               history={activeProfile.history}
+              geminiApiKey={activeProfile.preferences?.geminiApiKey}
           />
         )}
 
-        {!currentChannel && !selectedSeries && (liveCategories.length > 0 || vodCategories.length > 0) && isAiAvailable() && (
+        {!currentChannel && !selectedSeries && (liveCategories.length > 0 || vodCategories.length > 0) && isAiAvailable(activeProfile.preferences?.geminiApiKey) && (
             <AIRecommender
               channels={getCurrentCategories().flatMap(c => c.channels)}
               onPlayChannel={handlePlayRecommended}
@@ -643,6 +716,14 @@ function App() {
               history={activeProfile.history}
               aiCaching={activeProfile.preferences?.aiCaching}
               geminiApiKey={activeProfile.preferences?.geminiApiKey}
+            />
+        )}
+
+        {!currentChannel && !selectedSeries && (liveCategories.length > 0 || vodCategories.length > 0) && !isAiAvailable(activeProfile.preferences?.geminiApiKey) && (
+            <AiUnavailableHint
+              hasKey={hasAiApiKey(activeProfile.preferences?.geminiApiKey)}
+              isSuspended={isAiTemporarilySuspended()}
+              onOpenSettings={() => setShowSettings(true)}
             />
         )}
 

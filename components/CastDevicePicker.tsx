@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { X, Search, Tv, Smartphone, Monitor, Wifi, WifiOff, Loader2, Plus, Cast, Check, AlertCircle } from 'lucide-react';
 import { deviceDiscovery, DiscoveredDevice, DeviceDiscoveryState } from '../services/deviceDiscovery.ts';
+import { useFocusTrap } from '../hooks/useTvFocus.ts';
 
 interface CastDevicePickerProps {
   isOpen: boolean;
@@ -24,6 +25,7 @@ const CastDevicePicker: React.FC<CastDevicePickerProps> = ({
   onCastSuccess,
   onCastError,
 }) => {
+  const modalRef = useRef<HTMLDivElement>(null);
   const [state, setState] = useState<DeviceDiscoveryState>({
     isSearching: false,
     devices: [],
@@ -37,6 +39,8 @@ const CastDevicePicker: React.FC<CastDevicePickerProps> = ({
   const [castError, setCastError] = useState<string | null>(null);
   const [manualIP, setManualIP] = useState('');
   const [showManualInput, setShowManualInput] = useState(false);
+
+  useFocusTrap(isOpen, modalRef, { onEscape: onClose, initialSelector: '[data-initial-focus="true"], .tv-focus' });
 
   useEffect(() => {
     if (!isOpen) return;
@@ -156,14 +160,14 @@ const CastDevicePicker: React.FC<CastDevicePickerProps> = ({
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-fade-in">
-      <div className="bg-[#1a1a1a] border border-white/10 rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+      <div ref={modalRef} className="bg-[#1a1a1a] border border-white/10 rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden" role="dialog" aria-modal="true" aria-label="Selezione dispositivo cast">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-white/10">
           <div className="flex items-center gap-3">
             <Cast className="w-6 h-6 text-blue-400" />
             <h2 className="text-lg font-semibold text-white">Trasmetti su</h2>
           </div>
-          <button onClick={onClose} className="p-2 rounded-full hover:bg-white/10 text-gray-400 hover:text-white transition-colors">
+          <button onClick={onClose} className="tv-focus touch-target p-2 rounded-full hover:bg-white/10 text-gray-400 hover:text-white transition-colors" aria-label="Chiudi casting">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -188,7 +192,7 @@ const CastDevicePicker: React.FC<CastDevicePickerProps> = ({
                     )}
                   </div>
                 </div>
-                <button onClick={handleStopSearch} className="tv-focus px-3 py-1 text-xs rounded-lg bg-white/10 hover:bg-white/20 text-white">
+                <button onClick={handleStopSearch} className="tv-focus px-3 py-1 text-xs rounded-lg bg-white/10 hover:bg-white/20 text-white" data-initial-focus="true">
                   Annulla
                 </button>
               </div>
@@ -212,11 +216,11 @@ const CastDevicePicker: React.FC<CastDevicePickerProps> = ({
                   value={manualIP}
                   onChange={(e) => setManualIP(e.target.value)}
                   placeholder="192.168.1.100"
-                  className="flex-1 bg-black/50 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+                  className="tv-focus flex-1 bg-black/50 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
                   onKeyDown={(e) => e.key === 'Enter' && handleManualAdd()}
                   autoFocus
                 />
-                <button onClick={handleManualAdd} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors">
+                <button onClick={handleManualAdd} className="tv-focus px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors">
                   Connetti
                 </button>
               </div>
@@ -238,7 +242,8 @@ const CastDevicePicker: React.FC<CastDevicePickerProps> = ({
                   key={device.id}
                   onClick={() => handleDeviceSelect(device)}
                   disabled={isCasting}
-                  className={`w-full flex items-center gap-4 px-4 py-3 hover:bg-white/10 transition-colors text-left ${selectedDevice?.id === device.id ? 'bg-white/10' : ''} ${isCasting ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  className={`tv-focus w-full flex items-center gap-4 px-4 py-3 hover:bg-white/10 transition-colors text-left ${selectedDevice?.id === device.id ? 'bg-white/10' : ''} ${isCasting ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  data-initial-focus={!state.isSearching ? 'true' : undefined}
                 >
                   {device.id === 'manual' ? (
                     <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center">

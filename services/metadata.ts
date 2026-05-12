@@ -6,6 +6,8 @@ const TMDB_API_KEY = import.meta.env.VITE_TMDB_API_KEY || '';
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 
 export const MetadataService = {
+  isConfigured: (): boolean => Boolean(TMDB_API_KEY),
+
   /**
    * Cleans raw IPTV names to get a search-friendly title.
    * Example: "[EN] The Matrix (1999) FHD.mkv" -> "The Matrix"
