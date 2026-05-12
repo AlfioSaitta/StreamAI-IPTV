@@ -10,6 +10,7 @@ import ProfileSelection from './components/ProfileSelection.tsx';
 import ProfileSettings from './components/ProfileSettings.tsx';
 import CodecWarning from './components/CodecWarning.tsx';
 import EmptyState from './components/shared/EmptyState.tsx';
+import ShortcutsCheatsheet from './components/ShortcutsCheatsheet.tsx';
 import { LanguageProvider } from './contexts/LanguageContext.tsx';
 import { loginXtream } from './services/xtream.ts';
 import { ProfileService, DEFAULT_PREFERENCES } from './services/profileService.ts';
@@ -111,6 +112,7 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [showXtreamModal, setShowXtreamModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showCheatsheet, setShowCheatsheet] = useState(false);
   const [contentRefreshStatus, setContentRefreshStatus] = useState<ContentRefreshStatus>({ state: 'idle' });
   const contentRefreshInFlightRef = useRef(false);
 
@@ -148,6 +150,21 @@ function App() {
       document.body.classList.remove('theme-oled');
     }
   }, [activeProfile]);
+
+  // Global "?" / "Shift+/" → open keyboard shortcuts cheatsheet.
+  // Ignored while typing in inputs/textareas and while the cheatsheet is already open.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const active = document.activeElement;
+      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
+      if (e.key === '?' || (e.shiftKey && e.key === '/')) {
+        e.preventDefault();
+        setShowCheatsheet(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   // Gestione Tasto Back (Android Hardware Button)
   useEffect(() => {
@@ -592,7 +609,7 @@ function App() {
 
     if (isLoading) {
         return (
-            <div className="flex-1 flex flex-col items-center justify-center bg-[#141414]">
+            <div className="flex-1 flex flex-col items-center justify-center bg-[var(--bg-primary)]">
                 <div className="w-16 h-16 border-4 border-red-600/20 border-t-red-600 rounded-full animate-spin mb-4"></div>
                 <p className="text-xl text-gray-400 font-medium animate-pulse">{t.loadingLibrary}</p>
             </div>
@@ -651,7 +668,7 @@ function App() {
 
     if (liveCategories.length === 0 && vodCategories.length === 0 && seriesCategories.length === 0) {
         return (
-            <div className="flex-1 flex items-center justify-center bg-[#141414] safe-area-screen">
+            <div className="flex-1 flex items-center justify-center bg-[var(--bg-primary)] safe-area-screen">
                 <EmptyState
                     icon={Server}
                     title={t.welcome}
@@ -690,7 +707,7 @@ function App() {
 
   return (
     <LanguageProvider profileLanguage={activeProfile?.preferences?.language || DEFAULT_PREFERENCES.language}>
-      <div className="min-h-screen w-screen bg-[#141414] overflow-x-hidden relative font-sans text-gray-100 flex flex-col">
+      <div className="min-h-screen w-screen bg-[var(--bg-primary)] overflow-x-hidden relative font-sans text-gray-100 flex flex-col">
         {renderContent()}
 
         {selectedMovie && (
@@ -741,6 +758,9 @@ function App() {
 
         {/* Banner per lo stato di riproduzione in rete */}
         <NetworkStatusBanner />
+
+        {/* Cheatsheet scorciatoie da tastiera (apertura: ?, Shift+/) */}
+        <ShortcutsCheatsheet isOpen={showCheatsheet} onClose={() => setShowCheatsheet(false)} />
       </div>
     </LanguageProvider>
   );
