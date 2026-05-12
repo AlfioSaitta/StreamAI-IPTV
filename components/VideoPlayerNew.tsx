@@ -1,16 +1,32 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import videojs from 'video.js';
-import Hls from 'hls.js';
-import mpegts from 'mpegts.js';
+import type Player from 'video.js/dist/types/player';
+import type Hls from 'hls.js';
 import 'video.js/dist/video-js.css';
-import Player from 'video.js/dist/types/player';
 
 import { Channel } from '../types';
 import { platformService } from '../services/platformService';
 import { nativeVideoPlayer } from '../services/nativeVideoPlayer';
 import { streamInfoService } from '../services/streamInfoService';
 import { useCastSession } from '../hooks/useCastSession';
+import { usePlayerOsd } from '../hooks/usePlayerOsd';
+import { useInteractiveTimeline } from '../hooks/useInteractiveTimeline';
+import { usePlayerShortcuts } from '../hooks/usePlayerShortcuts';
+import { usePlayerMediaSession } from '../hooks/usePlayerMediaSession';
+import { useRemoteControl } from '../hooks/useRemoteControl';
+import { useNativePlayerEngine } from '../hooks/useNativePlayerEngine';
+import { useWebPlayerEngine } from '../hooks/useWebPlayerEngine';
 import CastDevicePicker from './CastDevicePicker';
+import {
+  MAX_PLAYBACK_RETRIES,
+  type PlayerEngine,
+  type PlaybackErrorState,
+  type StreamSourceInfo,
+} from './player/playerTypes';
+import {
+  detectStreamSource,
+  formatTime,
+  sanitizeStreamUrl,
+} from './player/playerUtils';
 import {
   AlertTriangle, Play, Pause, Volume2, VolumeX, Maximize, Minimize,
   SkipForward, SkipBack, List, X, FastForward, Rewind, RotateCcw,
@@ -32,144 +48,6 @@ interface VideoPlayerProps {
   debugOverlay?: boolean;
 }
 
-interface OsdState {
-  icon: React.ReactNode;
-  text?: string;
-  visible: boolean;
-}
-
-type PlayerEngine = 'videojs' | 'hlsjs' | 'mpegts' | 'native';
-type StreamProtocol = 'hls' | 'mpegts' | 'dash' | 'mp4' | 'webm' | 'unknown';
-
-interface StreamSourceInfo {
-  protocol: StreamProtocol;
-  mimeType: string;
-  engine: PlayerEngine;
-  isXtreamLike: boolean;
-  isExtensionless: boolean;
-  isLive: boolean;
-  label: string;
-}
-
-interface PlaybackErrorState {
-  title: string;
-  message: string;
-  category: 'network' | 'decode' | 'unsupported' | 'timeout' | 'native' | 'unknown';
-  canRetry: boolean;
-  retryCount: number;
-  technicalDetails: string[];
-}
-
-// --- UTILS ---
-
-const formatTime = (seconds: number): string => {
-  if (!isFinite(seconds) || seconds < 0) return '0:00';
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = Math.floor(seconds % 60);
-  return h > 0
-    ? `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
-    : `${m}:${s.toString().padStart(2, '0')}`;
-};
-
-const MAX_PLAYBACK_RETRIES = 2;
-
-const sanitizeStreamUrl = (rawUrl: string): string => {
-  try {
-    const url = new URL(rawUrl);
-    const sensitiveParams = ['username', 'user', 'password', 'pass', 'token', 'key', 'api_key'];
-    sensitiveParams.forEach(param => {
-      if (url.searchParams.has(param)) url.searchParams.set(param, '***');
-    });
-
-    const parts = url.pathname.split('/');
-    const xtreamIndex = parts.findIndex(part => ['live', 'movie', 'series'].includes(part.toLowerCase()));
-    if (xtreamIndex >= 0) {
-      if (parts[xtreamIndex + 1]) parts[xtreamIndex + 1] = '***';
-      if (parts[xtreamIndex + 2]) parts[xtreamIndex + 2] = '***';
-    }
-    url.pathname = parts.join('/');
-    url.hash = '';
-    return url.toString();
-  } catch {
-    return rawUrl.replace(/([?&](?:username|user|password|pass|token|key|api_key)=)[^&]+/gi, '$1***');
-  }
-};
-
-const detectStreamSource = (url: string, channelType?: Channel['type']): StreamSourceInfo => {
-  const lowerUrl = url.toLowerCase();
-  const path = (() => {
-    try { return new URL(url).pathname.toLowerCase(); } catch { return lowerUrl; }
-  })();
-  const isXtreamLike = /\/(live|movie|series)\//.test(path) || lowerUrl.includes('player_api.php');
-  const isExtensionless = !/\.[a-z0-9]{2,5}(?:$|[?#])/.test(lowerUrl);
-  const isLive = channelType === 'live' || path.includes('/live/');
-
-  if (lowerUrl.includes('.m3u8')) {
-    return { protocol: 'hls', mimeType: 'application/x-mpegURL', engine: Hls.isSupported() ? 'hlsjs' : 'videojs', isXtreamLike, isExtensionless, isLive, label: 'HLS (.m3u8)' };
-  }
-  if (lowerUrl.includes('.mpd')) {
-    return { protocol: 'dash', mimeType: 'application/dash+xml', engine: 'videojs', isXtreamLike, isExtensionless, isLive, label: 'DASH (.mpd)' };
-  }
-  if (/\.(ts|mpeg|mpg)(?:$|[?#])/.test(lowerUrl) || (isXtreamLike && isLive)) {
-    return { protocol: 'mpegts', mimeType: 'video/mp2t', engine: mpegts.isSupported() ? 'mpegts' : 'videojs', isXtreamLike, isExtensionless, isLive, label: 'MPEG-TS' };
-  }
-  if (/\.(webm)(?:$|[?#])/.test(lowerUrl)) {
-    return { protocol: 'webm', mimeType: 'video/webm', engine: 'videojs', isXtreamLike, isExtensionless, isLive, label: 'WebM progressivo' };
-  }
-
-  const shouldAssumeMp4 = /\.(mp4|m4v|mov)(?:$|[?#])/.test(lowerUrl) || (isXtreamLike && (channelType === 'movie' || channelType === 'series')) || isExtensionless;
-  return { protocol: shouldAssumeMp4 ? 'mp4' : 'unknown', mimeType: shouldAssumeMp4 ? 'video/mp4' : 'application/octet-stream', engine: 'videojs', isXtreamLike, isExtensionless, isLive, label: shouldAssumeMp4 ? 'MP4/progressivo' : 'Formato non rilevato' };
-};
-
-const classifyPlaybackError = (
-  err: { code?: number; message?: string } | null,
-  sourceInfo: StreamSourceInfo,
-  url: string,
-  retryCount: number,
-  engine: PlayerEngine,
-  extra?: unknown
-): PlaybackErrorState => {
-  const code = err?.code;
-  const details = [
-    `Motore: ${engine}`,
-    `Protocollo: ${sourceInfo.label}`,
-    `MIME: ${sourceInfo.mimeType}`,
-    `URL: ${sanitizeStreamUrl(url)}`,
-  ];
-  if (code) details.push(`MediaError code: ${code}`);
-  if (err?.message) details.push(`MediaError message: ${err.message}`);
-  if (extra) details.push(`Dettaglio: ${String(extra)}`);
-
-  const extraText = String(extra || '').toLowerCase();
-  if (extraText.includes('401') || extraText.includes('unauthorized')) {
-    return { title: 'Credenziali non autorizzate', message: 'Il server IPTV ha rifiutato lo stream. Verifica username/password o scadenza dell’abbonamento.', category: 'network', canRetry: retryCount < MAX_PLAYBACK_RETRIES, retryCount, technicalDetails: details };
-  }
-  if (extraText.includes('403') || extraText.includes('forbidden')) {
-    return { title: 'Accesso negato allo stream', message: 'Il server ha negato l’accesso allo stream. Potrebbe essere un limite account, geoblock o token scaduto.', category: 'network', canRetry: retryCount < MAX_PLAYBACK_RETRIES, retryCount, technicalDetails: details };
-  }
-  if (extraText.includes('404') || extraText.includes('not found')) {
-    return { title: 'Stream non trovato', message: 'Il canale o VOD non è più disponibile sul server IPTV.', category: 'network', canRetry: false, retryCount, technicalDetails: details };
-  }
-  if (extraText.includes('timeout')) {
-    return { title: 'Timeout dello stream', message: 'Il player non ha ricevuto dati in tempo utile. Controlla la connessione o riprova.', category: 'timeout', canRetry: retryCount < MAX_PLAYBACK_RETRIES, retryCount, technicalDetails: details };
-  }
-
-  if (code === MediaError.MEDIA_ERR_NETWORK) {
-    return { title: 'Errore di rete', message: 'Lo stream non risponde o la connessione è instabile. Riprova tra poco o controlla il server IPTV.', category: 'network', canRetry: retryCount < MAX_PLAYBACK_RETRIES, retryCount, technicalDetails: details };
-  }
-  if (code === MediaError.MEDIA_ERR_DECODE) {
-    return { title: 'Errore codec/decodifica', message: 'Il video potrebbe usare un codec non supportato o un flusso corrotto. Se è HEVC/H.265, verifica i codec del sistema.', category: 'decode', canRetry: retryCount < MAX_PLAYBACK_RETRIES, retryCount, technicalDetails: details };
-  }
-  if (code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) {
-    return { title: 'Formato non supportato', message: `Il formato ${sourceInfo.label} non è stato accettato dal player corrente. Prova un altro stream o verifica codec/protocollo.`, category: 'unsupported', canRetry: retryCount < MAX_PLAYBACK_RETRIES, retryCount, technicalDetails: details };
-  }
-  if (sourceInfo.protocol === 'mpegts' && engine === 'videojs') {
-    return { title: 'MPEG-TS non gestito nativamente', message: 'Questo stream TS diretto richiede supporto MediaSource/mpegts. Il dispositivo potrebbe non supportarlo.', category: 'unsupported', canRetry: retryCount < MAX_PLAYBACK_RETRIES, retryCount, technicalDetails: details };
-  }
-
-  return { title: 'Errore di riproduzione', message: 'La riproduzione si è interrotta. Puoi riprovare o aprire i dettagli tecnici.', category: 'unknown', canRetry: retryCount < MAX_PLAYBACK_RETRIES, retryCount, technicalDetails: details };
-};
 
 // --- MAIN COMPONENT ---
 
@@ -191,8 +69,6 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const controlsTimeoutRef = useRef<number | null>(null);
   const networkStatusIntervalRef = useRef<number | null>(null);
-  const osdTimeoutRef = useRef<number | null>(null);
-  const timelineRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const mpegtsRef = useRef<any>(null);
   const retryCountRef = useRef(0);
@@ -227,28 +103,21 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   const [streamSourceInfo, setStreamSourceInfo] = useState<StreamSourceInfo | null>(null);
   const [nativePiPSupported, setNativePiPSupported] = useState(false);
 
-  // OSD State
-  const [osd, setOsd] = useState<OsdState>({ icon: null, visible: false });
+  // OSD (extracted hook)
+  const { osd, showOsd } = usePlayerOsd();
 
-  // Timeline Hover State
-  const [hoverTime, setHoverTime] = useState<number | null>(null);
-  const [hoverPos, setHoverPos] = useState<number>(0);
+  // Interactive timeline (hover ghost bar + tooltip)
+  const {
+    timelineRef,
+    hoverTime,
+    hoverPos,
+    onMouseMove: handleTimelineMouseMove,
+    onMouseLeave: handleTimelineMouseLeave,
+  } = useInteractiveTimeline(duration);
 
   // Hooks
   const castSession = useCastSession();
 
-  // --- OSD HELPER ---
-  const showOsd = useCallback((icon: React.ReactNode, text?: string) => {
-    setOsd({ icon, text, visible: true });
-    
-    if (osdTimeoutRef.current) {
-      window.clearTimeout(osdTimeoutRef.current);
-    }
-    
-    osdTimeoutRef.current = window.setTimeout(() => {
-      setOsd(prev => ({ ...prev, visible: false }));
-    }, 2000);
-  }, []);
 
   const cleanupPlaybackEngines = useCallback(() => {
     if (retryTimerRef.current) {
@@ -407,21 +276,6 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     }
   }, [isUsingNativePlayer]);
 
-  const handleTimelineMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    if (!timelineRef.current || duration <= 0) return;
-    
-    const rect = timelineRef.current.getBoundingClientRect();
-    const offsetX = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
-    const percentage = offsetX / rect.width;
-    const time = percentage * duration;
-    
-    setHoverPos(percentage * 100);
-    setHoverTime(time);
-  }, [duration]);
-
-  const handleTimelineMouseLeave = useCallback(() => {
-    setHoverTime(null);
-  }, []);
 
   const toggleFullscreen = useCallback(() => {
     if (!containerRef.current) return;
@@ -613,96 +467,40 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     });
   }, [channel]);
 
-  // --- KEYBOARD SHORTCUTS ---
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignora se l'utente sta scrivendo in un input
-      if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
-
-      const key = e.key.toLowerCase();
-
-      switch (key) {
-        // Play / Pausa
-        case ' ':
-        case 'enter':
-        case 'p':
-          e.preventDefault();
-          togglePlay();
-          break;
-
-        // Seeking
-        case 'arrowleft':
-          e.preventDefault();
-          skip(-10);
-          break;
-        case 'arrowright':
-          e.preventDefault();
-          skip(10);
-          break;
-
-        // Volume
-        case 'arrowup':
-          e.preventDefault();
-          handleVolumeChange(Math.min(1, volume + 0.1));
-          break;
-        case 'arrowdown':
-          e.preventDefault();
-          handleVolumeChange(Math.max(0, volume - 0.1));
-          break;
-        case 'm':
-          e.preventDefault();
-          toggleMute();
-          break;
-
-        // Fullscreen
-        case 'f':
-          e.preventDefault();
-          toggleFullscreen();
-          break;
-
-        // Cast
-        case 'c':
-          e.preventDefault();
-          setShowDevicePicker(true);
-          break;
-
-        // Lista Canali / Episodi
-        case 'l':
-          e.preventDefault();
-          if (channel?.type === 'live' || channel?.type === 'series') {
-            setShowPlaylist(prev => !prev);
-          }
-          break;
-
-        // Indietro / Chiudi menu
-        case 'escape':
-          e.preventDefault();
-          if (showPlaylist) setShowPlaylist(false);
-          else if (showDevicePicker) setShowDevicePicker(false);
-          else if (showAudioMenu) setShowAudioMenu(false);
-          else if (onBack) onBack();
-          break;
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [togglePlay, skip, volume, handleVolumeChange, toggleMute, toggleFullscreen, channel, showPlaylist, showDevicePicker, showAudioMenu, onBack]);
+  // --- KEYBOARD SHORTCUTS (extracted hook) ---
+  usePlayerShortcuts(
+    {
+      togglePlay,
+      skip,
+      setVolume: (v) => handleVolumeChange(v),
+      currentVolume: volume,
+      toggleMute,
+      toggleFullscreen,
+      openCast: () => setShowDevicePicker(true),
+      togglePlaylist: () => setShowPlaylist(prev => !prev),
+      onEscape: () => {
+        if (showPlaylist) setShowPlaylist(false);
+        else if (showDevicePicker) setShowDevicePicker(false);
+        else if (showAudioMenu) setShowAudioMenu(false);
+        else if (onBack) onBack();
+      },
+    },
+    { channel }
+  );
 
 
   // --- INITIALIZATION & EVENT HANDLING ---
 
+  // Reset state + detect engine on channel change.
   useEffect(() => {
     if (!channel) return;
 
-    // Reset state for a new channel
     setIsPlaying(false);
     setIsBuffering(true);
     setCurrentTime(0);
     setDuration(0);
     setError(null);
     setPlaybackError(null);
-    setIsUsingNativePlayer(false);
     setShowPlaylist(false);
     setShowAudioMenu(false);
     setShowInfoPanel(false);
@@ -719,449 +517,82 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     const detectedSource = detectStreamSource(source, channel.type);
     setStreamSourceInfo(detectedSource);
     playerEngineRef.current = platformService.isNative ? 'native' : detectedSource.engine;
-
-    // Native Player (Android/iOS)
+    setIsUsingNativePlayer(platformService.isNative);
     if (platformService.isNative) {
-      setIsUsingNativePlayer(true);
       setIsBuffering(false);
-      const handlePlayerExit = () => onBack && onBack();
-      const syncNativeProgress = async () => {
-        const [nativeCurrentTime, nativeDuration, nativeIsPlaying] = await Promise.all([
-          nativeVideoPlayer.getCurrentTime(),
-          nativeVideoPlayer.getDuration(),
-          nativeVideoPlayer.isPlaying(),
-        ]);
-        if (Number.isFinite(nativeCurrentTime)) setCurrentTime(nativeCurrentTime);
-        if (Number.isFinite(nativeDuration) && nativeDuration > 0) setDuration(nativeDuration);
-        setIsPlaying(nativeIsPlaying);
-        if (onProgress && nativeDuration > 0) onProgress(nativeCurrentTime, nativeDuration);
-      };
-      const handleNativeReady = async () => {
-        setIsBuffering(false);
-        const nativeDuration = await nativeVideoPlayer.getDuration();
-        if (nativeDuration > 0) {
-          setDuration(nativeDuration);
-          if (initialProgress && initialProgress > 0.05 && initialProgress < 0.95) {
-            await nativeVideoPlayer.seekTo(nativeDuration * initialProgress);
-          }
-        }
-        await syncNativeProgress();
-      };
-      const handleNativePlay = () => { setIsPlaying(true); setIsBuffering(false); };
-      const handleNativePause = () => setIsPlaying(false);
-      const handleNativeEnded = () => { setIsPlaying(false); onNext?.(); };
-      const handleNativeTimeUpdate = (data: any) => {
-        const nativeCurrentTime = Number(data?.currentTime ?? data?.current_time ?? data?.value ?? data?.currentTimeSeconds ?? 0);
-        const nativeDuration = Number(data?.duration ?? data?.durationSeconds ?? data?.totalTime ?? 0);
-        if (Number.isFinite(nativeCurrentTime)) setCurrentTime(nativeCurrentTime);
-        if (Number.isFinite(nativeDuration) && nativeDuration > 0) setDuration(nativeDuration);
-        if (onProgress && nativeDuration > 0) onProgress(nativeCurrentTime, nativeDuration);
-      };
-      const handleNativeError = (data: any) => {
-        const nativeError: PlaybackErrorState = {
-          title: 'Errore player nativo',
-          message: 'ExoPlayer non è riuscito ad avviare o mantenere la riproduzione dello stream.',
-          category: 'native',
-          canRetry: retryCountRef.current < MAX_PLAYBACK_RETRIES,
-          retryCount: retryCountRef.current,
-          technicalDetails: [
-            `Motore: native`,
-            `Protocollo: ${detectedSource.label}`,
-            `URL: ${sanitizeStreamUrl(source)}`,
-            `Dettaglio: ${JSON.stringify(data)}`,
-          ],
-        };
-        setPlaybackError(nativeError);
-        setError(nativeError.message);
-        showOsd(<AlertTriangle className="w-12 h-12 text-white" />, nativeError.title);
-        scheduleRetry(nativeError);
-      };
-      nativeVideoPlayer.on('exit', handlePlayerExit);
-      nativeVideoPlayer.on('ready', handleNativeReady);
-      nativeVideoPlayer.on('play', handleNativePlay);
-      nativeVideoPlayer.on('pause', handleNativePause);
-      nativeVideoPlayer.on('ended', handleNativeEnded);
-      nativeVideoPlayer.on('timeupdate', handleNativeTimeUpdate);
-      nativeVideoPlayer.on('error', handleNativeError);
-      nativeVideoPlayer.play({ url: source, title: channel.cleanName || channel.name, poster: channel.logo, pipEnabled: platformService.isAndroid })
-        .then(success => {
-          setNativePiPSupported(nativeVideoPlayer.supportsPiP);
-          if (!success) {
-            const nativeError = classifyPlaybackError(null, detectedSource, source, retryCountRef.current, 'native', 'initPlayer returned false');
-            setPlaybackError(nativeError);
-            setError(nativeError.message);
-            showOsd(<AlertTriangle className="w-12 h-12 text-white" />, nativeError.title);
-            scheduleRetry(nativeError);
-          }
-        })
-        .catch(err => {
-          const nativeError = classifyPlaybackError(null, detectedSource, source, retryCountRef.current, 'native', err);
-          setPlaybackError(nativeError);
-          setError(nativeError.message);
-          showOsd(<AlertTriangle className="w-12 h-12 text-white" />, nativeError.title);
-          scheduleRetry(nativeError);
-        });
-      nativeProgressIntervalRef.current = window.setInterval(syncNativeProgress, 2000);
-      return () => {
-        nativeVideoPlayer.off('exit', handlePlayerExit);
-        nativeVideoPlayer.off('ready', handleNativeReady);
-        nativeVideoPlayer.off('play', handleNativePlay);
-        nativeVideoPlayer.off('pause', handleNativePause);
-        nativeVideoPlayer.off('ended', handleNativeEnded);
-        nativeVideoPlayer.off('timeupdate', handleNativeTimeUpdate);
-        nativeVideoPlayer.off('error', handleNativeError);
-        if (nativeProgressIntervalRef.current) {
-          window.clearInterval(nativeProgressIntervalRef.current);
-          nativeProgressIntervalRef.current = null;
-        }
-        nativeVideoPlayer.stop().catch(() => undefined);
-      };
     }
+  }, [channel, retryNonce, cleanupPlaybackEngines]);
 
-    // Web/Electron Player
-    if (!videoRef.current) return;
-    const container = videoRef.current;
-    container.innerHTML = '';
+  // Native (Capacitor/ExoPlayer) engine — no-op on web/Electron.
+  useNativePlayerEngine({
+    channel,
+    detectedSource: streamSourceInfo,
+    initialProgress,
+    retryNonce,
+    onBack,
+    onNext,
+    onProgress,
+    setIsPlaying,
+    setIsBuffering,
+    setCurrentTime,
+    setDuration,
+    setPlaybackError,
+    setError,
+    setNativePiPSupported,
+    showOsd,
+    scheduleRetry,
+    nativeProgressIntervalRef,
+    retryCountRef,
+  });
 
-    const videoEl = document.createElement('video');
-    videoEl.className = 'video-js vjs-big-play-centered vjs-fill';
-    videoEl.playsInline = true;
-    container.appendChild(videoEl);
+  // Web (Video.js + hls.js + mpegts.js) engine — no-op on native.
+  useWebPlayerEngine({
+    channel,
+    detectedSource: streamSourceInfo,
+    initialProgress,
+    retryNonce,
+    onNext,
+    onProgress,
+    videoRef,
+    playerRef,
+    hlsRef,
+    mpegtsRef,
+    loadTimeoutRef,
+    networkStatusIntervalRef,
+    retryCountRef,
+    setIsPlaying,
+    setIsBuffering,
+    setCurrentTime,
+    setDuration,
+    setVolume,
+    setIsMuted,
+    setIsFullscreen,
+    setNetworkSpeed,
+    setAudioTracks,
+    setError,
+    setPlaybackError,
+    setIsPiP,
+    showOsd,
+    scheduleRetry,
+    cleanupPlaybackEngines,
+    broadcastStatus,
+    isBuffering,
+  });
 
-    if (detectedSource.engine === 'hlsjs') {
-      const hls = new Hls({
-        enableWorker: true,
-        lowLatencyMode: channel.type === 'live',
-        backBufferLength: channel.type === 'live' ? 30 : 90,
-      });
-      hlsRef.current = hls;
-      hls.attachMedia(videoEl);
-      hls.on(Hls.Events.MEDIA_ATTACHED, () => hls.loadSource(source));
-      hls.on(Hls.Events.ERROR, (_event, data) => {
-        if (!data?.fatal) return;
-        const httpStatus = data?.response?.code ? ` HTTP ${data.response.code}` : '';
-        const hlsError = classifyPlaybackError(videoEl.error, detectedSource, source, retryCountRef.current, 'hlsjs', `${data.type}: ${data.details}${httpStatus}`);
-        setPlaybackError(hlsError);
-        setError(hlsError.message);
-        showOsd(<AlertTriangle className="w-12 h-12 text-white" />, hlsError.title);
-        scheduleRetry(hlsError);
-      });
-    }
+  // Media Session API integration (extracted hook)
+  usePlayerMediaSession({
+    channel,
+    isPlaying,
+    currentTime,
+    duration,
+    togglePlay,
+    skip,
+    onPrev,
+    onNext,
+  });
 
-    if (detectedSource.engine === 'mpegts') {
-      const tsPlayer = mpegts.createPlayer({ type: 'mpegts', url: source, isLive: detectedSource.isLive });
-      mpegtsRef.current = tsPlayer;
-      tsPlayer.attachMediaElement(videoEl);
-      tsPlayer.load();
-      tsPlayer.on(mpegts.Events.ERROR, (type: string, details: string) => {
-        const tsError = classifyPlaybackError(videoEl.error, detectedSource, source, retryCountRef.current, 'mpegts', `${type}: ${details}`);
-        setPlaybackError(tsError);
-        setError(tsError.message);
-        showOsd(<AlertTriangle className="w-12 h-12 text-white" />, tsError.title);
-        scheduleRetry(tsError);
-      });
-    }
-
-    const player = videojs(videoEl, {
-      autoplay: false,
-      controls: false,
-      responsive: true,
-      fluid: true,
-      preload: 'metadata',
-      sources: detectedSource.engine === 'videojs' ? [{ src: source, type: detectedSource.mimeType }] : [],
-    });
-    playerRef.current = player;
-    loadTimeoutRef.current = window.setTimeout(() => {
-      if (player.isDisposed() || (player.currentTime() || 0) > 0 || !isBuffering) return;
-      const timeoutError = classifyPlaybackError(player.error() ?? null, detectedSource, source, retryCountRef.current, detectedSource.engine, 'timeout iniziale caricamento metadata');
-      setPlaybackError(timeoutError);
-      setError(timeoutError.message);
-      showOsd(<AlertTriangle className="w-12 h-12 text-white" />, timeoutError.title);
-      scheduleRetry(timeoutError);
-    }, 18000);
-    
-    // Initial broadcast to announce existence
-    broadcastStatus();
-
-    player.on('play', () => { 
-      if (!player.isDisposed()) {
-        if (loadTimeoutRef.current) {
-          window.clearTimeout(loadTimeoutRef.current);
-          loadTimeoutRef.current = null;
-        }
-        setIsPlaying(true); 
-        setIsBuffering(false); 
-        if ('mediaSession' in navigator) {
-          navigator.mediaSession.playbackState = 'playing';
-        }
-        broadcastStatus();
-      }
-    });
-    player.on('pause', () => {
-      if (!player.isDisposed()) {
-        setIsPlaying(false);
-        if ('mediaSession' in navigator) {
-          navigator.mediaSession.playbackState = 'paused';
-        }
-        broadcastStatus();
-      }
-    });
-    player.on('waiting', () => {
-      if (!player.isDisposed()) setIsBuffering(true);
-    });
-    player.on('playing', () => {
-      if (!player.isDisposed()) {
-        if (loadTimeoutRef.current) {
-          window.clearTimeout(loadTimeoutRef.current);
-          loadTimeoutRef.current = null;
-        }
-        setIsBuffering(false);
-        broadcastStatus();
-      }
-    });
-    player.on('seeked', () => {
-      if (!player.isDisposed()) broadcastStatus();
-    });
-    player.on('volumechange', () => {
-      if (!player.isDisposed()) {
-        setVolume(player.volume() || 0);
-        setIsMuted(player.muted() || false);
-        broadcastStatus();
-      }
-    });
-    player.on('timeupdate', () => {
-      if (!player.isDisposed()) {
-        const cTime = player.currentTime() || 0;
-        setCurrentTime(cTime);
-        if (onProgress) onProgress(cTime, player.duration() || 0);
-        if (isBuffering && cTime > 0) setIsBuffering(false);
-      }
-    });
-    player.on('durationchange', () => {
-      if (!player.isDisposed()) {
-        setDuration(player.duration() || 0);
-        broadcastStatus();
-      }
-    });
-    player.on('fullscreenchange', () => {
-      if (!player.isDisposed()) setIsFullscreen(player.isFullscreen() || false);
-    });
-    player.on('loadedmetadata', () => {
-      if (player.isDisposed()) return;
-      if (loadTimeoutRef.current) {
-        window.clearTimeout(loadTimeoutRef.current);
-        loadTimeoutRef.current = null;
-      }
-      
-      updateAudioTracksList();
-
-      const dur = player.duration() || 0;
-      setDuration(dur);
-      if (initialProgress && initialProgress > 0.05 && initialProgress < 0.95) {
-        player.currentTime(dur * initialProgress);
-      }
-      streamInfoService.collectInfoAsync(videoEl, hlsRef.current, mpegtsRef.current, source)
-        .then(info => {
-          if (info.isHEVC && !info.isSupported) {
-            showOsd(<AlertTriangle className="w-12 h-12 text-white" />, 'HEVC/H.265: verifica codec');
-          }
-        })
-        .catch(() => undefined);
-      player.play()?.catch(e => console.warn("Autoplay bloccato:", e));
-      broadcastStatus();
-    });
-    player.on('ended', () => { 
-      if (onNext) onNext(); 
-      broadcastStatus();
-    });
-    player.on('error', () => {
-       const err = player.error();
-       console.error("VideoJS Error:", err);
-       
-       const classifiedError = classifyPlaybackError(err ?? null, detectedSource, source, retryCountRef.current, detectedSource.engine);
-       setPlaybackError(classifiedError);
-       setError(classifiedError.message);
-       showOsd(<AlertTriangle className="w-12 h-12 text-white" />, classifiedError.title);
-       scheduleRetry(classifiedError);
-       broadcastStatus();
-    });
-
-    // PiP Events
-    const handleEnterPiP = () => setIsPiP(true);
-    const handleLeavePiP = () => setIsPiP(false);
-    videoEl.addEventListener('enterpictureinpicture', handleEnterPiP);
-    videoEl.addEventListener('leavepictureinpicture', handleLeavePiP);
-
-    // Audio Track Change Event
-    const tracks = player.audioTracks() as any;
-    const updateAudioTracksList = () => {
-      const tracksList = [];
-      for (let i = 0; i < tracks.length; i++) {
-        tracksList.push({
-          id: tracks[i].id,
-          label: tracks[i].label,
-          language: tracks[i].language,
-          enabled: tracks[i].enabled
-        });
-      }
-      setAudioTracks(tracksList);
-    };
-    
-    tracks.addEventListener('change', updateAudioTracksList);
-
-    // Broadcast network status
-    if (platformService.isElectron && window.electronAPI) {
-      networkStatusIntervalRef.current = window.setInterval(() => {
-        if (player && !player.isDisposed()) {
-          // Monitor network speed
-          const stats = (player.tech({ IWillNotUseThisInPlugins: true }) as any)?.vhs?.stats;
-          if (stats && stats.bandwidth) {
-             setNetworkSpeed(stats.bandwidth / 1024 / 1024); // Mbps
-          }
-
-          // Periodic broadcast (meno frequente per risparmiare risorse)
-          broadcastStatus();
-        }
-      }, 5000);
-    }
-
-    return () => {
-      if (networkStatusIntervalRef.current) clearInterval(networkStatusIntervalRef.current);
-      videoEl.removeEventListener('enterpictureinpicture', handleEnterPiP);
-      videoEl.removeEventListener('leavepictureinpicture', handleLeavePiP);
-      tracks.removeEventListener('change', updateAudioTracksList);
-      if (playerRef.current) {
-        playerRef.current.dispose();
-        playerRef.current = null;
-      }
-      cleanupPlaybackEngines();
-    };
-  }, [channel, initialProgress, onBack, onNext, onProgress, broadcastStatus, cleanupPlaybackEngines, retryNonce, scheduleRetry, showOsd]);
-
-  // Media Session API integration
-  useEffect(() => {
-    if (!('mediaSession' in navigator) || !channel) return;
-
-    navigator.mediaSession.metadata = new window.MediaMetadata({
-      title: channel.cleanName || channel.name,
-      artist: channel.group || 'StreamAI IPTV',
-      artwork: [
-        { src: channel.logo || 'icon.png', sizes: '512x512', type: 'image/png' }
-      ]
-    });
-
-    const actionHandlers: [MediaSessionAction, () => void][] = [
-      ['play', togglePlay],
-      ['pause', togglePlay],
-      ['previoustrack', () => onPrev?.()],
-      ['nexttrack', () => onNext?.()],
-      ['seekbackward', () => skip(-10)],
-      ['seekforward', () => skip(10)],
-    ];
-
-    for (const [action, handler] of actionHandlers) {
-      try {
-        navigator.mediaSession.setActionHandler(action, handler);
-      } catch (error) {
-        console.warn(`MediaSession action ${action} non supportata.`);
-      }
-    }
-
-    return () => {
-      actionHandlers.forEach(([action]) => {
-        try {
-          navigator.mediaSession.setActionHandler(action, null);
-        } catch (error) {}
-      });
-    };
-  }, [channel, togglePlay, skip, onPrev, onNext]);
-
-  // Update Media Session position state
-  useEffect(() => {
-    if (!('mediaSession' in navigator) || !playerRef.current) return;
-    
-    try {
-      if (duration > 0) {
-        navigator.mediaSession.setPositionState({
-          duration: duration,
-          playbackRate: 1,
-          position: currentTime
-        });
-      }
-      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
-    } catch (error) {
-      console.warn("Errore aggiornamento MediaSession position state:", error);
-    }
-  }, [currentTime, duration, isPlaying]);
-
-  // Remote Control Handler
-  useEffect(() => {
-    if (platformService.isElectron && window.electronAPI?.onRemoteControlCommand && window.electronAPI.onRequestStatusBroadcast) {
-      const unsubCommand = window.electronAPI.onRemoteControlCommand((command: any) => {
-        const player = playerRef.current;
-        if (!player || player.isDisposed()) return;
-
-        switch (command.action) {
-          case 'play': player.play(); break;
-          case 'pause': player.pause(); break;
-          case 'seek': if (typeof command.value === 'number') player.currentTime(command.value); break;
-          case 'skip': if (typeof command.value === 'number') player.currentTime((player.currentTime() || 0) + command.value); break;
-          case 'volume': 
-            if (typeof command.value === 'number') {
-              const newVol = Math.max(0, Math.min(1, command.value));
-              player.volume(newVol);
-              setVolume(newVol);
-              if (newVol > 0) {
-                player.muted(false);
-                setIsMuted(false);
-              } else {
-                player.muted(true);
-                setIsMuted(true);
-              }
-            }
-            break;
-          case 'volumeUp': {
-            const upVol = Math.min(1, (player.volume() || 0) + 0.1);
-            player.volume(upVol);
-            setVolume(upVol);
-            if (upVol > 0) {
-              player.muted(false);
-              setIsMuted(false);
-            }
-            break;
-          }
-          case 'volumeDown': {
-            const downVol = Math.max(0, (player.volume() || 0) - 0.1);
-            player.volume(downVol);
-            setVolume(downVol);
-            if (downVol === 0) {
-              player.muted(true);
-              setIsMuted(true);
-            }
-            break;
-          }
-          case 'mute':
-            const newMuted = !player.muted();
-            player.muted(newMuted);
-            setIsMuted(newMuted);
-            if (!newMuted && player.volume() === 0) {
-              player.volume(0.5);
-              setVolume(0.5);
-            }
-            break;
-        }
-      });
-
-      const unsubRequest = window.electronAPI.onRequestStatusBroadcast(() => {
-        broadcastStatus();
-      });
-
-      return () => {
-        unsubCommand();
-        unsubRequest();
-      };
-    }
-  }, [broadcastStatus]);
+  // Remote Control Handler (extracted hook)
+  useRemoteControl({ playerRef, setVolume, setIsMuted, broadcastStatus });
 
   // --- UI EFFECTS ---
 
