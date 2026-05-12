@@ -11,7 +11,32 @@ const CachedImage: React.FC<CachedImageProps> = ({ src, className, alt, priority
   const [imgSrc, setImgSrc] = useState<string>('');
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(false);
+  const [isNearViewport, setIsNearViewport] = useState(priority >= 2);
+  const containerRef = useRef<HTMLDivElement>(null);
   const mounted = useRef(true);
+
+  useEffect(() => {
+    if (priority >= 2) {
+      setIsNearViewport(true);
+      return;
+    }
+
+    const element = containerRef.current;
+    if (!element || typeof IntersectionObserver === 'undefined') {
+      setIsNearViewport(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some(entry => entry.isIntersecting)) {
+        setIsNearViewport(true);
+        observer.disconnect();
+      }
+    }, { rootMargin: '700px 900px' });
+
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [priority, src]);
 
   useEffect(() => {
     mounted.current = true;
@@ -19,6 +44,7 @@ const CachedImage: React.FC<CachedImageProps> = ({ src, className, alt, priority
     setError(false);
     setImgSrc('');
 
+    if (!isNearViewport) return;
     if (!src) return;
 
     // Se DownloadManager è in pausa (es. durante streaming live), NON caricare nuove immagini
@@ -46,7 +72,7 @@ const CachedImage: React.FC<CachedImageProps> = ({ src, className, alt, priority
     return () => {
       mounted.current = false;
     };
-  }, [src, priority]);
+  }, [src, priority, isNearViewport]);
 
   const handleLoad = () => {
     if (mounted.current) {
@@ -65,7 +91,7 @@ const CachedImage: React.FC<CachedImageProps> = ({ src, className, alt, priority
   };
 
   return (
-    <div className={`relative overflow-hidden ${className}`}>
+    <div ref={containerRef} className={`relative overflow-hidden ${className}`}>
       {/* Placeholder / Skeleton */}
       {!loaded && !error && (
         <div className="absolute inset-0 bg-[#202020] animate-pulse flex items-center justify-center">
@@ -87,7 +113,8 @@ const CachedImage: React.FC<CachedImageProps> = ({ src, className, alt, priority
           className={`w-full h-full object-cover transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0'}`}
           onLoad={handleLoad}
           onError={handleError}
-          loading="lazy"
+          loading={priority >= 2 ? 'eager' : 'lazy'}
+          fetchPriority={priority >= 2 ? 'high' : 'low'}
           decoding="async"
           {...props}
         />

@@ -14,6 +14,11 @@ export interface Channel {
   rating?: string;
   year?: string;
   genre?: string;
+  nameLower?: string;
+  cleanNameLower?: string;
+  groupLower?: string;
+  genreLower?: string;
+  haystack?: string;
   cast?: string;
   director?: string;
   tmdbId?: number; // Store TMDB ID if found

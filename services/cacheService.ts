@@ -4,13 +4,27 @@ const DB_VERSION = 1;
 const STORE_API = 'api_responses';
 const STORE_IMAGES = 'images';
 
+const IMAGE_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const IMAGE_CACHE_MAX_ENTRIES = 1500;
+const IMAGE_CACHE_MAX_BYTES = 512 * 1024 * 1024;
+const IMAGE_CACHE_PRESSURE_RATIO = 0.85;
+
 interface ApiCacheOptions {
   maxAgeMs?: number;
+}
+
+interface ImageCacheRecord {
+  blob: Blob;
+  timestamp: number;
+  lastAccessed: number;
+  size: number;
+  type?: string;
 }
 
 // Cache LRU in memoria per URL delle immagini (evita letture ripetute da IndexedDB)
 const IMAGE_URL_CACHE_MAX = 500;
 const imageUrlCache = new Map<string, string>(); // url -> objectUrl
+let lastImageCleanupAt = 0;
 
 // Funzione per gestire LRU cache
 const addToUrlCache = (url: string, objectUrl: string) => {
@@ -24,6 +38,10 @@ const addToUrlCache = (url: string, objectUrl: string) => {
     }
   }
   imageUrlCache.set(url, objectUrl);
+};
+
+const isImageCacheRecord = (value: unknown): value is ImageCacheRecord => {
+  return Boolean(value && typeof value === 'object' && (value as ImageCacheRecord).blob instanceof Blob);
 };
 
 // noinspection JSUnusedGlobalSymbols
@@ -86,6 +104,7 @@ export const CacheService = {
 
     // Pre-apri il database
     await CacheService.openDB();
+    CacheService.cleanupOldImages().catch(e => console.warn('[Cache] Image cleanup failed', e));
   },
 
   openDB: () => {
@@ -206,16 +225,37 @@ export const CacheService = {
 
   // --- IMAGE CACHING ---
   saveImage: async (url: string, blob: Blob) => {
+    if (!blob || blob.size <= 0) return;
+
+    if (CacheService.storageInfo.quota > 0 && CacheService.storageInfo.usage / CacheService.storageInfo.quota > IMAGE_CACHE_PRESSURE_RATIO) {
+      await CacheService.cleanupOldImages({ aggressive: true });
+    }
+
+    if (Date.now() - lastImageCleanupAt > 5 * 60 * 1000) {
+      lastImageCleanupAt = Date.now();
+      await CacheService.cleanupOldImages();
+    }
+
     const db = await CacheService.openDB();
     return new Promise<void>((resolve) => {
       const tx = db.transaction(STORE_IMAGES, 'readwrite');
       const store = tx.objectStore(STORE_IMAGES);
-      store.put(blob, url);
+      const payload: ImageCacheRecord = {
+        blob,
+        timestamp: Date.now(),
+        lastAccessed: Date.now(),
+        size: blob.size,
+        type: blob.type
+      };
+      store.put(payload, url);
       tx.oncomplete = () => {
         CacheService.stats.writes++;
         resolve();
       };
-      tx.onerror = () => resolve();
+      tx.onerror = () => {
+        console.warn('[Cache] Image save failed, storage may be full:', tx.error);
+        CacheService.cleanupOldImages({ aggressive: true }).finally(resolve);
+      };
     });
   },
 
@@ -228,13 +268,29 @@ export const CacheService = {
 
     const db = await CacheService.openDB();
     return new Promise((resolve) => {
-      const tx = db.transaction(STORE_IMAGES, 'readonly');
+      const tx = db.transaction(STORE_IMAGES, 'readwrite');
       const store = tx.objectStore(STORE_IMAGES);
       const request = store.get(url);
       request.onsuccess = () => {
-        if (request.result instanceof Blob) {
+        const now = Date.now();
+        const result = request.result;
+        const record = result instanceof Blob
+          ? { blob: result, timestamp: now, lastAccessed: now, size: result.size, type: result.type }
+          : isImageCacheRecord(result)
+            ? result
+            : null;
+
+        if (record?.blob instanceof Blob) {
+          if (now - Number(record.timestamp || 0) > IMAGE_CACHE_TTL_MS) {
+            store.delete(url);
+            CacheService.stats.misses++;
+            resolve(null);
+            return;
+          }
+
           CacheService.stats.hits++;
-          const objectUrl = URL.createObjectURL(request.result);
+          store.put({ ...record, lastAccessed: now }, url);
+          const objectUrl = URL.createObjectURL(record.blob);
           addToUrlCache(url, objectUrl);
           resolve(objectUrl);
         } else {
@@ -330,6 +386,74 @@ export const CacheService = {
     imageUrlCache.clear();
   },
 
+  cleanupOldImages: async (options: { aggressive?: boolean } = {}) => {
+    const db = await CacheService.openDB();
+    return new Promise<{ deleted: number; freedBytes: number }>((resolve) => {
+      const tx = db.transaction(STORE_IMAGES, 'readwrite');
+      const store = tx.objectStore(STORE_IMAGES);
+      const request = store.getAllKeys();
+
+      request.onsuccess = () => {
+        const keys = request.result.filter((key): key is string => typeof key === 'string');
+        if (keys.length === 0) {
+          resolve({ deleted: 0, freedBytes: 0 });
+          return;
+        }
+
+        const entries: Array<{ key: string; timestamp: number; lastAccessed: number; size: number }> = [];
+        let pending = keys.length;
+        let deleted = 0;
+        let freedBytes = 0;
+        const now = Date.now();
+
+        const finish = () => {
+          const maxEntries = options.aggressive ? Math.floor(IMAGE_CACHE_MAX_ENTRIES * 0.65) : IMAGE_CACHE_MAX_ENTRIES;
+          const maxBytes = options.aggressive ? Math.floor(IMAGE_CACHE_MAX_BYTES * 0.65) : IMAGE_CACHE_MAX_BYTES;
+          let totalBytes = entries.reduce((sum, entry) => sum + entry.size, 0);
+          const candidates = entries
+            .filter(entry => now - entry.timestamp > IMAGE_CACHE_TTL_MS || entries.length > maxEntries || totalBytes > maxBytes)
+            .sort((a, b) => a.lastAccessed - b.lastAccessed || a.timestamp - b.timestamp);
+
+          for (const entry of candidates) {
+            if (now - entry.timestamp <= IMAGE_CACHE_TTL_MS && entries.length - deleted <= maxEntries && totalBytes <= maxBytes) break;
+            store.delete(entry.key);
+            const objectUrl = imageUrlCache.get(entry.key);
+            if (objectUrl) URL.revokeObjectURL(objectUrl);
+            imageUrlCache.delete(entry.key);
+            deleted++;
+            freedBytes += entry.size;
+            totalBytes -= entry.size;
+          }
+          resolve({ deleted, freedBytes });
+        };
+
+        keys.forEach((key) => {
+          const itemRequest = store.get(key);
+          itemRequest.onsuccess = () => {
+            const value = itemRequest.result;
+            if (value instanceof Blob) {
+              entries.push({ key, timestamp: 0, lastAccessed: 0, size: value.size });
+            } else if (isImageCacheRecord(value)) {
+              entries.push({
+                key,
+                timestamp: Number(value.timestamp || 0),
+                lastAccessed: Number(value.lastAccessed || value.timestamp || 0),
+                size: Number(value.size || value.blob.size || 0)
+              });
+            }
+            pending--;
+            if (pending === 0) finish();
+          };
+          itemRequest.onerror = () => {
+            pending--;
+            if (pending === 0) finish();
+          };
+        });
+      };
+      request.onerror = () => resolve({ deleted: 0, freedBytes: 0 });
+    });
+  },
+
   // Ottieni info storage aggiornate
   getStorageInfo: async () => {
     if (navigator.storage && navigator.storage.estimate) {
@@ -364,9 +488,34 @@ export const CacheService = {
     });
   },
 
+  getImageCacheInfo: async () => {
+    const db = await CacheService.openDB();
+    return new Promise<{ count: number; totalBytes: number; limitEntries: number; limitBytes: number; ttlDays: number }>((resolve) => {
+      const tx = db.transaction(STORE_IMAGES, 'readonly');
+      const store = tx.objectStore(STORE_IMAGES);
+      const request = store.getAll();
+      request.onsuccess = () => {
+        const values = request.result;
+        const totalBytes = values.reduce((sum, value) => {
+          if (value instanceof Blob) return sum + value.size;
+          if (isImageCacheRecord(value)) return sum + Number(value.size || value.blob.size || 0);
+          return sum;
+        }, 0);
+        resolve({
+          count: values.length,
+          totalBytes,
+          limitEntries: IMAGE_CACHE_MAX_ENTRIES,
+          limitBytes: IMAGE_CACHE_MAX_BYTES,
+          ttlDays: Math.round(IMAGE_CACHE_TTL_MS / 24 / 60 / 60 / 1000)
+        });
+      };
+      request.onerror = () => resolve({ count: 0, totalBytes: 0, limitEntries: IMAGE_CACHE_MAX_ENTRIES, limitBytes: IMAGE_CACHE_MAX_BYTES, ttlDays: 30 });
+    });
+  },
+
   getStats: async () => {
     const storageInfo = await CacheService.getStorageInfo();
-    const imageCount = await CacheService.countImages();
+    const imageCache = await CacheService.getImageCacheInfo();
 
     return {
       ...CacheService.stats,
@@ -375,7 +524,11 @@ export const CacheService = {
         ? Math.round(CacheService.stats.hits / (CacheService.stats.hits + CacheService.stats.misses) * 100)
         : 0,
       storage: storageInfo,
-      totalImages: imageCount
+      totalImages: imageCache.count,
+      imageBytesMB: (imageCache.totalBytes / 1024 / 1024).toFixed(2),
+      imageLimitMB: Math.round(imageCache.limitBytes / 1024 / 1024),
+      imageLimitEntries: imageCache.limitEntries,
+      imageTtlDays: imageCache.ttlDays
     };
   }
 };

@@ -5,6 +5,7 @@ import { CacheService } from './cacheService.ts';
 const MAX_CONCURRENT_DOWNLOADS = 6; // Download paralleli
 const DOWNLOAD_TIMEOUT_MS = 10000;
 
+// noinspection JSUnusedGlobalSymbols
 export const DownloadManager = {
   // Coda per download on-demand
   queue: new Map<string, {
@@ -65,8 +66,12 @@ export const DownloadManager = {
 
     // 1. Check memoria locale
     if (DownloadManager.cachedUrls.has(url)) {
-      DownloadManager.stats.fromCache++;
-      return CacheService.getImage(url);
+      const cached = await CacheService.getImage(url);
+      if (cached) {
+        DownloadManager.stats.fromCache++;
+        return cached;
+      }
+      DownloadManager.cachedUrls.delete(url);
     }
 
     // 2. Check se già fallito di recente
@@ -128,6 +133,14 @@ export const DownloadManager = {
     }
 
     try {
+      const resolveWaiting = (result: string | null) => {
+        const waiting = DownloadManager.queue.get(url);
+        if (waiting) {
+          waiting.resolve(result);
+          DownloadManager.queue.delete(url);
+        }
+      };
+
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
 
@@ -144,7 +157,12 @@ export const DownloadManager = {
       clearTimeout(timeoutId);
 
       if (DownloadManager.paused) return url;
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      if (!response.ok) {
+        DownloadManager.failedUrls.add(url);
+        DownloadManager.stats.failed++;
+        resolveWaiting(url);
+        return url;
+      }
 
       const blob = await response.blob();
 
@@ -152,7 +170,10 @@ export const DownloadManager = {
 
       // Verifica che sia un'immagine valida
       if (!blob.type.startsWith('image/') && blob.size < 100) {
-        throw new Error('Invalid image');
+        DownloadManager.failedUrls.add(url);
+        DownloadManager.stats.failed++;
+        resolveWaiting(url);
+        return url;
       }
 
       // Salva in cache
@@ -165,11 +186,7 @@ export const DownloadManager = {
       const cachedUrl = await CacheService.getImage(url);
 
       // Notifica chi sta aspettando
-      const waiting = DownloadManager.queue.get(url);
-      if (waiting) {
-        waiting.resolve(cachedUrl);
-        DownloadManager.queue.delete(url);
-      }
+      resolveWaiting(cachedUrl);
 
       return cachedUrl;
 

@@ -6,6 +6,16 @@ import CachedImage from './CachedImage.tsx';
 import { useLanguage } from '../contexts/LanguageContext.tsx';
 import EmptyState from './shared/EmptyState.tsx';
 import { useInitialTvFocus, useTvSpatialNavigation } from '../hooks/useTvFocus.ts';
+import { DownloadManager } from '../services/downloadManager.ts';
+import { IndexedChannel, indexCategories, indexChannels, searchIndexedChannels } from '../services/catalogIndex.ts';
+
+const INITIAL_VISIBLE_ROWS = 6;
+const ROW_BATCH_SIZE = 6;
+const INITIAL_ROW_ITEMS = 72;
+const ROW_ITEM_INCREMENT = 72;
+const HORIZONTAL_VIRTUALIZATION_THRESHOLD = 36;
+const HORIZONTAL_OVERSCAN = 8;
+const SEARCH_RESULT_LIMIT = 180;
 
 interface ChannelListProps {
   categories: Category[];
@@ -125,6 +135,48 @@ const ChannelItem = React.memo(({
 // Memoized Content Row
 const ContentRow = React.memo(({ title, channels, onSelect, isPoster, progressMap, watchlistSet, onToggleWatchlist, onShowDetails }: { title: string, channels: Channel[], onSelect: (c: Channel) => void, isPoster: boolean, progressMap?: Record<string, { progress: number, duration?: number }>, watchlistSet?: Set<string>, onToggleWatchlist?: (c: Channel) => void, onShowDetails?: (c: Channel) => void }) => {
     const rowRef = useRef<HTMLDivElement>(null);
+    const [itemLimit, setItemLimit] = useState(INITIAL_ROW_ITEMS);
+    const [scrollState, setScrollState] = useState({ scrollLeft: 0, viewportWidth: 1200 });
+
+    useEffect(() => {
+        setItemLimit(INITIAL_ROW_ITEMS);
+        setScrollState({ scrollLeft: 0, viewportWidth: rowRef.current?.clientWidth || 1200 });
+        rowRef.current?.scrollTo({ left: 0, behavior: 'auto' });
+    }, [channels, title]);
+
+    useEffect(() => {
+        const row = rowRef.current;
+        if (!row) return;
+
+        const updateMetrics = () => setScrollState({ scrollLeft: row.scrollLeft, viewportWidth: row.clientWidth || 1200 });
+        updateMetrics();
+        row.addEventListener('scroll', updateMetrics, { passive: true });
+
+        const resizeObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(updateMetrics) : null;
+        resizeObserver?.observe(row);
+
+        return () => {
+            row.removeEventListener('scroll', updateMetrics);
+            resizeObserver?.disconnect();
+        };
+    }, []);
+
+    const pagedChannels = channels.slice(0, itemLimit);
+    const hasMoreItems = itemLimit < channels.length;
+    const itemExtent = isPoster ? 196 : 316;
+    const shouldVirtualize = pagedChannels.length > HORIZONTAL_VIRTUALIZATION_THRESHOLD;
+    const startIndex = shouldVirtualize ? Math.max(0, Math.floor(scrollState.scrollLeft / itemExtent) - HORIZONTAL_OVERSCAN) : 0;
+    const endIndex = shouldVirtualize
+        ? Math.min(pagedChannels.length, Math.ceil((scrollState.scrollLeft + scrollState.viewportWidth) / itemExtent) + HORIZONTAL_OVERSCAN)
+        : pagedChannels.length;
+    const visibleChannels = pagedChannels.slice(startIndex, endIndex);
+    const beforeWidth = shouldVirtualize ? startIndex * itemExtent : 0;
+    const afterWidth = shouldVirtualize ? Math.max(0, (pagedChannels.length - endIndex) * itemExtent) : 0;
+
+    useEffect(() => {
+        const urls = visibleChannels.map(channel => channel.logo).filter((url): url is string => Boolean(url));
+        DownloadManager.preloadVisible(urls);
+    }, [visibleChannels]);
 
     if (channels.length === 0) return null;
 
@@ -139,8 +191,9 @@ const ContentRow = React.memo(({ title, channels, onSelect, isPoster, progressMa
                     ref={rowRef}
                     className="flex gap-4 overflow-x-auto no-scrollbar scroll-smooth px-1 py-4"
                 >
-                    {channels.map((channel) => (
-                        <ChannelItem 
+                    {beforeWidth > 0 && <div className="flex-none" style={{ width: beforeWidth }} aria-hidden="true" />}
+                    {visibleChannels.map((channel) => (
+                        <ChannelItem
                             key={channel.id}
                             channel={channel}
                             onSelect={onSelect}
@@ -151,6 +204,16 @@ const ContentRow = React.memo(({ title, channels, onSelect, isPoster, progressMa
                             onShowDetails={onShowDetails}
                         />
                     ))}
+                    {afterWidth > 0 && <div className="flex-none" style={{ width: afterWidth }} aria-hidden="true" />}
+                    {hasMoreItems && (
+                        <button
+                            onClick={() => setItemLimit(prev => Math.min(prev + ROW_ITEM_INCREMENT, channels.length))}
+                            className={`tv-focus touch-target flex-none rounded-md border border-white/10 bg-white/5 px-6 text-left text-gray-200 hover:bg-white/10 ${isPoster ? 'w-[150px] md:w-[180px] aspect-[2/3]' : 'w-[240px] md:w-[300px] aspect-[16/9]'}`}
+                        >
+                            <span className="block text-lg font-bold">Mostra altri</span>
+                            <span className="mt-2 block text-sm text-gray-400">{Math.min(ROW_ITEM_INCREMENT, channels.length - itemLimit)} contenuti</span>
+                        </button>
+                    )}
                 </div>
             </div>
         </div>
@@ -185,6 +248,12 @@ const ChannelList: React.FC<ChannelListProps> = ({
   const [featuredItem, setFeaturedItem] = useState<Channel | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
 
+  const indexedLiveCategories = useMemo(() => indexCategories(liveCategories), [liveCategories]);
+  const indexedVodCategories = useMemo(() => indexCategories(vodCategories), [vodCategories]);
+  const indexedSeriesCategories = useMemo(() => indexCategories(seriesCategories), [seriesCategories]);
+  const indexedBaseCategories = useMemo(() => indexCategories(categories), [categories]);
+  const indexedAllChannels = useMemo(() => indexChannels(allChannels), [allChannels]);
+
   // Debounce search term per performance
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -194,7 +263,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
   }, [searchTerm]);
 
   // Performance: Lazy Loading Rows
-  const [visibleRows, setVisibleRows] = useState(5);
+  const [visibleRows, setVisibleRows] = useState(INITIAL_VISIBLE_ROWS);
   const loadMoreRef = useRef<HTMLDivElement>(null);
 
   useInitialTvFocus(!currentChannelId, screenRef, '[data-initial-focus="true"], .tv-focus', 120);
@@ -211,7 +280,8 @@ const ChannelList: React.FC<ChannelListProps> = ({
 
   const continueWatching = useMemo(() => {
       // Per la Home usa tutti i canali, altrimenti usa solo quelli della categoria corrente
-      const channelsToUse = activeTab === 'home' ? allChannels : categories.flatMap(c => c.channels);
+      const channelsToUse = activeTab === 'home' ? indexedAllChannels : indexedBaseCategories.flatMap(c => c.channels);
+      const channelById = new Map(channelsToUse.map(channel => [channel.id, channel]));
       const seen = new Set<string>();
 
       return history
@@ -223,13 +293,13 @@ const ChannelList: React.FC<ChannelListProps> = ({
               return h.type === activeTab;
           })
           .map(h => {
-              const channel = channelsToUse.find(c => c.id === h.channelId);
+              const channel = channelById.get(h.channelId);
               if (channel) {
                   return { channel, timestamp: h.timestamp, progress: h.progress };
               }
               return null;
           })
-          .filter((item): item is { channel: Channel; timestamp: number; progress: number } => !!item)
+          .filter((item): item is { channel: IndexedChannel; timestamp: number; progress: number } => Boolean(item?.progress))
           .filter(item => {
               if (seen.has(item.channel.id)) return false;
               seen.add(item.channel.id);
@@ -237,21 +307,21 @@ const ChannelList: React.FC<ChannelListProps> = ({
           })
           .sort((a, b) => b.timestamp - a.timestamp)
           .map(item => item.channel);
-  }, [categories, history, activeTab, allChannels]);
+  }, [indexedBaseCategories, history, activeTab, indexedAllChannels]);
 
   const watchlistSet = useMemo(() => new Set(watchlistIds), [watchlistIds]);
 
   const watchlistChannels = useMemo(() => {
       const seen = new Set<string>();
       return watchlistIds
-        .map(id => allChannels.find(c => c.id === id))
-        .filter((c): c is Channel => !!c)
+        .map(id => indexedAllChannels.find(c => c.id === id))
+        .filter((c): c is IndexedChannel => Boolean(c))
         .filter(channel => {
             if (seen.has(channel.id)) return false;
             seen.add(channel.id);
             return true;
         });
-  }, [watchlistIds, allChannels]);
+  }, [watchlistIds, indexedAllChannels]);
 
   // Home page categories - mix di contenuti ottimizzato
   const homeCategories = useMemo(() => {
@@ -260,9 +330,9 @@ const ChannelList: React.FC<ChannelListProps> = ({
       const homeCats: Category[] = [];
 
       // Raccogli tutti i canali
-      const allLive = liveCategories.flatMap(c => c.channels);
-      const allMovies = vodCategories.flatMap(c => c.channels);
-      const allSeries = seriesCategories.flatMap(c => c.channels);
+      const allLive = indexedLiveCategories.flatMap(c => c.channels);
+      const allMovies = indexedVodCategories.flatMap(c => c.channels);
+      const allSeries = indexedSeriesCategories.flatMap(c => c.channels);
 
       // 1. Film in primo piano (con rating alto se disponibile)
       if (allMovies.length > 0) {
@@ -296,28 +366,28 @@ const ChannelList: React.FC<ChannelListProps> = ({
       }
 
       // 6. Aggiungi categorie specifiche di film (max 4)
-      vodCategories.slice(0, 4).forEach(cat => {
+       indexedVodCategories.slice(0, 4).forEach(cat => {
           if (cat.channels.length >= 5) {
               homeCats.push({ name: '🎬 ' + cat.name, channels: cat.channels.slice(0, 15) });
           }
       });
 
       // 7. Aggiungi categorie specifiche di serie (max 4)
-      seriesCategories.slice(0, 4).forEach(cat => {
+       indexedSeriesCategories.slice(0, 4).forEach(cat => {
           if (cat.channels.length >= 5) {
               homeCats.push({ name: '📺 ' + cat.name, channels: cat.channels.slice(0, 15) });
           }
       });
 
       // 8. Categorie Live (max 2)
-      liveCategories.slice(0, 2).forEach(cat => {
+       indexedLiveCategories.slice(0, 2).forEach(cat => {
           if (cat.channels.length >= 5) {
               homeCats.push({ name: '📡 ' + cat.name, channels: cat.channels.slice(0, 15) });
           }
       });
 
       return homeCats;
-  }, [activeTab, liveCategories, vodCategories, seriesCategories, t]);
+  }, [activeTab, indexedLiveCategories, indexedVodCategories, indexedSeriesCategories, t]);
 
 
   // Clock Update
@@ -337,8 +407,8 @@ const ChannelList: React.FC<ChannelListProps> = ({
   useEffect(() => {
     // Per la Home, usa contenuti da tutte le categorie
     const sourceChannels = activeTab === 'home'
-      ? [...vodCategories.flatMap(c => c.channels), ...seriesCategories.flatMap(c => c.channels)]
-      : categories.flatMap(c => c.channels);
+      ? [...indexedVodCategories.flatMap(c => c.channels), ...indexedSeriesCategories.flatMap(c => c.channels)]
+      : indexedBaseCategories.flatMap(c => c.channels);
 
     if (sourceChannels.length > 0) {
       // Filtra per contenuti con immagine e preferibilmente con descrizione/rating
@@ -359,7 +429,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
         setFeaturedItem(sourceChannels[0]);
       }
     }
-  }, [categories, activeTab, vodCategories, seriesCategories]);
+  }, [indexedBaseCategories, activeTab, indexedVodCategories, indexedSeriesCategories]);
 
   // Focus Restoration
   useEffect(() => {
@@ -378,19 +448,23 @@ const ChannelList: React.FC<ChannelListProps> = ({
   useEffect(() => {
       const observer = new IntersectionObserver((entries) => {
           if (entries[0].isIntersecting) {
-              setVisibleRows(prev => Math.min(prev + 5, filteredCategories.length));
+              setVisibleRows(prev => Math.min(prev + ROW_BATCH_SIZE, filteredCategories.length));
           }
       }, { rootMargin: '400px' });
 
       if (loadMoreRef.current) observer.observe(loadMoreRef.current);
       return () => observer.disconnect();
-  }, [categories, searchTerm]);
+  }, [indexedBaseCategories, searchTerm]);
+
+  useEffect(() => {
+      setVisibleRows(INITIAL_VISIBLE_ROWS);
+  }, [activeTab, debouncedSearchTerm, indexedBaseCategories]);
 
 
   // Usa homeCategories per la Home, altrimenti le categorie normali
   const activeCategories = useMemo(() => {
-      return activeTab === 'home' ? homeCategories : categories;
-  }, [activeTab, homeCategories, categories]);
+      return activeTab === 'home' ? homeCategories : indexedBaseCategories;
+  }, [activeTab, homeCategories, indexedBaseCategories]);
 
   const filteredCategories = useMemo(() => {
     if (!debouncedSearchTerm) return activeCategories;
@@ -398,38 +472,32 @@ const ChannelList: React.FC<ChannelListProps> = ({
     // Ottimizza la ricerca: cerca solo se il termine ha almeno 2 caratteri
     if (debouncedSearchTerm.length < 2) return activeCategories;
 
-    const lowerSearch = debouncedSearchTerm.toLowerCase();
-
     // Determina quali canali cercare in base alla tab attiva
-    let channelsToSearch: Channel[];
+    let channelsToSearch: IndexedChannel[];
     switch (activeTab) {
       case 'movie':
-        channelsToSearch = vodCategories.flatMap(c => c.channels);
+        channelsToSearch = indexedVodCategories.flatMap(c => c.channels);
         break;
       case 'series':
-        channelsToSearch = seriesCategories.flatMap(c => c.channels);
+        channelsToSearch = indexedSeriesCategories.flatMap(c => c.channels);
         break;
       case 'live':
-        channelsToSearch = liveCategories.flatMap(c => c.channels);
+        channelsToSearch = indexedLiveCategories.flatMap(c => c.channels);
         break;
       case 'home':
       default:
-        channelsToSearch = allChannels;
+        channelsToSearch = indexedAllChannels;
         break;
     }
 
-    // Cerca nei canali appropriati
-    const searchChannels = channelsToSearch.filter(ch =>
-        ch.name.toLowerCase().includes(lowerSearch) ||
-        (ch.cleanName && ch.cleanName.toLowerCase().includes(lowerSearch))
-    );
+    const searchChannels = searchIndexedChannels(channelsToSearch, debouncedSearchTerm, SEARCH_RESULT_LIMIT);
 
     if (searchChannels.length > 0) {
         // Limita i risultati per performance
         return [{ name: t.search + ` (${searchChannels.length})`, channels: searchChannels.slice(0, 100) }];
     }
     return [];
-  }, [activeCategories, debouncedSearchTerm, allChannels, activeTab, vodCategories, seriesCategories, liveCategories, t]);
+  }, [activeCategories, debouncedSearchTerm, indexedAllChannels, activeTab, indexedVodCategories, indexedSeriesCategories, indexedLiveCategories, t]);
 
   const displayedCategories = filteredCategories.slice(0, visibleRows);
 
@@ -463,7 +531,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
                  {(['home', 'live', 'movie', 'series'] as StreamType[]).map(tab => (
                      <button
                         key={tab}
-                        onClick={() => { setActiveTab(tab); window.scrollTo({top:0, behavior:'smooth'}); setVisibleRows(5); }}
+                        onClick={() => { setActiveTab(tab); window.scrollTo({top:0, behavior:'smooth'}); setVisibleRows(INITIAL_VISIBLE_ROWS); }}
                         className={`tv-focus touch-target px-4 py-2 rounded-md transition-all outline-none ${activeTab === tab ? 'bg-white/10 text-white font-bold' : 'hover:text-white hover:bg-white/5'}`}
                         tabIndex={0}
                      >

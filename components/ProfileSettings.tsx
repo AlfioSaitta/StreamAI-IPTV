@@ -18,7 +18,9 @@ import {
   Trash2,
   Database,
   RefreshCw,
-  Clock
+  Clock,
+  Image as ImageIcon,
+  HardDrive
 } from 'lucide-react';
 import { useEscapeKey, useInitialTvFocus, useTvSpatialNavigation } from '../hooks/useTvFocus.ts';
 
@@ -72,6 +74,22 @@ const PROFILE_COLORS = [
   '#a855f7', // Violet
 ];
 
+interface CacheStatsView {
+  totalImages: number;
+  imageBytesMB: string;
+  imageLimitMB: number;
+  imageLimitEntries: number;
+  imageTtlDays: number;
+  memCacheSize: number;
+  hitRate: number;
+  storage: {
+    usageMB: string;
+    quotaGB: string;
+    percentUsed: string | number;
+    persistent: boolean;
+  };
+}
+
 const ProfileSettings: React.FC<ProfileSettingsProps> = ({
   profile,
   onBack,
@@ -91,6 +109,8 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [localRefreshMessage, setLocalRefreshMessage] = useState<string | null>(null);
   const [aiCacheMessage, setAiCacheMessage] = useState<string | null>(null);
+  const [imageCacheMessage, setImageCacheMessage] = useState<string | null>(null);
+  const [cacheStats, setCacheStats] = useState<CacheStatsView | null>(null);
   const screenRef = useRef<HTMLDivElement>(null);
 
   useInitialTvFocus(true, screenRef, '[data-initial-focus="true"]');
@@ -104,6 +124,15 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
     const colorChanged = profileColor !== profile.color;
     setHasChanges(prefsChanged || nameChanged || colorChanged);
   }, [preferences, profileName, profileColor, profile]);
+
+  const refreshCacheStats = async () => {
+    const stats = await CacheService.getStats();
+    setCacheStats(stats as CacheStatsView);
+  };
+
+  useEffect(() => {
+    refreshCacheStats().catch(() => undefined);
+  }, []);
 
   const handlePreferenceChange = <K extends keyof ProfilePreferences>(
     key: K,
@@ -156,6 +185,18 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
   const handleClearAiCache = async () => {
     await CacheService.clearApiByPrefix('ai_');
     setAiCacheMessage('Cache AI svuotata. Le prossime raccomandazioni Gemini verranno rigenerate.');
+  };
+
+  const handleOptimizeImageCache = async () => {
+    const result = await CacheService.cleanupOldImages({ aggressive: true });
+    await refreshCacheStats();
+    setImageCacheMessage(`Cache immagini ottimizzata: ${result.deleted} elementi rimossi, ${(result.freedBytes / 1024 / 1024).toFixed(2)} MB liberati.`);
+  };
+
+  const handleClearImageCache = async () => {
+    await CacheService.clearImages();
+    await refreshCacheStats();
+    setImageCacheMessage('Cache immagini svuotata. Poster e loghi verranno riscaricati quando visibili.');
   };
 
   const formatLastRefresh = (timestamp?: number) => {
@@ -533,21 +574,72 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
             Cache
           </h2>
 
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="font-medium text-white">{t.clearCache}</h3>
-              <p className="text-sm text-gray-400 mt-1">{t.clearCacheDesc}</p>
+          <div className="space-y-6">
+            {cacheStats && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                  <div className="flex items-center gap-2 text-gray-400 text-sm"><ImageIcon className="w-4 h-4" /> Immagini</div>
+                  <p className="mt-2 text-2xl font-bold text-white">{cacheStats.totalImages}</p>
+                  <p className="text-xs text-gray-500">{cacheStats.imageBytesMB} MB / {cacheStats.imageLimitMB} MB · TTL {cacheStats.imageTtlDays} giorni</p>
+                </div>
+                <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                  <div className="flex items-center gap-2 text-gray-400 text-sm"><HardDrive className="w-4 h-4" /> Storage</div>
+                  <p className="mt-2 text-2xl font-bold text-white">{cacheStats.storage.percentUsed}%</p>
+                  <p className="text-xs text-gray-500">{cacheStats.storage.usageMB} MB usati / {cacheStats.storage.quotaGB} GB</p>
+                </div>
+                <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                  <div className="flex items-center gap-2 text-gray-400 text-sm"><RefreshCw className="w-4 h-4" /> Hit rate</div>
+                  <p className="mt-2 text-2xl font-bold text-white">{cacheStats.hitRate}%</p>
+                  <p className="text-xs text-gray-500">Memoria: {cacheStats.memCacheSize} URL · max {cacheStats.imageLimitEntries} immagini</p>
+                </div>
+              </div>
+            )}
+
+            {imageCacheMessage && (
+              <div className="rounded-xl border border-green-500/30 bg-green-950/30 px-4 py-3 text-sm text-green-200">
+                {imageCacheMessage}
+              </div>
+            )}
+
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div>
+                <h3 className="font-medium text-white">Cache immagini</h3>
+                <p className="text-sm text-gray-400 mt-1">Mantiene poster e loghi con limite massimo, TTL e cleanup automatico quando lo storage è sotto pressione.</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={handleOptimizeImageCache}
+                  className="tv-focus touch-target bg-white/5 hover:bg-white/10 text-gray-200 border border-white/10 px-4 py-2 rounded-lg transition-all font-medium"
+                >
+                  Ottimizza immagini
+                </button>
+                <button
+                  onClick={handleClearImageCache}
+                  className="tv-focus touch-target bg-red-600/10 hover:bg-red-600 text-red-300 hover:text-white border border-red-500/30 px-4 py-2 rounded-lg transition-all font-medium"
+                >
+                  Svuota immagini
+                </button>
+              </div>
             </div>
-            <button
-              onClick={() => {
-                CacheService.clearAll();
-                alert(t.cacheCleared);
-                window.location.reload();
-              }}
-              className="tv-focus bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white border border-red-500/30 px-4 py-2 rounded-lg transition-all font-medium"
-            >
-              {t.clearCache}
-            </button>
+
+            <div className="border-t border-white/10" />
+
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div>
+                <h3 className="font-medium text-white">{t.clearCache}</h3>
+                <p className="text-sm text-gray-400 mt-1">{t.clearCacheDesc}</p>
+              </div>
+              <button
+                onClick={() => {
+                  CacheService.clearAll();
+                  alert(t.cacheCleared);
+                  window.location.reload();
+                }}
+                className="tv-focus touch-target bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white border border-red-500/30 px-4 py-2 rounded-lg transition-all font-medium"
+              >
+                {t.clearCache}
+              </button>
+            </div>
           </div>
         </section>
       </div>

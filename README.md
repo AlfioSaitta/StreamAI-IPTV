@@ -352,6 +352,26 @@ node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types s
 
 ---
 
+## ⚡ Performance catalogo e immagini
+
+Il catalogo è ottimizzato per playlist IPTV grandi:
+
+- indice memoizzato con `nameLower`, `cleanNameLower`, `groupLower`, `genreLower` e `year` precomputati;
+- ricerca con debounce, ranking locale e limite risultati per evitare filtri costosi su ogni render;
+- righe orizzontali con finestra virtuale e overscan quando superano la soglia;
+- paginazione per categoria con **Mostra altri**;
+- caricamento immagini con `IntersectionObserver`, preload solo dei poster visibili e skeleton durante il caricamento.
+
+La cache immagini salva metadata di accesso, ha TTL di 30 giorni, limite di 1500 immagini / 512 MB e cleanup automatico quando lo storage è sotto pressione. In **Impostazioni → Cache** sono disponibili statistiche, ottimizzazione manuale e **Svuota immagini** senza cancellare catalogo o risposte AI.
+
+Test rapido indice catalogo grande:
+
+```bash
+node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/test-catalog-index.mjs
+```
+
+---
+
 ## 📡 Discovery e casting LAN
 
 Il menu **Trasmetti** usa discovery progressivo e cancellabile:

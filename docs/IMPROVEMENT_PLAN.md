@@ -467,11 +467,11 @@ npm run analyze
 
 ### P6.1 Ricerca indicizzata
 
-- [ ] Precomputare `cleanNameLower`, `groupLower`, `genreLower`, `year`.
-- [ ] Debounce input ricerca.
-- [ ] Evitare filtri costosi a ogni render.
-- [ ] Valutare Web Worker per playlist enormi.
-- [ ] Test su catalogo grande.
+- [x] Precomputare `cleanNameLower`, `groupLower`, `genreLower`, `year` tramite `services/catalogIndex.ts`.
+- [x] Debounce input ricerca.
+- [x] Evitare filtri costosi a ogni render usando indice memoizzato e ranking locale.
+- [x] Valutare Web Worker per playlist enormi: non introdotto per ora perché il test sintetico 8k resta sotto soglia e il costo worker supererebbe il beneficio; rivalutare oltre 50k item.
+- [x] Test su catalogo grande con `scripts/test-catalog-index.mjs`.
 
 ---
 
@@ -479,11 +479,11 @@ npm run analyze
 
 **File principale:** `components/ChannelList.tsx`.
 
-- [ ] Verificare performance con migliaia di VOD.
-- [ ] Virtualizzare righe orizzontali se necessario.
-- [ ] Paginazione per categoria.
-- [ ] Lazy image più aggressivo.
-- [ ] Skeleton poster.
+- [x] Verificare performance con migliaia di VOD tramite test indice 8k e build P6.
+- [x] Virtualizzare righe orizzontali se necessario: finestra orizzontale con overscan per righe lunghe.
+- [x] Paginazione per categoria con pulsante `Mostra altri`.
+- [x] Lazy image più aggressivo con IntersectionObserver e preload solo visibile.
+- [x] Skeleton poster.
 
 ---
 
@@ -491,12 +491,22 @@ npm run analyze
 
 **File principale:** `services/cacheService.ts`.
 
-- [ ] Definire limite massimo cache immagini.
-- [ ] TTL immagini.
-- [ ] Cleanup automatico vecchie immagini.
-- [ ] Statistiche cache in UI impostazioni.
-- [ ] Pulsante svuota cache immagini.
-- [ ] Gestione quota storage esaurita.
+- [x] Definire limite massimo cache immagini: 1500 immagini / 512 MB.
+- [x] TTL immagini: 30 giorni.
+- [x] Cleanup automatico vecchie immagini e pruning sotto pressione storage.
+- [x] Statistiche cache in UI impostazioni.
+- [x] Pulsante svuota cache immagini.
+- [x] Gestione quota storage esaurita con cleanup aggressivo oltre soglia.
+
+**Verifiche P6 2026-05-12:**
+
+- [x] Test catalog index `node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/test-catalog-index.mjs` OK.
+- [x] Test metadata matching `node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/test-metadata-matching.mjs` OK.
+- [x] `npm run typecheck` OK.
+- [x] `npm run build` OK.
+- [x] `npm run check` OK.
+- [x] Smoke Electron `timeout 20s npm run start`: avvio WebSocket, advertising HTTP/mDNS/SSDP e shutdown controllato senza `Uncaught Exception`.
+- [x] Warning Vite chunk > 500 kB invariato/conosciuto da P1, non introdotto come blocco P6.
 
 ---
 
