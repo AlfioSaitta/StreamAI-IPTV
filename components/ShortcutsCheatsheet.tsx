@@ -32,6 +32,7 @@ export const DEFAULT_SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: ['F'], description: 'Fullscreen toggle' },
       { keys: ['C'], description: 'Menu Cast (Chromecast / DLNA / AirPlay)' },
       { keys: ['L'], description: 'Lista canali (Live) o episodi (Serie)' },
+      { keys: ['G'], description: 'Guida TV / Mini-EPG (Live)' },
     ],
   },
   {

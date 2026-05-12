@@ -182,20 +182,28 @@ React 19 abilita:
 
 ### D.1 EPG (Electronic Program Guide)
 
-**Stato attuale:** assente. Xtream Codes espone `get.php?action=get_short_epg` e
-file XMLTV via `xmltv.php`.
+**Stato attuale:** **Fase 1 implementata** (servizio + Mini-EPG nel player).
+Xtream Codes espone `get.php?action=get_short_epg` e file XMLTV via `xmltv.php`.
 
-- [ ] Servizio `services/epg.ts`:
-  - Fetch XMLTV gzip, parse SAX streaming (evitare memoria spike su file 50 MB).
-  - Indice `Map<channelTvgId, ProgrammeList>` con purge programmi > 24h passati.
-  - Cache su `cacheService` con TTL 6h, refresh background.
-- [ ] UI Mini-EPG nel player (overlay `i` o `Up` su Live):
-  - Programma corrente + barra avanzamento.
-  - Prossimi 3 programmi.
-- [ ] Vista Guide TV completa:
+- [x] Servizio `services/epg/`:
+  - [x] Parser XMLTV via regex streaming (evita DOMParser su file > 10 MB),
+    decode entità e CDATA, parse offset `+HHMM`.
+  - [x] Indice `Map<channelTvgId, EpgProgramme[]>` con purge programmi > 24h
+    passati e > 14 giorni futuri.
+  - [x] Cache `cacheService` con TTL 6h + fallback a dati stale on network error.
+- [x] UI Mini-EPG nel player (overlay `G` su Live):
+  - [x] Programma corrente + barra avanzamento (refresh ogni 60s).
+  - [x] Prossimi 3 programmi con orario + giorno (Oggi/Domani/data).
+  - [x] Pulsante Refresh manuale + auto-rebuild ogni 30 min via hook.
+- [x] M3U parser estrae `tvg-id`; Xtream live channels mappano
+  `epg_channel_id` → `Channel.tvgId`.
+- [ ] Vista Guide TV completa (Fase 2):
   - Grid canali × ore con scroll virtualizzato verticale e orizzontale.
   - Selezione "ora" sticky in alto.
-- [ ] Promemoria programma: notifica nativa Electron/Android 2 minuti prima.
+- [ ] Promemoria programma: notifica nativa Electron/Android 2 minuti prima (Fase 3).
+
+**Test:** `tests/epg/xmltvParser.test.ts` — 11 test (date parsing, entity decoding,
+malformed inputs, document order preservation).
 
 ### D.2 Timeshift / Catch-up TV
 

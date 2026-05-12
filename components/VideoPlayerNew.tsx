@@ -4,6 +4,7 @@ import type Hls from 'hls.js';
 import 'video.js/dist/video-js.css';
 
 import { Channel } from '../types';
+import type { XtreamCredentials } from '../types';
 import { platformService } from '../services/platformService';
 import { nativeVideoPlayer } from '../services/nativeVideoPlayer';
 import { streamInfoService } from '../services/streamInfoService';
@@ -15,7 +16,9 @@ import { usePlayerMediaSession } from '../hooks/usePlayerMediaSession';
 import { useRemoteControl } from '../hooks/useRemoteControl';
 import { useNativePlayerEngine } from '../hooks/useNativePlayerEngine';
 import { useWebPlayerEngine } from '../hooks/useWebPlayerEngine';
+import { useEpg } from '../hooks/useEpg';
 import CastDevicePicker from './CastDevicePicker';
+import MiniEpgOverlay from './MiniEpgOverlay';
 import {
   MAX_PLAYBACK_RETRIES,
   type PlayerEngine,
@@ -30,7 +33,7 @@ import {
 import {
   AlertTriangle, Play, Pause, Volume2, VolumeX, Maximize, Minimize,
   SkipForward, SkipBack, List, X, FastForward, Rewind, RotateCcw,
-  PictureInPicture2, Loader2, Info, Cast, Tv, Headphones, Volume1
+  PictureInPicture2, Loader2, Info, Cast, Tv, Headphones, Volume1, Calendar
 } from 'lucide-react';
 
 // --- TYPES ---
@@ -46,6 +49,8 @@ interface VideoPlayerProps {
   initialProgress?: number;
   onResetProgress?: () => void;
   debugOverlay?: boolean;
+  /** Xtream credentials, used to fetch the EPG for Live channels (D.1). */
+  xtreamCreds?: XtreamCredentials | null;
 }
 
 
@@ -62,6 +67,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   initialProgress,
   onResetProgress,
   debugOverlay = false,
+  xtreamCreds = null,
 }) => {
   // Refs
   const videoRef = useRef<HTMLDivElement>(null);
@@ -102,9 +108,18 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   const [streamInfoLines, setStreamInfoLines] = useState<string[]>([]);
   const [streamSourceInfo, setStreamSourceInfo] = useState<StreamSourceInfo | null>(null);
   const [nativePiPSupported, setNativePiPSupported] = useState(false);
+  const [showMiniEpg, setShowMiniEpg] = useState(false);
 
   // OSD (extracted hook)
   const { osd, showOsd } = usePlayerOsd();
+
+  // EPG (D.1) — only loads when the channel is Live and we have a tvgId + creds.
+  const isLive = channel?.type === 'live';
+  const epg = useEpg(xtreamCreds, {
+    tvgId: isLive ? channel?.tvgId : undefined,
+    upcomingCount: 3,
+    enabled: isLive && !!xtreamCreds,
+  });
 
   // Interactive timeline (hover ghost bar + tooltip)
   const {
@@ -478,8 +493,10 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       toggleFullscreen,
       openCast: () => setShowDevicePicker(true),
       togglePlaylist: () => setShowPlaylist(prev => !prev),
+      toggleEpg: () => setShowMiniEpg(prev => !prev),
       onEscape: () => {
-        if (showPlaylist) setShowPlaylist(false);
+        if (showMiniEpg) setShowMiniEpg(false);
+        else if (showPlaylist) setShowPlaylist(false);
         else if (showDevicePicker) setShowDevicePicker(false);
         else if (showAudioMenu) setShowAudioMenu(false);
         else if (onBack) onBack();
@@ -504,6 +521,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     setShowPlaylist(false);
     setShowAudioMenu(false);
     setShowInfoPanel(false);
+    setShowMiniEpg(false);
     setStreamInfoLines([]);
     setAudioTracks([]);
     setNativePiPSupported(false);
@@ -906,6 +924,17 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
 
             {/* Right Controls */}
             <div className="flex items-center gap-2">
+              {isLive && channel.tvgId && (
+                <button
+                  onClick={() => setShowMiniEpg(prev => !prev)}
+                  aria-label="Guida TV"
+                  aria-pressed={showMiniEpg}
+                  className={`tv-focus touch-target p-2 hover:bg-white/10 rounded-full transition-colors ${showMiniEpg ? 'text-red-500 bg-white/10' : 'text-white'}`}
+                  title="Guida TV (G)"
+                >
+                  <Calendar className="w-6 h-6" />
+                </button>
+              )}
               {channel.type === 'series' && (
                 <button onClick={() => setShowPlaylist(true)} aria-label="Lista episodi" className="tv-focus touch-target p-2 hover:bg-white/10 rounded-full" title="Lista episodi (L)">
                   <List className="w-6 h-6 text-white" />
@@ -946,6 +975,20 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Mini-EPG (Guida TV) — D.1 */}
+      {isLive && channel.tvgId && (
+        <MiniEpgOverlay
+          open={showMiniEpg}
+          onClose={() => setShowMiniEpg(false)}
+          channelName={channel.cleanName || channel.name}
+          current={epg.current}
+          upcoming={epg.upcoming}
+          isLoading={epg.isLoading}
+          error={epg.error}
+          onRefresh={epg.refresh}
+        />
+      )}
 
       {/* Cast Device Picker */}
       {channel && (

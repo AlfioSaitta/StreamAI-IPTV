@@ -15,6 +15,8 @@ export interface UsePlayerShortcutsHandlers {
   openCast: () => void;
   togglePlaylist: () => void;
   onEscape: () => void;
+  /** Optional: toggle Mini-EPG overlay (key 'g'), only fires for Live channels. */
+  toggleEpg?: () => void;
 }
 
 export interface UsePlayerShortcutsContext {
@@ -32,6 +34,7 @@ export function usePlayerShortcuts(handlers: UsePlayerShortcutsHandlers, ctx: Us
     openCast,
     togglePlaylist,
     onEscape,
+    toggleEpg,
   } = handlers;
 
   useEffect(() => {
@@ -81,6 +84,13 @@ export function usePlayerShortcuts(handlers: UsePlayerShortcutsHandlers, ctx: Us
             togglePlaylist();
           }
           break;
+        case 'g':
+          // Mini-EPG (Guide) — only for live channels.
+          if (toggleEpg && ctx.channel?.type === 'live') {
+            e.preventDefault();
+            toggleEpg();
+          }
+          break;
         case 'escape':
           e.preventDefault();
           onEscape();
@@ -90,6 +100,6 @@ export function usePlayerShortcuts(handlers: UsePlayerShortcutsHandlers, ctx: Us
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [togglePlay, skip, setVolume, currentVolume, toggleMute, toggleFullscreen, openCast, togglePlaylist, onEscape, ctx.channel]);
+  }, [togglePlay, skip, setVolume, currentVolume, toggleMute, toggleFullscreen, openCast, togglePlaylist, onEscape, toggleEpg, ctx.channel]);
 }
 

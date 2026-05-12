@@ -642,6 +642,7 @@ function App() {
                     initialProgress={getInitialProgress()}
                     onResetProgress={handleResetProgress}
                     debugOverlay={activeProfile.preferences?.debugOverlay}
+                    xtreamCreds={xtreamCreds}
                     onBack={() => {
                         // Refresh history when closing player to update UI
                         setActiveProfile(prev => prev ? ({...prev, history: ProfileService.getHistory(prev.id)}) : null);
