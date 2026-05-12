@@ -509,14 +509,20 @@ DevTools Performance per desktop; `adb shell am start -W` per Android).
 
 Lista isolata per chi vuole un primo PR rapido:
 
-- [ ] Aggiungere `Shift+/` cheatsheet (C.1).
-- [ ] Tema OLED (D.10) — solo CSS variable swap.
-- [ ] `useDeferredValue` su ricerca canali (E.2).
-- [ ] `structuredClone` al posto di JSON deep clone (E.2).
-- [ ] `aria-label` su tutti i bottoni icon-only (C.6).
-- [ ] Tooltip su pulsanti player con scorciatoia (C.1).
+- [x] Aggiungere `Shift+/` cheatsheet (C.1).
+- [ ] Tema OLED (D.10) — variabile `--bg-primary` già definita in `index.css`,
+  manca switcher in ProfileSettings.
+- [x] `useDeferredValue` su ricerca canali (E.2) — applicato in `ChannelList.tsx`
+  in aggiunta al debounce esistente (300 ms).
+- [x] `structuredClone` al posto di JSON deep clone (E.2) — **N/A**: nessuna
+  occorrenza di `JSON.parse(JSON.stringify(...))` trovata nel codebase.
+- [x] `aria-label` su tutti i bottoni icon-only (C.6) — completato per
+  `VideoPlayerNew` (16 pulsanti del player + range input timeline/volume).
+- [x] Tooltip su pulsanti player con scorciatoia (C.1) — `title` arricchito
+  con lettera scorciatoia (M, F, P, C, L, ←, →, Spazio, Esc).
 - [ ] Health-check basic Xtream con badge scadenza in ProfileSettings (F.3).
-- [ ] Allineare copilot-instructions a React 18 reale (G.3).
+- [x] Allineare copilot-instructions a React 18 reale (G.3) — fixato sia
+  `.github/copilot-instructions.md` sia `AGENTS.md`.
 - [ ] Sostituire `bonjour` → `bonjour-service` (G.5).
 - [ ] `content-visibility: auto` sui carousel non visibili (E.6).
 
