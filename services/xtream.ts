@@ -1,5 +1,5 @@
 
-import { Category, Channel, XtreamCredentials, XtreamContent } from '../types.ts';
+import { Category, Channel, XtreamCredentials, XtreamContent, XtreamAccountInfo } from '../types.ts';
 import { MetadataService } from './metadata.ts';
 import { CacheService } from './cacheService.ts';
 
@@ -171,3 +171,46 @@ export const loginXtream = async (creds: XtreamCredentials, forceRefresh = false
     throw error;
   }
 };
+
+/**
+ * Lightweight health-check: calls `player_api.php` (no `action`) to retrieve
+ * just the `user_info` block. Used by the periodic Xtream health-check
+ * (F.3 IMPROVEMENT_PLAN_V2) to surface expiry / connection metrics.
+ *
+ * Throws on auth failure / network error so callers can mark the badge red.
+ */
+export const getXtreamAccountInfo = async (
+  creds: XtreamCredentials
+): Promise<XtreamAccountInfo> => {
+  const baseUrl = normalizeBaseUrl(creds.url);
+  const url = `${baseUrl}/player_api.php?username=${encodeURIComponent(creds.username)}&password=${encodeURIComponent(creds.password)}`;
+  const data = await fetchDirect(url);
+
+  const ui = data?.user_info ?? {};
+  if (ui.auth === 0) {
+    throw new Error('Xtream authentication failed (auth=0)');
+  }
+
+  const toNumber = (v: unknown): number | undefined => {
+    if (v === undefined || v === null || v === '') return undefined;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : undefined;
+  };
+
+  return {
+    username: typeof ui.username === 'string' ? ui.username : undefined,
+    status: typeof ui.status === 'string' ? ui.status : undefined,
+    auth: toNumber(ui.auth),
+    // `exp_date` can be "0" / "" / null for unlimited accounts — keep as-is for caller logic.
+    expDate: ui.exp_date ?? null,
+    isTrial: typeof ui.is_trial === 'string' ? ui.is_trial : undefined,
+    activeConnections: toNumber(ui.active_cons),
+    maxConnections: toNumber(ui.max_connections),
+    createdAt: typeof ui.created_at === 'string' ? ui.created_at : undefined,
+    allowedOutputFormats: Array.isArray(ui.allowed_output_formats)
+      ? ui.allowed_output_formats.filter((x: unknown): x is string => typeof x === 'string')
+      : undefined,
+    fetchedAt: Date.now(),
+  };
+};
+

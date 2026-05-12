@@ -46,6 +46,30 @@ export interface XtreamContent {
   series: Category[];
 }
 
+/**
+ * Snapshot of the Xtream `user_info` block returned by `player_api.php`.
+ * All numeric fields arrive as strings from the API.
+ */
+export interface XtreamAccountInfo {
+  username?: string;
+  /** Account status string, e.g. "Active" / "Banned" / "Expired". */
+  status?: string;
+  /** `auth === 1` means the credentials are valid. */
+  auth?: number;
+  /** UNIX seconds (string) when the account expires; `null` for unlimited. */
+  expDate?: string | null;
+  isTrial?: string;
+  /** Currently active connections (concurrent streams). */
+  activeConnections?: number;
+  /** Maximum allowed concurrent connections. */
+  maxConnections?: number;
+  createdAt?: string;
+  /** Allowed output formats (m3u8, ts, rtmp, ...). */
+  allowedOutputFormats?: string[];
+  /** Local timestamp of the last successful health check. */
+  fetchedAt: number;
+}
+
 export interface WatchHistoryItem {
   channelId: string;
   name: string;

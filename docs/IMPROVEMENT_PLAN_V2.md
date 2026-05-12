@@ -363,9 +363,14 @@ Molti provider Xtream supportano `timeshift/<user>/<pass>/<duration>/<start>/<id
 
 ### F.3 Health-check periodico provider Xtream
 
-- [ ] Job background ogni 30 min: `player_api.php?action=get_account_info`.
-- [ ] Badge profilo: scadenza account, banda usata, connessioni attive.
-- [ ] Alert 7 giorni prima della scadenza.
+- [x] Job background ogni 30 min: `player_api.php?action=get_account_info`.
+- [x] Badge profilo: scadenza account, banda usata, connessioni attive.
+- [x] Alert 7 giorni prima della scadenza.
+
+**Stato 2026-05-12:** implementato in `services/xtream.ts::getXtreamAccountInfo`,
+`hooks/useXtreamHealthCheck.ts` e `components/XtreamHealthBadge.tsx`. Mostrato
+in `ProfileSettings` quando il profilo ha credenziali Xtream. Soglia
+"expiring" a 7 giorni, refresh manuale via pulsante o auto ogni 30 min.
 
 ### F.4 Test su rete reale
 
@@ -520,7 +525,7 @@ Lista isolata per chi vuole un primo PR rapido:
   `VideoPlayerNew` (16 pulsanti del player + range input timeline/volume).
 - [x] Tooltip su pulsanti player con scorciatoia (C.1) — `title` arricchito
   con lettera scorciatoia (M, F, P, C, L, ←, →, Spazio, Esc).
-- [ ] Health-check basic Xtream con badge scadenza in ProfileSettings (F.3).
+- [x] Health-check basic Xtream con badge scadenza in ProfileSettings (F.3).
 - [x] Allineare copilot-instructions a React 18 reale (G.3) — fixato sia
   `.github/copilot-instructions.md` sia `AGENTS.md`.
 - [ ] Sostituire `bonjour` → `bonjour-service` (G.5).

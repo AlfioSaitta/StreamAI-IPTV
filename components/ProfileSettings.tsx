@@ -3,6 +3,7 @@ import { Profile, ProfilePreferences } from '../types.ts';
 import { ProfileService, DEFAULT_PREFERENCES } from '../services/profileService.ts';
 import { CacheService } from '../services/cacheService.ts';
 import { useLanguage } from '../contexts/LanguageContext.tsx';
+import XtreamHealthBadge from './XtreamHealthBadge.tsx';
 import {
   ArrowLeft, 
   User, 
@@ -503,6 +504,13 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
             <Database className="w-6 h-6 text-purple-500" />
             Catalogo contenuti
           </h2>
+
+          {/* F.3 Xtream account health-check badge */}
+          {profile.xtreamCreds && (
+            <div className="mb-6">
+              <XtreamHealthBadge creds={profile.xtreamCreds} />
+            </div>
+          )}
 
           <div className="space-y-6">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
