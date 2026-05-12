@@ -1,11 +1,14 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import videojs from 'video.js';
+import Hls from 'hls.js';
+import mpegts from 'mpegts.js';
 import 'video.js/dist/video-js.css';
 import Player from 'video.js/dist/types/player';
 
 import { Channel } from '../types';
 import { platformService } from '../services/platformService';
 import { nativeVideoPlayer } from '../services/nativeVideoPlayer';
+import { streamInfoService } from '../services/streamInfoService';
 import { useCastSession } from '../hooks/useCastSession';
 import CastDevicePicker from './CastDevicePicker';
 import {
@@ -35,6 +38,28 @@ interface OsdState {
   visible: boolean;
 }
 
+type PlayerEngine = 'videojs' | 'hlsjs' | 'mpegts' | 'native';
+type StreamProtocol = 'hls' | 'mpegts' | 'dash' | 'mp4' | 'webm' | 'unknown';
+
+interface StreamSourceInfo {
+  protocol: StreamProtocol;
+  mimeType: string;
+  engine: PlayerEngine;
+  isXtreamLike: boolean;
+  isExtensionless: boolean;
+  isLive: boolean;
+  label: string;
+}
+
+interface PlaybackErrorState {
+  title: string;
+  message: string;
+  category: 'network' | 'decode' | 'unsupported' | 'timeout' | 'native' | 'unknown';
+  canRetry: boolean;
+  retryCount: number;
+  technicalDetails: string[];
+}
+
 // --- UTILS ---
 
 const formatTime = (seconds: number): string => {
@@ -45,6 +70,105 @@ const formatTime = (seconds: number): string => {
   return h > 0
     ? `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
     : `${m}:${s.toString().padStart(2, '0')}`;
+};
+
+const MAX_PLAYBACK_RETRIES = 2;
+
+const sanitizeStreamUrl = (rawUrl: string): string => {
+  try {
+    const url = new URL(rawUrl);
+    const sensitiveParams = ['username', 'user', 'password', 'pass', 'token', 'key', 'api_key'];
+    sensitiveParams.forEach(param => {
+      if (url.searchParams.has(param)) url.searchParams.set(param, '***');
+    });
+
+    const parts = url.pathname.split('/');
+    const xtreamIndex = parts.findIndex(part => ['live', 'movie', 'series'].includes(part.toLowerCase()));
+    if (xtreamIndex >= 0) {
+      if (parts[xtreamIndex + 1]) parts[xtreamIndex + 1] = '***';
+      if (parts[xtreamIndex + 2]) parts[xtreamIndex + 2] = '***';
+    }
+    url.pathname = parts.join('/');
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return rawUrl.replace(/([?&](?:username|user|password|pass|token|key|api_key)=)[^&]+/gi, '$1***');
+  }
+};
+
+const detectStreamSource = (url: string, channelType?: Channel['type']): StreamSourceInfo => {
+  const lowerUrl = url.toLowerCase();
+  const path = (() => {
+    try { return new URL(url).pathname.toLowerCase(); } catch { return lowerUrl; }
+  })();
+  const isXtreamLike = /\/(live|movie|series)\//.test(path) || lowerUrl.includes('player_api.php');
+  const isExtensionless = !/\.[a-z0-9]{2,5}(?:$|[?#])/.test(lowerUrl);
+  const isLive = channelType === 'live' || path.includes('/live/');
+
+  if (lowerUrl.includes('.m3u8')) {
+    return { protocol: 'hls', mimeType: 'application/x-mpegURL', engine: Hls.isSupported() ? 'hlsjs' : 'videojs', isXtreamLike, isExtensionless, isLive, label: 'HLS (.m3u8)' };
+  }
+  if (lowerUrl.includes('.mpd')) {
+    return { protocol: 'dash', mimeType: 'application/dash+xml', engine: 'videojs', isXtreamLike, isExtensionless, isLive, label: 'DASH (.mpd)' };
+  }
+  if (/\.(ts|mpeg|mpg)(?:$|[?#])/.test(lowerUrl) || (isXtreamLike && isLive)) {
+    return { protocol: 'mpegts', mimeType: 'video/mp2t', engine: mpegts.isSupported() ? 'mpegts' : 'videojs', isXtreamLike, isExtensionless, isLive, label: 'MPEG-TS' };
+  }
+  if (/\.(webm)(?:$|[?#])/.test(lowerUrl)) {
+    return { protocol: 'webm', mimeType: 'video/webm', engine: 'videojs', isXtreamLike, isExtensionless, isLive, label: 'WebM progressivo' };
+  }
+
+  const shouldAssumeMp4 = /\.(mp4|m4v|mov)(?:$|[?#])/.test(lowerUrl) || (isXtreamLike && (channelType === 'movie' || channelType === 'series')) || isExtensionless;
+  return { protocol: shouldAssumeMp4 ? 'mp4' : 'unknown', mimeType: shouldAssumeMp4 ? 'video/mp4' : 'application/octet-stream', engine: 'videojs', isXtreamLike, isExtensionless, isLive, label: shouldAssumeMp4 ? 'MP4/progressivo' : 'Formato non rilevato' };
+};
+
+const classifyPlaybackError = (
+  err: { code?: number; message?: string } | null,
+  sourceInfo: StreamSourceInfo,
+  url: string,
+  retryCount: number,
+  engine: PlayerEngine,
+  extra?: unknown
+): PlaybackErrorState => {
+  const code = err?.code;
+  const details = [
+    `Motore: ${engine}`,
+    `Protocollo: ${sourceInfo.label}`,
+    `MIME: ${sourceInfo.mimeType}`,
+    `URL: ${sanitizeStreamUrl(url)}`,
+  ];
+  if (code) details.push(`MediaError code: ${code}`);
+  if (err?.message) details.push(`MediaError message: ${err.message}`);
+  if (extra) details.push(`Dettaglio: ${String(extra)}`);
+
+  const extraText = String(extra || '').toLowerCase();
+  if (extraText.includes('401') || extraText.includes('unauthorized')) {
+    return { title: 'Credenziali non autorizzate', message: 'Il server IPTV ha rifiutato lo stream. Verifica username/password o scadenza dell’abbonamento.', category: 'network', canRetry: retryCount < MAX_PLAYBACK_RETRIES, retryCount, technicalDetails: details };
+  }
+  if (extraText.includes('403') || extraText.includes('forbidden')) {
+    return { title: 'Accesso negato allo stream', message: 'Il server ha negato l’accesso allo stream. Potrebbe essere un limite account, geoblock o token scaduto.', category: 'network', canRetry: retryCount < MAX_PLAYBACK_RETRIES, retryCount, technicalDetails: details };
+  }
+  if (extraText.includes('404') || extraText.includes('not found')) {
+    return { title: 'Stream non trovato', message: 'Il canale o VOD non è più disponibile sul server IPTV.', category: 'network', canRetry: false, retryCount, technicalDetails: details };
+  }
+  if (extraText.includes('timeout')) {
+    return { title: 'Timeout dello stream', message: 'Il player non ha ricevuto dati in tempo utile. Controlla la connessione o riprova.', category: 'timeout', canRetry: retryCount < MAX_PLAYBACK_RETRIES, retryCount, technicalDetails: details };
+  }
+
+  if (code === MediaError.MEDIA_ERR_NETWORK) {
+    return { title: 'Errore di rete', message: 'Lo stream non risponde o la connessione è instabile. Riprova tra poco o controlla il server IPTV.', category: 'network', canRetry: retryCount < MAX_PLAYBACK_RETRIES, retryCount, technicalDetails: details };
+  }
+  if (code === MediaError.MEDIA_ERR_DECODE) {
+    return { title: 'Errore codec/decodifica', message: 'Il video potrebbe usare un codec non supportato o un flusso corrotto. Se è HEVC/H.265, verifica i codec del sistema.', category: 'decode', canRetry: retryCount < MAX_PLAYBACK_RETRIES, retryCount, technicalDetails: details };
+  }
+  if (code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) {
+    return { title: 'Formato non supportato', message: `Il formato ${sourceInfo.label} non è stato accettato dal player corrente. Prova un altro stream o verifica codec/protocollo.`, category: 'unsupported', canRetry: retryCount < MAX_PLAYBACK_RETRIES, retryCount, technicalDetails: details };
+  }
+  if (sourceInfo.protocol === 'mpegts' && engine === 'videojs') {
+    return { title: 'MPEG-TS non gestito nativamente', message: 'Questo stream TS diretto richiede supporto MediaSource/mpegts. Il dispositivo potrebbe non supportarlo.', category: 'unsupported', canRetry: retryCount < MAX_PLAYBACK_RETRIES, retryCount, technicalDetails: details };
+  }
+
+  return { title: 'Errore di riproduzione', message: 'La riproduzione si è interrotta. Puoi riprovare o aprire i dettagli tecnici.', category: 'unknown', canRetry: retryCount < MAX_PLAYBACK_RETRIES, retryCount, technicalDetails: details };
 };
 
 // --- MAIN COMPONENT ---
@@ -69,6 +193,14 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   const networkStatusIntervalRef = useRef<number | null>(null);
   const osdTimeoutRef = useRef<number | null>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
+  const mpegtsRef = useRef<any>(null);
+  const retryCountRef = useRef(0);
+  const retryTimerRef = useRef<number | null>(null);
+  const loadTimeoutRef = useRef<number | null>(null);
+  const nativeProgressIntervalRef = useRef<number | null>(null);
+  const playerEngineRef = useRef<PlayerEngine>('videojs');
+  const lastSourceRef = useRef<string | null>(null);
 
   // State
   const [isPlaying, setIsPlaying] = useState(false);
@@ -76,6 +208,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [playbackError, setPlaybackError] = useState<PlaybackErrorState | null>(null);
   const [isUsingNativePlayer, setIsUsingNativePlayer] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -88,7 +221,12 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   const [showAudioMenu, setShowAudioMenu] = useState(false);
   const [audioTracks, setAudioTracks] = useState<any[]>([]);
   const [networkSpeed, setNetworkSpeed] = useState<number | null>(null);
-  
+  const [retryNonce, setRetryNonce] = useState(0);
+  const [showInfoPanel, setShowInfoPanel] = useState(false);
+  const [streamInfoLines, setStreamInfoLines] = useState<string[]>([]);
+  const [streamSourceInfo, setStreamSourceInfo] = useState<StreamSourceInfo | null>(null);
+  const [nativePiPSupported, setNativePiPSupported] = useState(false);
+
   // OSD State
   const [osd, setOsd] = useState<OsdState>({ icon: null, visible: false });
 
@@ -112,9 +250,110 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     }, 2000);
   }, []);
 
+  const cleanupPlaybackEngines = useCallback(() => {
+    if (retryTimerRef.current) {
+      window.clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+    if (loadTimeoutRef.current) {
+      window.clearTimeout(loadTimeoutRef.current);
+      loadTimeoutRef.current = null;
+    }
+    if (nativeProgressIntervalRef.current) {
+      window.clearInterval(nativeProgressIntervalRef.current);
+      nativeProgressIntervalRef.current = null;
+    }
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+    if (mpegtsRef.current) {
+      try {
+        mpegtsRef.current.unload?.();
+        mpegtsRef.current.detachMediaElement?.();
+        mpegtsRef.current.destroy?.();
+      } catch (e) {
+        console.warn('[Player] Errore cleanup mpegts:', e);
+      }
+      mpegtsRef.current = null;
+    }
+  }, []);
+
+  const scheduleRetry = useCallback((reason: PlaybackErrorState) => {
+    if (!reason.canRetry || retryTimerRef.current) return;
+    const nextRetry = retryCountRef.current + 1;
+    const delay = Math.min(6000, 1200 * nextRetry);
+    retryTimerRef.current = window.setTimeout(() => {
+      retryTimerRef.current = null;
+      retryCountRef.current = nextRetry;
+      setPlaybackError(null);
+      setError(null);
+      setIsBuffering(true);
+      showOsd(<RotateCcw className="w-12 h-12 text-white" />, `Riprovo (${nextRetry}/${MAX_PLAYBACK_RETRIES})`);
+      setRetryNonce(n => n + 1);
+    }, delay);
+  }, [showOsd]);
+
+  const retryPlaybackNow = useCallback(() => {
+    if (retryTimerRef.current) {
+      window.clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+    retryCountRef.current = Math.min(retryCountRef.current + 1, MAX_PLAYBACK_RETRIES);
+    setPlaybackError(null);
+    setError(null);
+    setIsBuffering(true);
+    showOsd(<RotateCcw className="w-12 h-12 text-white" />, 'Riprovo');
+    setRetryNonce(n => n + 1);
+  }, [showOsd]);
+
+  const updateStreamInfo = useCallback(async () => {
+    if (!channel) return;
+    const videoElement = playerRef.current?.el()?.querySelector('video') as HTMLVideoElement | null;
+    try {
+      const info = await streamInfoService.collectInfoAsync(videoElement, hlsRef.current, mpegtsRef.current, channel.url);
+      setStreamInfoLines([
+        ...streamInfoService.formatInfoForDisplay(info),
+        '',
+        '🔒 URL',
+        `   ${sanitizeStreamUrl(channel.url)}`,
+        '',
+        '🧩 PLAYER',
+        `   Motore: ${playerEngineRef.current}`,
+        streamSourceInfo ? `   Rilevamento URL: ${streamSourceInfo.label}` : '   Rilevamento URL: N/D',
+      ]);
+      setShowInfoPanel(true);
+    } catch (e) {
+      setStreamInfoLines([
+        'Errore durante la raccolta informazioni stream.',
+        String(e),
+        `URL: ${sanitizeStreamUrl(channel.url)}`,
+      ]);
+      setShowInfoPanel(true);
+    }
+  }, [channel, streamSourceInfo]);
+
   // --- CONTROLS LOGIC ---
 
   const togglePlay = useCallback(() => {
+    if (isUsingNativePlayer) {
+      const action = isPlaying ? nativeVideoPlayer.pause() : nativeVideoPlayer.resume();
+      action
+        .then(() => {
+          setIsPlaying(prev => !prev);
+          showOsd(isPlaying
+            ? <Pause className="w-12 h-12 text-white" fill="white" />
+            : <Play className="w-12 h-12 text-white" fill="white" />,
+            isPlaying ? 'Pausa' : 'Play'
+          );
+        })
+        .catch(err => {
+          console.warn('[Player] Native play/pause failed:', err);
+          showOsd(<AlertTriangle className="w-12 h-12 text-white" />, 'Controllo nativo non disponibile');
+        });
+      return;
+    }
+
     if (playerRef.current) {
       if (playerRef.current.paused()) {
         playerRef.current.play();
@@ -124,9 +363,23 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         showOsd(<Pause className="w-12 h-12 text-white" fill="white" />, "Pausa");
       }
     }
-  }, [showOsd]);
+  }, [isPlaying, isUsingNativePlayer, showOsd]);
 
   const skip = useCallback((seconds: number) => {
+    if (isUsingNativePlayer) {
+      const newTime = Math.max(0, currentTime + seconds);
+      nativeVideoPlayer.seekTo(newTime)
+        .then(() => setCurrentTime(newTime))
+        .catch(err => console.warn('[Player] Native seek failed:', err));
+
+      if (seconds > 0) {
+        showOsd(<FastForward className="w-12 h-12 text-white" />, `+${seconds}s`);
+      } else {
+        showOsd(<Rewind className="w-12 h-12 text-white" />, `${seconds}s`);
+      }
+      return;
+    }
+
     if (playerRef.current) {
       const newTime = (playerRef.current.currentTime() || 0) + seconds;
       playerRef.current.currentTime(Math.max(0, newTime));
@@ -137,15 +390,22 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         showOsd(<Rewind className="w-12 h-12 text-white" />, `${seconds}s`);
       }
     }
-  }, [showOsd]);
+  }, [currentTime, isUsingNativePlayer, showOsd]);
 
   const handleSeek = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const time = parseFloat(e.target.value);
+    if (isUsingNativePlayer) {
+      nativeVideoPlayer.seekTo(time)
+        .then(() => setCurrentTime(time))
+        .catch(err => console.warn('[Player] Native timeline seek failed:', err));
+      return;
+    }
+
     if (playerRef.current) {
       playerRef.current.currentTime(time);
       setCurrentTime(time); // Aggiornamento immediato UI
     }
-  }, []);
+  }, [isUsingNativePlayer]);
 
   const handleTimelineMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (!timelineRef.current || duration <= 0) return;
@@ -175,6 +435,21 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   }, [showOsd]);
 
   const toggleMute = useCallback(() => {
+    if (isUsingNativePlayer) {
+      const newMuted = !isMuted;
+      nativeVideoPlayer.setMuted(newMuted)
+        .then(() => {
+          setIsMuted(newMuted);
+          showOsd(newMuted
+            ? <VolumeX className="w-12 h-12 text-white" />
+            : <Volume2 className="w-12 h-12 text-white" />,
+            newMuted ? 'Muto' : 'Audio Attivo'
+          );
+        })
+        .catch(err => console.warn('[Player] Native mute failed:', err));
+      return;
+    }
+
     if (playerRef.current) {
       const newMuted = !playerRef.current.muted();
       playerRef.current.muted(newMuted);
@@ -191,10 +466,29 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         }
       }
     }
-  }, [showOsd]);
+  }, [isMuted, isUsingNativePlayer, showOsd]);
 
   const handleVolumeChange = useCallback((e: React.ChangeEvent<HTMLInputElement> | number) => {
     const newVolume = typeof e === 'number' ? e : parseFloat(e.target.value);
+    if (isUsingNativePlayer) {
+      nativeVideoPlayer.setVolume(newVolume)
+        .then(() => {
+          setVolume(newVolume);
+          const nextMuted = newVolume === 0;
+          setIsMuted(nextMuted);
+          return nativeVideoPlayer.setMuted(nextMuted);
+        })
+        .catch(err => console.warn('[Player] Native volume failed:', err));
+
+      let Icon = Volume2;
+      if (newVolume === 0) Icon = VolumeX;
+      else if (newVolume < 0.5) Icon = Volume1;
+      if (typeof e === 'number') {
+        showOsd(<Icon className="w-12 h-12 text-white" />, `${Math.round(newVolume * 100)}%`);
+      }
+      return;
+    }
+
     if (playerRef.current) {
       playerRef.current.volume(newVolume);
       setVolume(newVolume);
@@ -216,9 +510,19 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         showOsd(<Icon className="w-12 h-12 text-white" />, `${Math.round(newVolume * 100)}%`);
       }
     }
-  }, [showOsd]);
+  }, [isUsingNativePlayer, showOsd]);
 
   const togglePiP = useCallback(async () => {
+    if (isUsingNativePlayer) {
+      if (!nativePiPSupported) {
+        showOsd(<PictureInPicture2 className="w-12 h-12 text-white" />, 'PiP non supportato su questo device');
+        return;
+      }
+      const ok = await nativeVideoPlayer.enterPictureInPicture();
+      showOsd(<PictureInPicture2 className="w-12 h-12 text-white" />, ok ? 'PiP Android richiesto' : 'PiP non disponibile');
+      return;
+    }
+
     const videoElement = playerRef.current?.el()?.querySelector('video');
     if (!videoElement) return;
 
@@ -234,10 +538,22 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       }
     } catch (err) {
       console.error("PiP error:", err);
+      showOsd(<AlertTriangle className="w-12 h-12 text-white" />, 'PiP non disponibile');
     }
-  }, [showOsd]);
+  }, [isUsingNativePlayer, nativePiPSupported, showOsd]);
 
   const restartFromBeginning = () => {
+    if (isUsingNativePlayer) {
+      nativeVideoPlayer.seekTo(0)
+        .then(() => {
+          setCurrentTime(0);
+          onResetProgress?.();
+          showOsd(<RotateCcw className="w-12 h-12 text-white" />, 'Riavvia');
+        })
+        .catch(err => console.warn('[Player] Native restart failed:', err));
+      return;
+    }
+
     if (playerRef.current) {
       playerRef.current.currentTime(0);
       if (onResetProgress) onResetProgress();
@@ -385,22 +701,121 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     setCurrentTime(0);
     setDuration(0);
     setError(null);
+    setPlaybackError(null);
     setIsUsingNativePlayer(false);
     setShowPlaylist(false);
     setShowAudioMenu(false);
+    setShowInfoPanel(false);
+    setStreamInfoLines([]);
     setAudioTracks([]);
+    setNativePiPSupported(false);
+    cleanupPlaybackEngines();
 
     const source = channel.url;
+    if (lastSourceRef.current !== source) {
+      retryCountRef.current = 0;
+      lastSourceRef.current = source;
+    }
+    const detectedSource = detectStreamSource(source, channel.type);
+    setStreamSourceInfo(detectedSource);
+    playerEngineRef.current = platformService.isNative ? 'native' : detectedSource.engine;
 
     // Native Player (Android/iOS)
     if (platformService.isNative) {
       setIsUsingNativePlayer(true);
       setIsBuffering(false);
       const handlePlayerExit = () => onBack && onBack();
+      const syncNativeProgress = async () => {
+        const [nativeCurrentTime, nativeDuration, nativeIsPlaying] = await Promise.all([
+          nativeVideoPlayer.getCurrentTime(),
+          nativeVideoPlayer.getDuration(),
+          nativeVideoPlayer.isPlaying(),
+        ]);
+        if (Number.isFinite(nativeCurrentTime)) setCurrentTime(nativeCurrentTime);
+        if (Number.isFinite(nativeDuration) && nativeDuration > 0) setDuration(nativeDuration);
+        setIsPlaying(nativeIsPlaying);
+        if (onProgress && nativeDuration > 0) onProgress(nativeCurrentTime, nativeDuration);
+      };
+      const handleNativeReady = async () => {
+        setIsBuffering(false);
+        const nativeDuration = await nativeVideoPlayer.getDuration();
+        if (nativeDuration > 0) {
+          setDuration(nativeDuration);
+          if (initialProgress && initialProgress > 0.05 && initialProgress < 0.95) {
+            await nativeVideoPlayer.seekTo(nativeDuration * initialProgress);
+          }
+        }
+        await syncNativeProgress();
+      };
+      const handleNativePlay = () => { setIsPlaying(true); setIsBuffering(false); };
+      const handleNativePause = () => setIsPlaying(false);
+      const handleNativeEnded = () => { setIsPlaying(false); onNext?.(); };
+      const handleNativeTimeUpdate = (data: any) => {
+        const nativeCurrentTime = Number(data?.currentTime ?? data?.current_time ?? data?.value ?? data?.currentTimeSeconds ?? 0);
+        const nativeDuration = Number(data?.duration ?? data?.durationSeconds ?? data?.totalTime ?? 0);
+        if (Number.isFinite(nativeCurrentTime)) setCurrentTime(nativeCurrentTime);
+        if (Number.isFinite(nativeDuration) && nativeDuration > 0) setDuration(nativeDuration);
+        if (onProgress && nativeDuration > 0) onProgress(nativeCurrentTime, nativeDuration);
+      };
+      const handleNativeError = (data: any) => {
+        const nativeError: PlaybackErrorState = {
+          title: 'Errore player nativo',
+          message: 'ExoPlayer non è riuscito ad avviare o mantenere la riproduzione dello stream.',
+          category: 'native',
+          canRetry: retryCountRef.current < MAX_PLAYBACK_RETRIES,
+          retryCount: retryCountRef.current,
+          technicalDetails: [
+            `Motore: native`,
+            `Protocollo: ${detectedSource.label}`,
+            `URL: ${sanitizeStreamUrl(source)}`,
+            `Dettaglio: ${JSON.stringify(data)}`,
+          ],
+        };
+        setPlaybackError(nativeError);
+        setError(nativeError.message);
+        showOsd(<AlertTriangle className="w-12 h-12 text-white" />, nativeError.title);
+        scheduleRetry(nativeError);
+      };
       nativeVideoPlayer.on('exit', handlePlayerExit);
-      nativeVideoPlayer.play({ url: source, title: channel.cleanName || channel.name })
-        .then(success => { if (!success) setError('Impossibile avviare il player nativo'); });
-      return () => nativeVideoPlayer.off('exit', handlePlayerExit);
+      nativeVideoPlayer.on('ready', handleNativeReady);
+      nativeVideoPlayer.on('play', handleNativePlay);
+      nativeVideoPlayer.on('pause', handleNativePause);
+      nativeVideoPlayer.on('ended', handleNativeEnded);
+      nativeVideoPlayer.on('timeupdate', handleNativeTimeUpdate);
+      nativeVideoPlayer.on('error', handleNativeError);
+      nativeVideoPlayer.play({ url: source, title: channel.cleanName || channel.name, poster: channel.logo, pipEnabled: platformService.isAndroid })
+        .then(success => {
+          setNativePiPSupported(nativeVideoPlayer.supportsPiP);
+          if (!success) {
+            const nativeError = classifyPlaybackError(null, detectedSource, source, retryCountRef.current, 'native', 'initPlayer returned false');
+            setPlaybackError(nativeError);
+            setError(nativeError.message);
+            showOsd(<AlertTriangle className="w-12 h-12 text-white" />, nativeError.title);
+            scheduleRetry(nativeError);
+          }
+        })
+        .catch(err => {
+          const nativeError = classifyPlaybackError(null, detectedSource, source, retryCountRef.current, 'native', err);
+          setPlaybackError(nativeError);
+          setError(nativeError.message);
+          showOsd(<AlertTriangle className="w-12 h-12 text-white" />, nativeError.title);
+          scheduleRetry(nativeError);
+        });
+      nativeProgressIntervalRef.current = window.setInterval(syncNativeProgress, 2000);
+      return () => {
+        nativeVideoPlayer.off('exit', handlePlayerExit);
+        nativeVideoPlayer.off('ready', handleNativeReady);
+        nativeVideoPlayer.off('play', handleNativePlay);
+        nativeVideoPlayer.off('pause', handleNativePause);
+        nativeVideoPlayer.off('ended', handleNativeEnded);
+        nativeVideoPlayer.off('timeupdate', handleNativeTimeUpdate);
+        nativeVideoPlayer.off('error', handleNativeError);
+        if (nativeProgressIntervalRef.current) {
+          window.clearInterval(nativeProgressIntervalRef.current);
+          nativeProgressIntervalRef.current = null;
+        }
+        nativeVideoPlayer.stop().catch(() => undefined);
+      };
     }
 
     // Web/Electron Player
@@ -413,9 +828,39 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     videoEl.playsInline = true;
     container.appendChild(videoEl);
 
-    let sourceType = 'video/mp4';
-    if (source.includes('.m3u8')) sourceType = 'application/x-mpegURL';
-    else if (source.includes('.mpd')) sourceType = 'application/dash+xml';
+    if (detectedSource.engine === 'hlsjs') {
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: channel.type === 'live',
+        backBufferLength: channel.type === 'live' ? 30 : 90,
+      });
+      hlsRef.current = hls;
+      hls.attachMedia(videoEl);
+      hls.on(Hls.Events.MEDIA_ATTACHED, () => hls.loadSource(source));
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (!data?.fatal) return;
+        const httpStatus = data?.response?.code ? ` HTTP ${data.response.code}` : '';
+        const hlsError = classifyPlaybackError(videoEl.error, detectedSource, source, retryCountRef.current, 'hlsjs', `${data.type}: ${data.details}${httpStatus}`);
+        setPlaybackError(hlsError);
+        setError(hlsError.message);
+        showOsd(<AlertTriangle className="w-12 h-12 text-white" />, hlsError.title);
+        scheduleRetry(hlsError);
+      });
+    }
+
+    if (detectedSource.engine === 'mpegts') {
+      const tsPlayer = mpegts.createPlayer({ type: 'mpegts', url: source, isLive: detectedSource.isLive });
+      mpegtsRef.current = tsPlayer;
+      tsPlayer.attachMediaElement(videoEl);
+      tsPlayer.load();
+      tsPlayer.on(mpegts.Events.ERROR, (type: string, details: string) => {
+        const tsError = classifyPlaybackError(videoEl.error, detectedSource, source, retryCountRef.current, 'mpegts', `${type}: ${details}`);
+        setPlaybackError(tsError);
+        setError(tsError.message);
+        showOsd(<AlertTriangle className="w-12 h-12 text-white" />, tsError.title);
+        scheduleRetry(tsError);
+      });
+    }
 
     const player = videojs(videoEl, {
       autoplay: false,
@@ -423,15 +868,27 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       responsive: true,
       fluid: true,
       preload: 'metadata',
-      sources: [{ src: source, type: sourceType }],
+      sources: detectedSource.engine === 'videojs' ? [{ src: source, type: detectedSource.mimeType }] : [],
     });
     playerRef.current = player;
+    loadTimeoutRef.current = window.setTimeout(() => {
+      if (player.isDisposed() || (player.currentTime() || 0) > 0 || !isBuffering) return;
+      const timeoutError = classifyPlaybackError(player.error() ?? null, detectedSource, source, retryCountRef.current, detectedSource.engine, 'timeout iniziale caricamento metadata');
+      setPlaybackError(timeoutError);
+      setError(timeoutError.message);
+      showOsd(<AlertTriangle className="w-12 h-12 text-white" />, timeoutError.title);
+      scheduleRetry(timeoutError);
+    }, 18000);
     
     // Initial broadcast to announce existence
     broadcastStatus();
 
     player.on('play', () => { 
       if (!player.isDisposed()) {
+        if (loadTimeoutRef.current) {
+          window.clearTimeout(loadTimeoutRef.current);
+          loadTimeoutRef.current = null;
+        }
         setIsPlaying(true); 
         setIsBuffering(false); 
         if ('mediaSession' in navigator) {
@@ -454,6 +911,10 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     });
     player.on('playing', () => {
       if (!player.isDisposed()) {
+        if (loadTimeoutRef.current) {
+          window.clearTimeout(loadTimeoutRef.current);
+          loadTimeoutRef.current = null;
+        }
         setIsBuffering(false);
         broadcastStatus();
       }
@@ -487,6 +948,10 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     });
     player.on('loadedmetadata', () => {
       if (player.isDisposed()) return;
+      if (loadTimeoutRef.current) {
+        window.clearTimeout(loadTimeoutRef.current);
+        loadTimeoutRef.current = null;
+      }
       
       updateAudioTracksList();
 
@@ -495,6 +960,13 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       if (initialProgress && initialProgress > 0.05 && initialProgress < 0.95) {
         player.currentTime(dur * initialProgress);
       }
+      streamInfoService.collectInfoAsync(videoEl, hlsRef.current, mpegtsRef.current, source)
+        .then(info => {
+          if (info.isHEVC && !info.isSupported) {
+            showOsd(<AlertTriangle className="w-12 h-12 text-white" />, 'HEVC/H.265: verifica codec');
+          }
+        })
+        .catch(() => undefined);
       player.play()?.catch(e => console.warn("Autoplay bloccato:", e));
       broadcastStatus();
     });
@@ -506,12 +978,11 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
        const err = player.error();
        console.error("VideoJS Error:", err);
        
-       // Fallback logic for common codec/source errors
-       if (err?.code === 4 || err?.code === 3) {
-          setError('Errore di decodifica o rete. Prova un altro canale.');
-       } else {
-          setError('Errore di riproduzione');
-       }
+       const classifiedError = classifyPlaybackError(err ?? null, detectedSource, source, retryCountRef.current, detectedSource.engine);
+       setPlaybackError(classifiedError);
+       setError(classifiedError.message);
+       showOsd(<AlertTriangle className="w-12 h-12 text-white" />, classifiedError.title);
+       scheduleRetry(classifiedError);
        broadcastStatus();
     });
 
@@ -563,8 +1034,9 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         playerRef.current.dispose();
         playerRef.current = null;
       }
+      cleanupPlaybackEngines();
     };
-  }, [channel, initialProgress, onBack, onNext, onProgress, broadcastStatus]);
+  }, [channel, initialProgress, onBack, onNext, onProgress, broadcastStatus, cleanupPlaybackEngines, retryNonce, scheduleRetry, showOsd]);
 
   // Media Session API integration
   useEffect(() => {
@@ -727,6 +1199,30 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         </div>
         <h2 className="text-2xl font-bold text-white mb-2">Riproduzione in corso...</h2>
         <p className="text-gray-400 mb-8 max-w-md">Il video è in riproduzione nel player nativo.</p>
+        {playbackError && (
+          <div className="max-w-xl bg-red-950/60 border border-red-500/40 rounded-2xl p-5 text-left mb-6">
+            <div className="flex items-center gap-3 mb-2 text-red-200">
+              <AlertTriangle className="w-5 h-5" />
+              <span className="font-semibold">{playbackError.title}</span>
+            </div>
+            <p className="text-sm text-red-100 mb-4">{playbackError.message}</p>
+            <div className="flex flex-wrap gap-3">
+              {playbackError.canRetry && (
+                <button onClick={retryPlaybackNow} className="tv-focus px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white font-medium">
+                  Riprova ({playbackError.retryCount}/{MAX_PLAYBACK_RETRIES})
+                </button>
+              )}
+              <button onClick={onBack} className="tv-focus px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white">Indietro</button>
+            </div>
+          </div>
+        )}
+        <button
+          onClick={togglePiP}
+          disabled={!nativePiPSupported}
+          className={`tv-focus px-5 py-2 rounded-lg flex items-center gap-2 ${nativePiPSupported ? 'bg-white/10 hover:bg-white/20 text-white' : 'bg-white/5 text-gray-500 cursor-not-allowed'}`}
+        >
+          <PictureInPicture2 className="w-5 h-5" /> {nativePiPSupported ? 'PiP' : 'PiP non disponibile'}
+        </button>
       </div>
     );
   }
@@ -758,11 +1254,55 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       
       {error && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/90">
-          <div className="bg-red-900/50 backdrop-blur border border-red-500/50 px-8 py-6 rounded-2xl flex flex-col items-center gap-4 text-center">
+          <div className="bg-red-950/70 backdrop-blur border border-red-500/50 px-8 py-6 rounded-2xl flex flex-col items-center gap-4 text-center max-w-2xl mx-4 shadow-2xl">
             <AlertTriangle className="w-12 h-12 text-red-400" />
-            <p className="text-xl font-medium text-white">{error}</p>
-            <button onClick={() => { setError(null); if (onBack) onBack(); }} className="px-6 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded-lg">Chiudi</button>
+            <div>
+              <h3 className="text-2xl font-bold text-white mb-2">{playbackError?.title || 'Errore di riproduzione'}</h3>
+              <p className="text-base text-red-100">{error}</p>
+            </div>
+
+            {playbackError && (
+              <div className="w-full bg-black/30 border border-white/10 rounded-xl p-4 text-left">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-gray-300 mb-3">
+                  <span>Categoria: <strong className="text-white">{playbackError.category}</strong></span>
+                  <span>Retry: <strong className="text-white">{playbackError.retryCount}/{MAX_PLAYBACK_RETRIES}</strong></span>
+                  {streamSourceInfo && <span>Formato: <strong className="text-white">{streamSourceInfo.label}</strong></span>}
+                  <span>Motore: <strong className="text-white">{playerEngineRef.current}</strong></span>
+                </div>
+                <details className="text-xs text-gray-300">
+                  <summary className="cursor-pointer text-gray-100 font-semibold mb-2">Dettagli tecnici</summary>
+                  <pre className="whitespace-pre-wrap break-words max-h-40 overflow-auto bg-black/40 rounded-lg p-3">{playbackError.technicalDetails.join('\n')}</pre>
+                </details>
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              {playbackError?.canRetry && (
+                <button onClick={retryPlaybackNow} className="tv-focus px-6 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg font-semibold flex items-center gap-2">
+                  <RotateCcw className="w-4 h-4" /> Riprova
+                </button>
+              )}
+              <button onClick={updateStreamInfo} className="tv-focus px-6 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg flex items-center gap-2">
+                <Info className="w-4 h-4" /> Info stream
+              </button>
+              <button onClick={() => { setError(null); setPlaybackError(null); if (onBack) onBack(); }} className="tv-focus px-6 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded-lg">Chiudi</button>
+            </div>
           </div>
+        </div>
+      )}
+
+      {showInfoPanel && (
+        <div className="absolute inset-y-0 right-0 z-[80] w-full max-w-xl bg-black/95 backdrop-blur-xl border-l border-white/10 shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
+          <div className="p-4 border-b border-white/10 flex items-center justify-between">
+            <div>
+              <h3 className="text-white font-bold flex items-center gap-2"><Info className="w-5 h-5" /> Info stream</h3>
+              <p className="text-xs text-gray-400 truncate max-w-md">{channel.cleanName || channel.name}</p>
+            </div>
+            <button onClick={() => setShowInfoPanel(false)} className="tv-focus p-2 rounded-full hover:bg-white/10"><X className="w-5 h-5 text-gray-300" /></button>
+          </div>
+          <pre className="flex-1 overflow-auto p-4 text-xs leading-relaxed text-gray-200 whitespace-pre-wrap font-mono">
+            {streamInfoLines.length > 0 ? streamInfoLines.join('\n') : 'Nessuna informazione disponibile.'}
+          </pre>
         </div>
       )}
 
@@ -942,7 +1482,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
                   <Headphones className="w-6 h-6" />
                 </button>
               )}
-              <button onClick={() => {}} className="p-2 hover:bg-white/10 rounded-full" title="Info Codec">
+              <button onClick={updateStreamInfo} className="p-2 hover:bg-white/10 rounded-full" title="Info Codec">
                 <Info className="w-6 h-6 text-white" />
               </button>
               <button

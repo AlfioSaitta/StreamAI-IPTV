@@ -14,6 +14,8 @@ Si distingue per l'integrazione con **Google Gemini AI**, che offre raccomandazi
 - **Codec HEVC/H.265**: Supporto nativo per video 4K con codec proprietari (via BranchBit).
 - **Player Nativo (Android)**: Utilizzo del player di sistema (ExoPlayer) per massime prestazioni su mobile.
 - **OSD (On-Screen Display)**: Feedback visivo immediato per volume, seeking, play/pausa e stato buffer.
+- **Diagnostica stream**: classificazione errori HTTP/codec/timeout, retry controllato e pannello “Info stream” con URL sanitizzato, protocollo, engine, codec video/audio e dati qualità quando disponibili.
+- **Fallback multi-engine**: HLS.js, MPEG-TS (`mpegts.js`), Video.js e player nativo Android vengono scelti in base a protocollo, estensione e URL Xtream-like.
 
 ### 📡 Networking & Casting
 - **Casting Universale**: Trasmissione su Chromecast, dispositivi DLNA/UPnP e AirPlay.
@@ -168,12 +170,38 @@ I file `*.keystore`, `*.jks`, APK/AAB e gli asset Android generati sono esclusi 
 ### Funzionalità Android
 - ✅ Streaming Live/VOD/Series
 - ✅ Player nativo (ExoPlayer tramite `capacitor-video-player`) per prestazioni superiori
-- ✅ Picture-in-Picture
+- ✅ Picture-in-Picture su Android 8+ / API 26+ quando supportato dal device
 - ✅ Fullscreen
 - ✅ Supporto HTTP cleartext per stream IPTV
 - ✅ Deep link `streamai://`
 - ❌ Casting (solo su Electron per ora)
 - ❌ Download locale (solo su Electron)
+
+### Verifica Android consigliata
+
+Per validare le funzionalità P2 del player nativo serve un JDK completo, non solo il runtime Java. Verifica prima che siano disponibili sia `java` sia `javac`:
+
+```bash
+java -version
+javac -version
+```
+
+Poi esegui:
+
+```bash
+npm run android:build
+npm run android:run
+```
+
+Checklist minima su device fisico o emulatore API 26+:
+
+1. Avvia un canale live e verifica partenza, audio e controlli nativi.
+2. Premi Home: se il device supporta PiP, il player deve entrare in Picture-in-Picture senza crash.
+3. Rientra nell'app dal PiP e verifica che stato play/pausa, audio e progresso siano coerenti.
+4. Ripeti con VOD/serie e, se disponibile, con stream HEVC/H.265.
+5. Apri “Info stream” e verifica codec video/audio, container, protocollo e supporto decodifica.
+
+Nota: in ambienti senza JDK 17 completo o senza device fisico la build/test Android completa non è rappresentativa; in quel caso usare `npm run typecheck` e `npm run build` come validazione web/Electron e rimandare il collaudo Android a hardware reale.
 
 ---
 
@@ -257,6 +285,19 @@ sudo dnf install gstreamer1-libav gstreamer1-plugins-bad-freeworld
 # Arch
 sudo pacman -S gst-libav gst-plugins-bad
 ```
+
+---
+
+## 🧪 Diagnostica riproduzione stream
+
+Il player mostra un overlay diagnostico quando uno stream fallisce:
+
+- errori credenziali/accesso (`401`, `403`), stream non trovato (`404`), timeout iniziale, codec/decodifica e sorgente non supportata;
+- pulsante **Riprova** con limite di retry per evitare loop infiniti;
+- sezione **Dettagli tecnici** con URL sanitizzato, protocollo, MIME e motore usato;
+- pulsante **Info stream** per raccogliere codec video/audio, risoluzione, bitrate, container, protocollo, qualità playback e stato supporto.
+
+Per stream live MPEG-TS/HLS il rilevamento codec usa più fonti: Video.js/HLS.js, track API browser, manifest HLS `CODECS`, byte iniziali dello stream e parsing PAT/PMT MPEG-TS quando possibile. Alcuni provider bloccano fetch paralleli o CORS: in quei casi il pannello mostra comunque il metodo di rilevamento e l'affidabilità del dato.
 
 ---
 

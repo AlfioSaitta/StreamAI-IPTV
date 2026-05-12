@@ -375,6 +375,193 @@ function checkCodecSupport(mimeType: string): { supported: boolean; probably: bo
   };
 }
 
+function parseCodecList(codecList: string): Partial<StreamCodecInfo> {
+  const info: Partial<StreamCodecInfo> = {};
+  const codecs = codecList.split(',').map(codec => codec.trim()).filter(Boolean);
+
+  for (const codecStr of codecs) {
+    const parsed = parseCodecString(codecStr);
+    const id = parsed.id.toLowerCase();
+    const isVideo = id.startsWith('avc') || id.startsWith('hev') || id.startsWith('hvc') ||
+                    id.startsWith('dvh') || id.startsWith('dva') || id.startsWith('av0') ||
+                    id === 'av1' || id.startsWith('vp9') || id.startsWith('vp09') ||
+                    id.startsWith('vp8') || id.startsWith('vp08') || id.startsWith('mp2v');
+    const isAudio = id.startsWith('mp4a') || id.includes('ac-3') || id.includes('ec-3') ||
+                    id.includes('ac3') || id.includes('ec3') || id.startsWith('opus') ||
+                    id.startsWith('vorbis') || id.startsWith('flac') || id.startsWith('mp3');
+
+    if (isVideo && !info.videoCodec) {
+      info.videoCodec = parsed.name;
+      info.videoCodecId = codecStr;
+      info.videoProfile = parsed.profile || null;
+      info.videoLevel = parsed.level || null;
+      info.videoBitDepth = parsed.bitDepth || null;
+      info.videoColorSpace = parsed.colorSpace || null;
+      info.videoHDR = parsed.isHDR || false;
+      info.isH264 = id.startsWith('avc');
+      info.isHEVC = id.startsWith('hev') || id.startsWith('hvc');
+      info.isAV1 = id.startsWith('av0') || id === 'av1';
+      info.isVP9 = id.startsWith('vp9') || id.startsWith('vp09');
+      info.isVP8 = id.startsWith('vp8') || id.startsWith('vp08');
+      info.isDolbyVision = id.startsWith('dvh') || id.startsWith('dva');
+    }
+
+    if (isAudio && !info.audioCodec) {
+      info.audioCodec = parsed.name;
+      info.audioCodecId = codecStr;
+    }
+  }
+
+  return info;
+}
+
+function analyzeHlsManifestText(text: string): Partial<StreamCodecInfo> {
+  const info: Partial<StreamCodecInfo> = {
+    protocol: 'HLS',
+    container: 'HLS (m3u8)',
+    rawInfo: {},
+    detectionMethod: 'hls-manifest-fetch',
+    confidence: 'medium',
+  };
+
+  const codecMatch = text.match(/CODECS="([^"]+)"/i);
+  if (codecMatch) {
+    Object.assign(info, parseCodecList(codecMatch[1]));
+    info.rawInfo = { ...info.rawInfo, manifestCodecs: codecMatch[1] };
+    if (info.videoCodec || info.audioCodec) info.confidence = 'high';
+  }
+
+  const resolutionMatch = text.match(/RESOLUTION=(\d+)x(\d+)/i);
+  if (resolutionMatch) {
+    info.width = Number(resolutionMatch[1]);
+    info.height = Number(resolutionMatch[2]);
+  }
+
+  const bandwidthMatch = text.match(/(?:AVERAGE-)?BANDWIDTH=(\d+)/i);
+  if (bandwidthMatch) info.bitrate = Number(bandwidthMatch[1]);
+
+  const frameRateMatch = text.match(/FRAME-RATE=([0-9.]+)/i);
+  if (frameRateMatch) info.frameRate = Number(frameRateMatch[1]);
+
+  return info;
+}
+
+function resolveHlsReference(baseUrl: string, manifestText: string): string | null {
+  const line = manifestText
+    .split(/\r?\n/)
+    .map(value => value.trim())
+    .find(value => value && !value.startsWith('#'));
+
+  if (!line) return null;
+
+  try {
+    return new URL(line, baseUrl).toString();
+  } catch {
+    return null;
+  }
+}
+
+function isLikelyMpegTs(data: Uint8Array): boolean {
+  return data.length >= 188 && data[0] === 0x47 && (data.length < 376 || data[188] === 0x47 || data[376] === 0x47);
+}
+
+function mapMpegTsStreamType(streamType: number): { codec?: string; codecId?: string; kind: 'video' | 'audio' | 'unknown' } {
+  switch (streamType) {
+    case 0x01:
+    case 0x02:
+      return { kind: 'video', codec: 'MPEG-2 Video', codecId: 'mp2v' };
+    case 0x10:
+      return { kind: 'video', codec: 'MPEG-4 Part 2', codecId: 'mp4v' };
+    case 0x1B:
+      return { kind: 'video', codec: 'H.264/AVC', codecId: 'avc1' };
+    case 0x24:
+      return { kind: 'video', codec: 'H.265/HEVC', codecId: 'hvc1' };
+    case 0x03:
+    case 0x04:
+      return { kind: 'audio', codec: 'MP3/MPEG Audio', codecId: 'mp3' };
+    case 0x0F:
+    case 0x11:
+      return { kind: 'audio', codec: 'AAC', codecId: 'mp4a' };
+    case 0x81:
+      return { kind: 'audio', codec: 'AC-3 (Dolby Digital)', codecId: 'ac-3' };
+    case 0x87:
+      return { kind: 'audio', codec: 'E-AC-3 (Dolby Digital Plus)', codecId: 'ec-3' };
+    default:
+      return { kind: 'unknown' };
+  }
+}
+
+function analyzeMpegTsProgramMap(data: Uint8Array): {
+  videoCodec?: string;
+  videoCodecId?: string;
+  audioCodec?: string;
+  audioCodecId?: string;
+} | null {
+  if (!isLikelyMpegTs(data)) return null;
+
+  const pmtPids = new Set<number>();
+  const packetSize = 188;
+
+  for (let offset = 0; offset + packetSize <= data.length; offset += packetSize) {
+    if (data[offset] !== 0x47) continue;
+
+    const payloadUnitStart = (data[offset + 1] & 0x40) !== 0;
+    const pid = ((data[offset + 1] & 0x1f) << 8) | data[offset + 2];
+    const adaptationControl = (data[offset + 3] >> 4) & 0x03;
+    if (adaptationControl === 0 || adaptationControl === 2) continue;
+
+    let payloadOffset = offset + 4;
+    if (adaptationControl === 3) payloadOffset += 1 + data[payloadOffset];
+    if (payloadOffset >= offset + packetSize) continue;
+
+    if (payloadUnitStart) payloadOffset += 1 + data[payloadOffset];
+    if (payloadOffset >= offset + packetSize) continue;
+
+    const tableId = data[payloadOffset];
+    const sectionLength = ((data[payloadOffset + 1] & 0x0f) << 8) | data[payloadOffset + 2];
+    const sectionEnd = Math.min(payloadOffset + 3 + sectionLength - 4, offset + packetSize);
+
+    if (pid === 0 && tableId === 0x00) {
+      for (let pos = payloadOffset + 8; pos + 4 <= sectionEnd; pos += 4) {
+        const programNumber = (data[pos] << 8) | data[pos + 1];
+        if (programNumber === 0) continue;
+        pmtPids.add(((data[pos + 2] & 0x1f) << 8) | data[pos + 3]);
+      }
+      continue;
+    }
+
+    if (pmtPids.has(pid) && tableId === 0x02) {
+      const programInfoLength = ((data[payloadOffset + 10] & 0x0f) << 8) | data[payloadOffset + 11];
+      const result: {
+        videoCodec?: string;
+        videoCodecId?: string;
+        audioCodec?: string;
+        audioCodecId?: string;
+      } = {};
+
+      for (let pos = payloadOffset + 12 + programInfoLength; pos + 5 <= sectionEnd;) {
+        const streamType = data[pos];
+        const esInfoLength = ((data[pos + 3] & 0x0f) << 8) | data[pos + 4];
+        const mapped = mapMpegTsStreamType(streamType);
+
+        if (mapped.kind === 'video' && !result.videoCodec) {
+          result.videoCodec = mapped.codec;
+          result.videoCodecId = mapped.codecId;
+        } else if (mapped.kind === 'audio' && !result.audioCodec) {
+          result.audioCodec = mapped.codec;
+          result.audioCodecId = mapped.codecId;
+        }
+
+        pos += 5 + esInfoLength;
+      }
+
+      return result.videoCodec || result.audioCodec ? result : null;
+    }
+  }
+
+  return null;
+}
+
 /**
  * Verifica avanzata con Media Capabilities API
  * Fornisce info su hardware acceleration e power efficiency
@@ -453,11 +640,24 @@ async function checkMediaCapabilities(config: {
  */
 export function analyzeVideoBytes(data: Uint8Array): {
   codec?: string;
+  codecId?: string;
+  audioCodec?: string;
+  audioCodecId?: string;
   profile?: string;
   level?: string;
   bitDepth?: number;
 } | null {
   if (data.length < 10) return null;
+
+  const tsInfo = analyzeMpegTsProgramMap(data);
+  if (tsInfo?.videoCodec || tsInfo?.audioCodec) {
+    return {
+      codec: tsInfo.videoCodec,
+      codecId: tsInfo.videoCodecId,
+      audioCodec: tsInfo.audioCodec,
+      audioCodecId: tsInfo.audioCodecId,
+    };
+  }
 
   // Cerca NAL unit start codes (H.264/HEVC)
   for (let i = 0; i < data.length - 5; i++) {
@@ -1195,7 +1395,7 @@ class StreamInfoService {
    * Questo metodo tenta di rilevare il codec dai dati binari dello stream
    */
   async analyzeStreamDirectly(url: string): Promise<Partial<StreamCodecInfo>> {
-    const info: Partial<StreamCodecInfo> = {
+    let info: Partial<StreamCodecInfo> = {
       rawInfo: {},
       detectionMethod: 'stream-analysis',
       confidence: 'low',
@@ -1262,10 +1462,49 @@ class StreamInfoService {
       const data = new Uint8Array(await response.arrayBuffer());
       this.log(`Letti ${data.length} bytes per analisi`);
 
+      const textHeader = new TextDecoder('utf-8', { fatal: false }).decode(data.slice(0, Math.min(data.length, 8192)));
+      if (textHeader.includes('#EXTM3U')) {
+        const manifestInfo = analyzeHlsManifestText(textHeader);
+        info = { ...info, ...manifestInfo, rawInfo: { ...info.rawInfo, ...manifestInfo.rawInfo } };
+
+        const firstReference = resolveHlsReference(url, textHeader);
+        if (firstReference && !info.videoCodec) {
+          this.log(`HLS: tentativo analisi primo riferimento media: ${firstReference.substring(0, 80)}...`);
+          try {
+            const nestedController = new AbortController();
+            const nestedTimeoutId = setTimeout(() => nestedController.abort(), 8000);
+            const nestedResponse = await fetch(firstReference, { headers: { 'Range': 'bytes=0-65535' }, signal: nestedController.signal });
+            clearTimeout(nestedTimeoutId);
+
+            if (nestedResponse.ok || nestedResponse.status === 206) {
+              const nestedData = new Uint8Array(await nestedResponse.arrayBuffer());
+              const nestedText = new TextDecoder('utf-8', { fatal: false }).decode(nestedData.slice(0, Math.min(nestedData.length, 8192)));
+
+              if (nestedText.includes('#EXTM3U')) {
+                const nestedManifestInfo = analyzeHlsManifestText(nestedText);
+                info = { ...info, ...nestedManifestInfo, rawInfo: { ...info.rawInfo, ...nestedManifestInfo.rawInfo } };
+              } else {
+                const nestedCodecInfo = analyzeVideoBytes(nestedData);
+                if (nestedCodecInfo) {
+                  info.videoCodec = info.videoCodec || nestedCodecInfo.codec || null;
+                  info.videoCodecId = info.videoCodecId || nestedCodecInfo.codecId || null;
+                  info.audioCodec = info.audioCodec || nestedCodecInfo.audioCodec || null;
+                  info.audioCodecId = info.audioCodecId || nestedCodecInfo.audioCodecId || null;
+                  if (nestedCodecInfo.codec || nestedCodecInfo.audioCodec) info.confidence = 'medium';
+                }
+              }
+            }
+          } catch (nestedError) {
+            this.log(`Analisi riferimento HLS fallita: ${nestedError}`, 'warn');
+          }
+        }
+      }
+
       // Analizza i byte per rilevare codec
       const codecFromBytes = analyzeVideoBytes(data);
       if (codecFromBytes && !info.videoCodec) {
         info.videoCodec = codecFromBytes.codec;
+        info.videoCodecId = codecFromBytes.codecId || null;
         info.videoProfile = codecFromBytes.profile || null;
         info.videoLevel = codecFromBytes.level || null;
         info.videoBitDepth = codecFromBytes.bitDepth || null;
@@ -1284,6 +1523,12 @@ class StreamInfoService {
         this.log(`✓ Video Codec (da analisi binaria): ${codecFromBytes.codec}`);
         if (codecFromBytes.profile) this.log(`  Profilo: ${codecFromBytes.profile}`);
         if (codecFromBytes.level) this.log(`  Livello: ${codecFromBytes.level}`);
+      }
+
+      if (codecFromBytes?.audioCodec && !info.audioCodec) {
+        info.audioCodec = codecFromBytes.audioCodec;
+        info.audioCodecId = codecFromBytes.audioCodecId || null;
+        this.log(`✓ Audio Codec (da analisi binaria): ${codecFromBytes.audioCodec}`);
       }
 
       // Rileva container dai magic bytes
@@ -1504,13 +1749,13 @@ class StreamInfoService {
     // Prima raccoglie info sincrone
     let info = this.collectInfo(video, hls, mpegts, url);
 
-    // Se non abbiamo rilevato il video codec, prova l'analisi diretta
-    // MA NON per file progressivi (mkv, mp4, etc.) perché il fetch può interferire con la riproduzione
+    // Se non abbiamo rilevato il video codec, prova l'analisi diretta.
+    // Per HLS leggiamo manifest/segmento iniziale; evitiamo invece file progressivi
+    // perché il fetch parallelo può interferire con provider che limitano le connessioni.
     const lowerUrl = url.toLowerCase();
     const isProgressiveFile = lowerUrl.match(/\.(mkv|mp4|m4v|avi|webm|mov|flv)(\?|$)/);
-    const isHlsStream = lowerUrl.includes('.m3u8');
 
-    if (!info.videoCodec && url && !isHlsStream && !isProgressiveFile) {
+    if (!info.videoCodec && url && !isProgressiveFile) {
       this.log('Codec non rilevato, tentativo analisi diretta stream...');
       try {
         const directInfo = await this.analyzeStreamDirectly(url);
