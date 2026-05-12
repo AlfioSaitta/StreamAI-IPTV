@@ -4,7 +4,7 @@ This file provides context and guidelines for GitHub Copilot coding agent when w
 
 ## Project Overview
 
-**StreamAI IPTV** is a next-generation IPTV player built with React 19, TypeScript, Electron, and Tailwind CSS. It features AI-powered recommendations using Google Gemini and supports cross-platform deployment (Linux, Windows, Android via Capacitor).
+**StreamAI IPTV** is a next-generation IPTV player built with React 18, TypeScript, Electron, and Tailwind CSS. It features AI-powered recommendations using Google Gemini and supports cross-platform deployment (Linux, Windows, Android via Capacitor).
 
 **Key Capabilities:**
 - Live TV streaming, Movies (VOD), and Series with advanced playback features
@@ -16,7 +16,7 @@ This file provides context and guidelines for GitHub Copilot coding agent when w
 
 ## Tech Stack
 
-- **Framework:** React 19, TypeScript, Vite
+- **Framework:** React 18, TypeScript, Vite
 - **Desktop Runtime:** Electron (with custom HEVC codec support via BranchBit)
 - **Mobile Runtime:** Capacitor 7 (Android)
 - **Styling:** Tailwind CSS (dark theme by default)

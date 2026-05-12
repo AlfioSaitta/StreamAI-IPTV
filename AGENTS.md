@@ -6,7 +6,7 @@ Questo file serve come guida e contesto per gli agenti AI che collaborano allo s
 **StreamAI IPTV** è un client IPTV avanzato che integra l'Intelligenza Artificiale (Google Gemini) per offrire raccomandazioni contestuali. È un'applicazione ibrida cross-platform.
 
 ## 🛠 Tech Stack
-- **Framework:** React 19, TypeScript, Vite
+- **Framework:** React 18, TypeScript, Vite
 - **Desktop Runtime:** Electron (con supporto HEVC custom)
 - **Mobile Runtime:** Capacitor 7 (Android)
 - **Styling:** Tailwind CSS
