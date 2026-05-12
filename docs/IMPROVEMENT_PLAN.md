@@ -268,20 +268,20 @@ npm run analyze
 
 **File principali:** `services/deviceDiscovery.ts`, `components/CastDevicePicker.tsx`.
 
-- [ ] Introdurre `AbortController` per annullare scansioni.
-- [ ] Limitare concorrenza scansione subnet `/24`.
-- [ ] Aggiungere timeout configurabili per probe.
-- [ ] Deduplicare dispositivi per IP/protocollo/nome.
-- [ ] Cache TTL dei dispositivi trovati.
-- [ ] Mostrare progress UI durante scansione.
-- [ ] Evitare di considerare `WebSocket.onerror` come device trovato senza probe ulteriore.
-- [ ] Preferire risultati mDNS/SSDP/DIAL affidabili quando disponibili.
+- [x] Introdurre `AbortController` per annullare scansioni.
+- [x] Limitare concorrenza scansione subnet `/24`.
+- [x] Aggiungere timeout configurabili per probe.
+- [x] Deduplicare dispositivi per IP/protocollo/nome.
+- [x] Cache TTL dei dispositivi trovati.
+- [x] Mostrare progress UI durante scansione.
+- [x] Evitare di considerare `WebSocket.onerror` come device trovato senza probe ulteriore.
+- [x] Preferire risultati SSDP/DIAL affidabili quando disponibili e usare probe TCP/HTTP nativi Electron.
 
 **Criteri di completamento:**
 
-- [ ] Scansione cancellabile da UI.
-- [ ] UI non bloccata durante discovery.
-- [ ] Meno falsi positivi.
+- [x] Scansione cancellabile da UI.
+- [x] UI non bloccata durante discovery.
+- [x] Meno falsi positivi.
 
 ---
 
@@ -289,12 +289,13 @@ npm run analyze
 
 **File principali:** `hooks/useCastSession.ts`, `services/castService.ts`, `services/deviceDiscovery.ts`, `components/CastDevicePicker.tsx`.
 
-- [ ] Stato connessione più esplicito: connecting, connected, buffering, error, disconnected.
-- [ ] Retry controllato per cast load.
-- [ ] Timeout per connect/load/control.
-- [ ] Messaggi diversi per device offline, protocollo non supportato, stream rifiutato.
-- [ ] UI `Nessun dispositivo trovato` con suggerimenti LAN.
-- [ ] Test manuali su Chromecast/DLNA se disponibili.
+- [x] Stato connessione più esplicito: connecting, connected, buffering, error, disconnected.
+- [x] Retry controllato per cast load.
+- [x] Timeout per connect/load/control.
+- [x] Messaggi diversi per device offline, protocollo non supportato, stream rifiutato.
+- [x] UI `Nessun dispositivo trovato` con suggerimenti LAN.
+- [x] Implementati handler IPC Electron reali per discovery, connect, load, control e disconnect.
+- [ ] Da verificare: test manuali su Chromecast/DLNA reali se disponibili.
 
 ---
 
@@ -302,11 +303,20 @@ npm run analyze
 
 **File principali:** `services/advertisingService.js`, `main.js`.
 
-- [ ] Gestire errori mDNS/SSDP senza crash.
-- [ ] Evitare porte hardcoded non configurabili se occupate.
-- [ ] Retry o fallback porta per HTTP DIAL.
-- [ ] Log con livelli e modalità debug.
-- [ ] Verificare shutdown pulito su `will-quit`.
+- [x] Gestire errori mDNS/SSDP senza crash.
+- [x] Evitare porte hardcoded non configurabili se occupate (`STREAMAI_ADVERTISING_PORT`).
+- [x] Retry o fallback porta per HTTP DIAL.
+- [x] Log espliciti e warning non fatali per dipendenze opzionali.
+- [x] Verificare shutdown pulito su `will-quit` per advertising, WebSocket, UDP e sessione cast.
+
+**Verifiche P3 2026-05-12:**
+
+- [x] `npm run typecheck` OK.
+- [x] `npm run build` OK.
+- [x] `npm run check` OK.
+- [x] `node --check main.js`, `node --check preload.js`, `node --check services/advertisingService.js` OK.
+- [x] Smoke Electron `timeout 20s npm run start`: avvio WebSocket, advertising HTTP/mDNS/SSDP e shutdown senza `Uncaught Exception`.
+- [ ] Da verificare: test su Chromecast/DLNA fisici in LAN reale.
 
 ---
 

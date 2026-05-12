@@ -12,12 +12,16 @@
  */
 
 const { ipcMain, app } = require('electron');
-const bonjour = require('bonjour');
-const { Server: SsdpServer } = require('node-ssdp');
 const http = require('http');
 const os = require('os');
 
-const PORT = 8090; // Port for our local HTTP and DIAL server
+let bonjour = null;
+let SsdpServer = null;
+try { bonjour = require('bonjour'); } catch (error) { console.warn('[Advertise] bonjour non disponibile:', error.message); }
+try { ({ Server: SsdpServer } = require('node-ssdp')); } catch (error) { console.warn('[Advertise] node-ssdp non disponibile:', error.message); }
+
+const DEFAULT_PORT = Number(process.env.STREAMAI_ADVERTISING_PORT || 8090);
+const MAX_PORT_ATTEMPTS = 5;
 const APP_NAME = 'StreamAI IPTV';
 
 class AdvertisingService {
@@ -27,6 +31,7 @@ class AdvertisingService {
     this.httpServer = null;
     this.isRunning = false;
     this.playbackState = {};
+    this.port = DEFAULT_PORT;
 
     ipcMain.on('update-playback-status', (_, state) => {
       this.playbackState = state;
@@ -49,18 +54,18 @@ class AdvertisingService {
     return '127.0.0.1';
   }
 
-  start() {
+  async start() {
     if (this.isRunning) {
       console.log('[Advertise] Service is already running.');
       return;
     }
 
     try {
-      this.startHttpServer();
+      await this.startHttpServer();
       this.startMdns();
       this.startSsdp();
       this.isRunning = true;
-      console.log('[Advertise] Service started successfully.');
+      console.log(`[Advertise] Service started successfully on port ${this.port}.`);
     } catch (error) {
       console.error('[Advertise] Failed to start advertising service:', error);
       this.stop();
@@ -68,27 +73,29 @@ class AdvertisingService {
   }
 
   stop() {
-    if (!this.isRunning) return;
-
     console.log('[Advertise] Stopping service...');
     if (this.bonjourInstance) {
-      this.bonjourInstance.unpublishAll(() => {
-        if (this.bonjourInstance) {
-          this.bonjourInstance.destroy();
+      try {
+        this.bonjourInstance.unpublishAll(() => {
+          try { this.bonjourInstance?.destroy(); } catch {}
           this.bonjourInstance = null;
-        }
-        console.log('[Advertise] mDNS service stopped.');
-      });
+          console.log('[Advertise] mDNS service stopped.');
+        });
+      } catch (error) {
+        console.warn('[Advertise] mDNS stop failed:', error.message);
+        try { this.bonjourInstance.destroy(); } catch {}
+        this.bonjourInstance = null;
+      }
     }
 
     if (this.ssdpServer) {
-      this.ssdpServer.stop();
+      try { this.ssdpServer.stop(); } catch (error) { console.warn('[Advertise] SSDP stop failed:', error.message); }
       this.ssdpServer = null;
       console.log('[Advertise] SSDP service stopped.');
     }
 
     if (this.httpServer) {
-      this.httpServer.close();
+      try { this.httpServer.close(); } catch (error) { console.warn('[Advertise] HTTP stop failed:', error.message); }
       this.httpServer = null;
       console.log('[Advertise] HTTP server stopped.');
     }
@@ -97,13 +104,18 @@ class AdvertisingService {
   }
 
   startMdns() {
+    if (!bonjour) {
+      console.warn('[Advertise] mDNS disabilitato: dipendenza bonjour assente.');
+      return;
+    }
     this.bonjourInstance = bonjour();
-    
+    this.bonjourInstance.on?.('error', error => console.warn('[Advertise] mDNS error:', error.message));
+
     // Advertise as an AirPlay device
     this.bonjourInstance.publish({
       name: APP_NAME,
       type: 'airplay',
-      port: PORT,
+      port: this.port,
       txt: {
         deviceid: 'AA:BB:CC:DD:EE:FF', // Fake MAC address
         features: '0x5A7FFFF7,0x1E', // Features supported by many AirPlay receivers
@@ -117,11 +129,15 @@ class AdvertisingService {
   }
 
   startSsdp() {
+    if (!SsdpServer) {
+      console.warn('[Advertise] SSDP/DIAL disabilitato: dipendenza node-ssdp assente.');
+      return;
+    }
     const ip = this.getLocalIpAddress();
     const usn = `uuid:${app.getName()}-${app.getVersion()}`;
     
     this.ssdpServer = new SsdpServer({
-      location: `http://${ip}:${PORT}/dial.xml`,
+      location: `http://${ip}:${this.port}/dial.xml`,
       udn: usn,
       ssdpSig: `${os.platform()}/${os.release()} UPnP/1.1 ${app.getName()}/${app.getVersion()}`,
       suppressRootDeviceAdvertisements: false,
@@ -129,18 +145,24 @@ class AdvertisingService {
 
     // DIAL service
     this.ssdpServer.addUSN('urn:dial-multiscreen-org:service:dial:1');
-    
-    this.ssdpServer.start();
-    console.log(`[Advertise] SSDP/DIAL service started. Location: http://${ip}:${PORT}/dial.xml`);
+    this.ssdpServer.on?.('error', error => console.warn('[Advertise] SSDP error:', error.message));
+
+    try {
+      this.ssdpServer.start();
+      console.log(`[Advertise] SSDP/DIAL service started. Location: http://${ip}:${this.port}/dial.xml`);
+    } catch (error) {
+      console.warn('[Advertise] SSDP start failed:', error.message);
+      this.ssdpServer = null;
+    }
   }
 
   startHttpServer() {
     const ip = this.getLocalIpAddress();
 
-    this.httpServer = http.createServer((req, res) => {
+    const createServer = () => http.createServer((req, res) => {
       if (req.url === '/dial.xml') {
         this.handleDialXml(req, res);
-      } else if (req.url === `/apps/${APP_NAME}`) {
+      } else if (req.url === '/apps/' || req.url === `/apps/${APP_NAME}` || req.url === `/apps/${encodeURIComponent(APP_NAME)}`) {
         this.handleDialApp(req, res);
       } else {
         res.writeHead(404, { 'Content-Type': 'text/plain' });
@@ -148,8 +170,27 @@ class AdvertisingService {
       }
     });
 
-    this.httpServer.listen(PORT, ip, () => {
-      console.log(`[Advertise] HTTP server listening on http://${ip}:${PORT}`);
+    return new Promise((resolve, reject) => {
+      let attempts = 0;
+      const tryListen = () => {
+        const port = DEFAULT_PORT + attempts;
+        const server = createServer();
+        server.once('error', (error) => {
+          if (error.code === 'EADDRINUSE' && attempts < MAX_PORT_ATTEMPTS - 1) {
+            attempts += 1;
+            tryListen();
+            return;
+          }
+          reject(error);
+        });
+        server.listen(port, ip, () => {
+          this.port = port;
+          this.httpServer = server;
+          console.log(`[Advertise] HTTP server listening on http://${ip}:${port}`);
+          resolve();
+        });
+      };
+      tryListen();
     });
   }
 
@@ -162,28 +203,28 @@ class AdvertisingService {
           <minor>0</minor>
         </specVersion>
         <device>
-          <deviceType>urn:schemas-upnp-org:device:dail:1</deviceType>
+          <deviceType>urn:schemas-upnp-org:device:dial:1</deviceType>
           <friendlyName>${APP_NAME}</friendlyName>
           <manufacturer>StreamAI</manufacturer>
           <modelName>StreamAI Desktop Player</modelName>
           <UDN>uuid:${app.getName()}-${app.getVersion()}</UDN>
           <serviceList>
             <service>
-              <serviceType>urn:schemas-upnp-org:service:dail:1</serviceType>
-              <serviceId>urn:upnp-org:serviceId:dail</serviceId>
+              <serviceType>urn:schemas-upnp-org:service:dial:1</serviceType>
+              <serviceId>urn:upnp-org:serviceId:dial</serviceId>
               <controlURL>/ssdp/notfound</controlURL>
               <eventSubURL>/ssdp/notfound</eventSubURL>
               <SCPDURL>/ssdp/notfound</SCPDURL>
             </service>
           </serviceList>
-          <application-URL>http://${this.getLocalIpAddress()}:${PORT}/apps/</application-URL>
+          <application-URL>http://${this.getLocalIpAddress()}:${this.port}/apps/</application-URL>
         </device>
       </root>
     `.trim();
 
     res.writeHead(200, {
       'Content-Type': 'application/xml',
-      'Application-URL': `http://${this.getLocalIpAddress()}:${PORT}/apps/`,
+      'Application-URL': `http://${this.getLocalIpAddress()}:${this.port}/apps/`,
     });
     res.end(dialXml);
   }
@@ -216,7 +257,6 @@ class AdvertisingService {
           <name>${APP_NAME}</name>
           <options allowStop="true"/>
           <state>${state}</state>
-          ${this.playbackState.isPlaying ? `<link rel="run" href="run"/>` : ''}
         </service>
       `.trim();
       res.writeHead(200, { 'Content-Type': 'application/xml' });

@@ -19,8 +19,8 @@ Si distingue per l'integrazione con **Google Gemini AI**, che offre raccomandazi
 
 ### 📡 Networking & Casting
 - **Casting Universale**: Trasmissione su Chromecast, dispositivi DLNA/UPnP e AirPlay.
-- **Device Discovery**: Scansione profonda della rete locale (/24 subnet) per trovare tutti i dispositivi compatibili.
-- **Advertising Service**: L'app si annuncia sulla rete tramite mDNS (Bonjour), SSDP e DIAL, rendendosi visibile come target di casting per altre app.
+- **Device Discovery**: Scansione rete locale cancellabile, con concorrenza limitata, progress UI, cache TTL, deduplica IP/protocollo e minori falsi positivi.
+- **Advertising Service**: L'app si annuncia sulla rete tramite mDNS (Bonjour), SSDP e DIAL con porta configurabile/fallback, rendendosi visibile come target di casting per altre app.
 - **Controllo Remoto**: Architettura pronta per il controllo remoto tramite WebSocket e API REST locali.
 
 ### 🤖 AI Assistant
@@ -240,6 +240,9 @@ STREAMAI_INSECURE_ELECTRON=1
 
 # Abilita debug WebView Android durante lo sviluppo
 STREAMAI_ANDROID_DEBUG=true
+
+# Porta base per HTTP DIAL/advertising LAN Electron (fallback automatico se occupata)
+STREAMAI_ADVERTISING_PORT=8090
 ```
 
 ---
@@ -311,6 +314,22 @@ Nella pagina **Impostazioni → Catalogo contenuti** sono disponibili:
 - **Frequenza aggiornamento**: 1 ora, 3 ore, 6 ore, 12 ore o 24 ore.
 
 Lo stato dell'ultimo aggiornamento riuscito e dell'eventuale ultimo errore viene salvato nel profilo. Il refresh automatico non parte se il browser risulta offline e usa un lock interno per evitare aggiornamenti concorrenti.
+
+---
+
+## 📡 Discovery e casting LAN
+
+Il menu **Trasmetti** usa discovery progressivo e cancellabile:
+
+- risultati SSDP/DIAL quando disponibili;
+- probe nativi Electron su porte Chromecast/DIAL/DLNA/AirPlay;
+- fallback browser con timeout brevi;
+- cache temporanea dei dispositivi trovati per evitare scansioni ripetute;
+- pulsante **Annulla** durante la scansione e inserimento IP manuale.
+
+Gli stati di cast distinguono connessione, buffering, errore e disconnessione. In caso di fallimento viene mostrato un messaggio nella UI e l'URL viene copiato negli appunti come fallback pratico per VLC/Kodi/IPTV player.
+
+Se la porta DIAL locale è occupata, Electron prova automaticamente le porte successive a partire da `STREAMAI_ADVERTISING_PORT`.
 
 ---
 

@@ -62,9 +62,26 @@ export interface DeviceDiscoveryState {
   isSearching: boolean;
   devices: DiscoveredDevice[];
   error: string | null;
+  progress: {
+    phase: string;
+    scannedHosts: number;
+    totalHosts: number;
+  };
+  lastUpdatedAt: number | null;
 }
 
 type DeviceCallback = (state: DeviceDiscoveryState) => void;
+
+const DISCOVERY_TIMEOUT_MS = 20000;
+const DEVICE_CACHE_TTL_MS = 2 * 60 * 1000;
+const SUBNET_CONCURRENCY = 16;
+const PROBE_TIMEOUT_MS = 900;
+const MANUAL_DEVICE_ID = 'manual';
+
+interface CachedDiscovery {
+  timestamp: number;
+  devices: DiscoveredDevice[];
+}
 
 class DeviceDiscoveryService {
   private devices: Map<string, DiscoveredDevice> = new Map();
@@ -73,6 +90,10 @@ class DeviceDiscoveryService {
   private searchTimeout: number | null = null;
   private error: string | null = null;
   private electronUnsubscribe: (() => void) | null = null;
+  private abortController: AbortController | null = null;
+  private cache: CachedDiscovery | null = null;
+  private progress = { phase: 'Inattivo', scannedHosts: 0, totalHosts: 0 };
+  private discoveryRunId = 0;
 
   /**
    * Check if Electron API is available
@@ -98,6 +119,8 @@ class DeviceDiscoveryService {
       isSearching: this.isSearching,
       devices: Array.from(this.devices.values()),
       error: this.error,
+      progress: this.progress,
+      lastUpdatedAt: this.cache?.timestamp || null,
     };
   }
 
@@ -106,16 +129,101 @@ class DeviceDiscoveryService {
     this.callbacks.forEach(cb => cb(state));
   }
 
+  private ensureNotAborted() {
+    if (this.abortController?.signal.aborted) {
+      throw new DOMException('Discovery aborted', 'AbortError');
+    }
+  }
+
+  private updateProgress(phase: string, scannedDelta = 0, totalHosts?: number) {
+    this.progress = {
+      phase,
+      scannedHosts: this.progress.scannedHosts + scannedDelta,
+      totalHosts: totalHosts ?? this.progress.totalHosts,
+    };
+    this.notify();
+  }
+
+  private getDeviceKey(device: DiscoveredDevice): string {
+    if (device.id === MANUAL_DEVICE_ID) return MANUAL_DEVICE_ID;
+    const protocols = (device.services || []).map(service => service.protocol).sort().join('+') || 'unknown';
+    return `${device.ip}:${protocols}`;
+  }
+
+  private addOrMergeDevice(device: DiscoveredDevice) {
+    if (device.id === MANUAL_DEVICE_ID) {
+      this.devices.set(MANUAL_DEVICE_ID, device);
+      return;
+    }
+
+    const key = this.getDeviceKey(device);
+    const existingEntry = Array.from(this.devices.entries()).find(([, existing]) => this.getDeviceKey(existing) === key || (existing.ip === device.ip && existing.type === device.type));
+
+    if (!existingEntry) {
+      this.devices.set(device.id, device);
+      return;
+    }
+
+    const [existingId, existing] = existingEntry;
+    const servicesByKey = new Map<string, CastService>();
+    [...(existing.services || []), ...(device.services || [])].forEach(service => {
+      servicesByKey.set(`${service.protocol}:${service.port}`, service);
+    });
+
+    this.devices.set(existingId, {
+      ...existing,
+      ...device,
+      id: existing.id,
+      name: existing.name.includes('(') && !device.name.includes('(') ? device.name : existing.name,
+      services: Array.from(servicesByKey.values()).sort((a, b) => a.priority - b.priority),
+    });
+  }
+
+  private async fetchWithTimeout(url: string, timeoutMs = PROBE_TIMEOUT_MS, init: RequestInit = {}): Promise<Response> {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+    const parentSignal = this.abortController?.signal;
+    const onAbort = () => controller.abort();
+    parentSignal?.addEventListener('abort', onAbort, { once: true });
+
+    try {
+      return await fetch(url, { ...init, signal: controller.signal });
+    } finally {
+      window.clearTimeout(timeout);
+      parentSignal?.removeEventListener('abort', onAbort);
+    }
+  }
+
   /**
    * Start searching for devices
    */
-  async startDiscovery(): Promise<void> {
-    if (this.isSearching) return;
+  async startDiscovery(forceRefresh = false): Promise<void> {
+    if (this.isSearching) {
+      this.stopDiscovery();
+      return;
+    }
+
+    if (!forceRefresh && this.cache && Date.now() - this.cache.timestamp < DEVICE_CACHE_TTL_MS) {
+      this.devices.clear();
+      this.cache.devices.forEach(device => this.addOrMergeDevice(device));
+      this.addManualEntryOption();
+      this.progress = { phase: 'Risultati da cache recente', scannedHosts: this.progress.totalHosts, totalHosts: this.progress.totalHosts };
+      this.error = null;
+      this.notify();
+      return;
+    }
 
     this.isSearching = true;
     this.error = null;
     this.devices.clear();
+    this.progress = { phase: 'Avvio ricerca dispositivi', scannedHosts: 0, totalHosts: 0 };
+    this.abortController = new AbortController();
+    const runId = ++this.discoveryRunId;
     this.notify();
+
+    this.searchTimeout = window.setTimeout(() => {
+      this.stopDiscovery();
+    }, DISCOVERY_TIMEOUT_MS);
 
     console.log('[Discovery] Starting device discovery...');
     console.log('[Discovery] Electron API available:', this.isElectron);
@@ -131,18 +239,35 @@ class DeviceDiscoveryService {
 
       // Always add manual entry option
       this.addManualEntryOption();
+      this.cache = {
+        timestamp: Date.now(),
+        devices: Array.from(this.devices.values()).filter(device => device.id !== MANUAL_DEVICE_ID),
+      };
 
     } catch (err) {
-      console.error('[Discovery] Error:', err);
-      this.error = 'Errore durante la ricerca dispositivi';
+      if (runId === this.discoveryRunId && !this.abortController?.signal.aborted) {
+        console.error('[Discovery] Error:', err);
+        this.error = 'Errore durante la ricerca dispositivi';
+      }
+    } finally {
+      if (runId === this.discoveryRunId) {
+        this.isSearching = false;
+        if (this.searchTimeout) {
+          window.clearTimeout(this.searchTimeout);
+          this.searchTimeout = null;
+        }
+        if (this.electronUnsubscribe) {
+          this.electronUnsubscribe();
+          this.electronUnsubscribe = null;
+        }
+        this.abortController = null;
+        this.progress = {
+          ...this.progress,
+          phase: this.error ? 'Ricerca terminata con errori' : 'Ricerca completata',
+        };
+        this.notify();
+      }
     }
-
-    // Stop after timeout
-    this.searchTimeout = window.setTimeout(() => {
-      this.stopDiscovery();
-    }, 30000); // Increased to 30 seconds for full scan
-
-    this.notify();
   }
 
   /**
@@ -151,28 +276,9 @@ class DeviceDiscoveryService {
   private async discoverViaElectron(): Promise<void> {
     if (!window.electronAPI) return;
 
-    // Track IPs to avoid duplicates
-    const foundIPs = new Set<string>();
-
     // Subscribe to incremental updates
     this.electronUnsubscribe = window.electronAPI.onDeviceFound((device) => {
-      // Deduplicate by IP, prefer port 8008
-      if (foundIPs.has(device.ip)) {
-        // Check if we should replace existing device
-        const existingKey = Array.from(this.devices.keys()).find(k => k.startsWith(device.ip + ':'));
-        if (existingKey) {
-          const existing = this.devices.get(existingKey);
-          // Only replace if new device has port 8008 and existing doesn't
-          if (device.port === 8008 && existing?.port !== 8008) {
-            this.devices.delete(existingKey);
-          } else {
-            return; // Skip duplicate
-          }
-        }
-      }
-
-      foundIPs.add(device.ip);
-      this.devices.set(device.id, device);
+      this.addOrMergeDevice(device);
       this.notify();
       console.log('[Discovery] Found via Electron:', device.name);
     });
@@ -182,9 +288,7 @@ class DeviceDiscoveryService {
       const devices = await window.electronAPI.discoverDevices();
 
       for (const device of devices) {
-        if (!this.devices.has(device.id)) {
-          this.devices.set(device.id, device);
-        }
+        this.addOrMergeDevice(device);
       }
 
       this.notify();
@@ -299,97 +403,73 @@ class DeviceDiscoveryService {
    * Scan a network range using WebSocket probing
    */
   private async scanNetworkRange(base: string): Promise<void> {
-    const deviceSignatures = [
-      { port: 8008, type: 'chromecast' as const, name: 'Chromecast' },
-      { port: 9080, type: 'dlna' as const, name: 'DLNA' },
-      { port: 8080, type: 'dlna' as const, name: 'Media Server' },
-      { port: 7000, type: 'smarttv' as const, name: 'Samsung TV' },
-      { port: 8001, type: 'smarttv' as const, name: 'Samsung TV' },
-      { port: 3000, type: 'smarttv' as const, name: 'LG TV' },
-    ];
+    const ips = Array.from({ length: 254 }, (_, index) => `${base}.${index + 1}`);
+    this.updateProgress(`Scansione subnet ${base}.0/24`, 0, this.progress.totalHosts + ips.length);
 
-    const batchSize = 25;
-
-    for (let startIP = 1; startIP < 255; startIP += batchSize) {
-      const batch: Promise<void>[] = [];
-
-      for (let i = startIP; i < Math.min(startIP + batchSize, 255); i++) {
-        const ip = `${base}.${i}`;
-
-        for (const sig of deviceSignatures) {
-          batch.push(this.probeDeviceWS(ip, sig.port, sig.type, sig.name));
-        }
+    let cursor = 0;
+    const workers = Array.from({ length: SUBNET_CONCURRENCY }, async () => {
+      while (cursor < ips.length && !this.abortController?.signal.aborted) {
+        const ip = ips[cursor++];
+        await this.probeLikelyDevice(ip);
+        this.updateProgress(`Scansione ${base}.0/24`, 1);
       }
+    });
 
-      await Promise.race([
-        Promise.allSettled(batch),
-        new Promise(resolve => setTimeout(resolve, 2500))
-      ]);
-    }
+    await Promise.allSettled(workers);
   }
 
   /**
-   * Probe device using WebSocket
+   * Probe device using HTTP endpoints. WebSocket errors are intentionally ignored
+   * because a failed websocket handshake is not evidence of a cast-capable device.
    */
-  private async probeDeviceWS(
-    ip: string,
-    port: number,
-    type: DiscoveredDevice['type'],
-    defaultName: string
-  ): Promise<void> {
-    const deviceId = `${ip}:${port}`;
-    if (this.devices.has(deviceId)) return;
+  private async probeLikelyDevice(ip: string): Promise<void> {
+    this.ensureNotAborted();
 
-    return new Promise((resolve) => {
-      const ws = new WebSocket(`ws://${ip}:${port}`);
-      const timer = setTimeout(() => {
-        ws.close();
-        resolve();
-      }, 800);
+    const probes = [
+      { path: 'http://{ip}:8008/setup/eureka_info', port: 8008, type: 'chromecast' as const, protocol: 'castv2' as const, priority: 1, name: 'Chromecast' },
+      { path: 'http://{ip}:8008/apps/YouTube', port: 8008, type: 'chromecast' as const, protocol: 'dial' as const, priority: 3, name: 'DIAL Receiver' },
+      { path: 'http://{ip}:9080/', port: 9080, type: 'dlna' as const, protocol: 'dlna' as const, priority: 4, name: 'DLNA Renderer' },
+      { path: 'http://{ip}:8080/', port: 8080, type: 'dlna' as const, protocol: 'dlna' as const, priority: 5, name: 'Media Renderer' },
+      { path: 'http://{ip}:7000/', port: 7000, type: 'smarttv' as const, protocol: 'airplay' as const, priority: 7, name: 'AirPlay Receiver' },
+    ];
 
-      const addDevice = async () => {
-        clearTimeout(timer);
-        ws.close();
+    for (const probe of probes) {
+      if (this.abortController?.signal.aborted) return;
+      try {
+        const url = probe.path.replace('{ip}', ip);
+        let response: Response | null = null;
+        try {
+          response = await this.fetchWithTimeout(url, PROBE_TIMEOUT_MS, { method: 'GET', mode: 'cors' });
+        } catch {
+          response = await this.fetchWithTimeout(url, PROBE_TIMEOUT_MS, { method: 'GET', mode: 'no-cors' });
+        }
+        let name = `${probe.name} (${ip})`;
+        let manufacturer: string | undefined;
+        let model: string | undefined;
 
-        let deviceName = `${defaultName} (${ip})`;
-
-        // Try to get real device name for Chromecast
-        if (port === 8008) {
-          try {
-            const response = await fetch(`http://${ip}:8008/setup/eureka_info`, {
-              signal: AbortSignal.timeout(2000),
-            });
-            if (response.ok) {
-              const info = await response.json();
-              if (info.name) {
-                deviceName = info.name;
-              }
-            }
-          } catch {}
+        if (probe.port === 8008 && response.ok && response.type !== 'opaque') {
+          const info = await response.json().catch(() => null);
+          name = info?.name || info?.device_info?.name || name;
+          manufacturer = info?.manufacturer;
+          model = info?.model_name || info?.model;
         }
 
-        const device: DiscoveredDevice = {
-          id: deviceId,
-          name: deviceName,
-          type,
+        this.addOrMergeDevice({
+          id: `${ip}:${probe.protocol}:${probe.port}`,
+          name,
+          type: probe.type,
           ip,
-          port,
-          services: [{
-            protocol: type === 'chromecast' ? 'castv2' : 'dlna',
-            port,
-            priority: type === 'chromecast' ? 1 : 4,
-            available: true,
-          }],
-        };
-
-        this.devices.set(deviceId, device);
+          port: probe.port,
+          manufacturer,
+          model,
+          services: [{ protocol: probe.protocol, port: probe.port, priority: probe.priority, available: true }],
+        });
         this.notify();
-        resolve();
-      };
-
-      ws.onopen = addDevice;
-      ws.onerror = addDevice; // Error might mean HTTP service (good for us)
-    });
+        return;
+      } catch {
+        // Expected for most IP/port combinations.
+      }
+    }
   }
 
   /**
@@ -397,6 +477,8 @@ class DeviceDiscoveryService {
    */
   stopDiscovery() {
     this.isSearching = false;
+    this.discoveryRunId += 1;
+    this.abortController?.abort();
 
     if (this.searchTimeout) {
       window.clearTimeout(this.searchTimeout);
@@ -440,7 +522,7 @@ class DeviceDiscoveryService {
         if (devices && devices.length > 0) {
           // Use the first found device
           const foundDevice = devices[0];
-          this.devices.set(foundDevice.id, foundDevice);
+          this.addOrMergeDevice(foundDevice);
           this.notify();
           console.log('[Discovery] Manual device found:', foundDevice.name);
           return foundDevice;
@@ -451,15 +533,16 @@ class DeviceDiscoveryService {
     }
 
     // Fallback: add device without verification
+    const services = await this.probeDeviceServices(ip).catch(() => []);
     const device: DiscoveredDevice = {
       id: `manual-${ip}`,
       name: name || `Dispositivo (${ip})`,
-      type: 'unknown',
+      type: services.some(service => service.protocol === 'castv2') ? 'chromecast' : services.some(service => service.protocol === 'dlna') ? 'dlna' : 'unknown',
       ip,
-      port,
-      services: [],
+      port: services[0]?.port || port,
+      services,
     };
-    this.devices.set(device.id, device);
+    this.addOrMergeDevice(device);
     this.notify();
     return device;
   }
@@ -587,16 +670,10 @@ class DeviceDiscoveryService {
    */
   private async checkPortAvailable(ip: string, port: number): Promise<boolean> {
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 1000);
-
-      await fetch(`http://${ip}:${port}/`, {
+      await this.fetchWithTimeout(`http://${ip}:${port}/`, PROBE_TIMEOUT_MS, {
         method: 'HEAD',
         mode: 'no-cors',
-        signal: controller.signal,
       });
-
-      clearTimeout(timeout);
       return true;
     } catch {
       return false;
@@ -680,7 +757,7 @@ class DeviceDiscoveryService {
     // Create a simple HTML page that will cast the video
     const castHtml = `
 <!DOCTYPE html>
-<html>
+<html lang="it">
 <head>
   <meta charset="UTF-8">
   <title>Casting: ${title}</title>
@@ -808,9 +885,7 @@ class DeviceDiscoveryService {
           mode: 'no-cors',
         });
         return true;
-      } catch {
-        continue;
-      }
+      } catch {}
     }
     return false;
   }
@@ -868,9 +943,7 @@ class DeviceDiscoveryService {
           });
 
           return true;
-        } catch {
-          continue;
-        }
+        } catch {}
       }
     }
     return false;

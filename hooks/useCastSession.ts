@@ -15,10 +15,19 @@ interface CastStatus {
   error?: string;
 }
 
+interface CastIpcResult {
+  success?: boolean;
+  error?: string;
+  status?: Partial<CastStatus>;
+}
+
+export type CastConnectionState = 'disconnected' | 'connecting' | 'connected' | 'buffering' | 'error';
+
 interface UseCastSessionReturn {
   // Connection
   isConnected: boolean;
   isConnecting: boolean;
+  connectionState: CastConnectionState;
   device: DiscoveredDevice | null;
   connect: (device: DiscoveredDevice) => Promise<boolean>;
   disconnect: () => Promise<void>;
@@ -39,6 +48,11 @@ interface UseCastSessionReturn {
   error: string | null;
 }
 
+const CAST_CONNECT_TIMEOUT_MS = 8000;
+const CAST_LOAD_TIMEOUT_MS = 12000;
+const CAST_CONTROL_TIMEOUT_MS = 5000;
+const CAST_LOAD_RETRIES = 1;
+
 const initialStatus: CastStatus = {
   connected: false,
   playerState: 'IDLE',
@@ -55,7 +69,8 @@ export function useCastSession(): UseCastSessionReturn {
   const [device, setDevice] = useState<DiscoveredDevice | null>(null);
   const [status, setStatus] = useState<CastStatus>(initialStatus);
   const [error, setError] = useState<string | null>(null);
-  
+  const [connectionState, setConnectionState] = useState<CastConnectionState>('disconnected');
+
   // Refs
   const statusUnsubscribe = useRef<(() => void) | null>(null);
   const pollIntervalRef = useRef<number | null>(null);
@@ -64,6 +79,20 @@ export function useCastSession(): UseCastSessionReturn {
   // Electron API check
   const electronAPI = (window as any).electronAPI;
   const isElectron = platformService.isElectron && !!electronAPI;
+
+  const withTimeout = useCallback(async <T,>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> => {
+    let timeoutId: number | null = null;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<T>((_, reject) => {
+          timeoutId = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+        })
+      ]);
+    } finally {
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+    }
+  }, []);
 
   // Sync ref
   useEffect(() => {
@@ -84,6 +113,16 @@ export function useCastSession(): UseCastSessionReturn {
         deviceIp: device?.ip,
       }));
       setIsConnected(newStatus.connected);
+      if (newStatus.error) {
+        setError(newStatus.error);
+        setConnectionState('error');
+      } else if (!newStatus.connected) {
+        setConnectionState('disconnected');
+      } else if (newStatus.playerState === 'BUFFERING') {
+        setConnectionState('buffering');
+      } else {
+        setConnectionState('connected');
+      }
     });
 
     return () => {
@@ -114,6 +153,7 @@ export function useCastSession(): UseCastSessionReturn {
             deviceIp: device?.ip,
           }));
           setIsConnected(result.status.connected !== false);
+          setConnectionState(result.status.connected === false ? 'disconnected' : result.status.playerState === 'BUFFERING' ? 'buffering' : 'connected');
         }
       } catch (err) {
         console.log('[useCastSession] Status poll error:', err);
@@ -134,14 +174,19 @@ export function useCastSession(): UseCastSessionReturn {
 
   const connect = useCallback(async (targetDevice: DiscoveredDevice): Promise<boolean> => {
     setIsConnecting(true);
+    setConnectionState('connecting');
     setError(null);
 
     try {
       if (isElectron) {
         // Electron Native Cast
         console.log('[useCastSession] Connecting via Electron to:', targetDevice.ip);
-        const result = await electronAPI.castConnect({ ip: targetDevice.ip });
-        
+        const result = await withTimeout<CastIpcResult>(
+          electronAPI.castConnect({ ip: targetDevice.ip, port: targetDevice.services?.find(s => s.protocol === 'castv2')?.port }),
+          CAST_CONNECT_TIMEOUT_MS,
+          `Timeout connessione a ${targetDevice.name}`
+        );
+
         if (result.success) {
           setDevice(targetDevice);
           setIsConnected(true);
@@ -152,24 +197,28 @@ export function useCastSession(): UseCastSessionReturn {
             deviceName: targetDevice.name,
             deviceIp: targetDevice.ip,
           }));
+          setConnectionState('connected');
           return true;
         } else {
-          setError(result.error || 'Connessione fallita');
+          setError(result.error || 'Connessione fallita: dispositivo offline o protocollo non supportato');
+          setConnectionState('error');
           return false;
         }
       } else {
         // TODO: Implementare Capacitor Cast Plugin per Android/iOS
         console.warn('[useCastSession] Casting not supported on this platform yet');
         setError('Casting non disponibile su questa piattaforma');
+        setConnectionState('error');
         return false;
       }
     } catch (err) {
       setError((err as Error).message);
+      setConnectionState('error');
       return false;
     } finally {
       setIsConnecting(false);
     }
-  }, [isElectron]);
+  }, [isElectron, withTimeout]);
 
   const disconnect = useCallback(async () => {
     console.log('[useCastSession] Disconnecting...');
@@ -185,6 +234,7 @@ export function useCastSession(): UseCastSessionReturn {
     setDevice(null);
     setStatus(initialStatus);
     setError(null);
+    setConnectionState('disconnected');
   }, [isElectron]);
 
   const loadMedia = useCallback(async (url: string, title: string): Promise<boolean> => {
@@ -192,28 +242,44 @@ export function useCastSession(): UseCastSessionReturn {
 
     try {
       if (isElectron) {
-        const result = await electronAPI.castLoad({ mediaUrl: url, title });
-        if (result.success && result.status) {
-          setStatus(prev => ({ ...prev, ...result.status }));
-          return true;
-        } else {
-          setError(result.error || 'Caricamento fallito');
-          return false;
+        setConnectionState('buffering');
+        for (let attempt = 0; attempt <= CAST_LOAD_RETRIES; attempt++) {
+          const result = await withTimeout<CastIpcResult>(
+            electronAPI.castLoad({ mediaUrl: url, title }),
+            CAST_LOAD_TIMEOUT_MS,
+            'Timeout caricamento media sul dispositivo'
+          );
+          if (result.success && result.status) {
+            setStatus(prev => ({ ...prev, ...result.status }));
+            setConnectionState(result.status.playerState === 'BUFFERING' ? 'buffering' : 'connected');
+            return true;
+          }
+          if (attempt === CAST_LOAD_RETRIES) {
+            const message = result.error || 'Il dispositivo ha rifiutato lo stream o il formato non è supportato';
+            setError(message);
+            setConnectionState('error');
+            return false;
+          }
         }
       }
       return false;
     } catch (err) {
       setError((err as Error).message);
+      setConnectionState('error');
       return false;
     }
-  }, [isElectron]);
+  }, [isElectron, withTimeout]);
 
   const control = useCallback(async (action: string, value?: any) => {
     if (!isConnectedRef.current) return;
 
     try {
       if (isElectron) {
-        const result = await electronAPI.castControl({ action, value });
+        const result = await withTimeout<CastIpcResult>(
+          electronAPI.castControl({ action, value }),
+          CAST_CONTROL_TIMEOUT_MS,
+          `Timeout comando cast: ${action}`
+        );
         if (result.status) {
           setStatus(prev => ({ ...prev, ...result.status }));
         }
@@ -221,7 +287,7 @@ export function useCastSession(): UseCastSessionReturn {
     } catch (err) {
       console.error(`[useCastSession] ${action} error:`, err);
     }
-  }, [isElectron]);
+  }, [isElectron, withTimeout]);
 
   // Wrappers
   const play = useCallback(() => control('play'), [control]);
@@ -249,6 +315,7 @@ export function useCastSession(): UseCastSessionReturn {
   return {
     isConnected,
     isConnecting,
+    connectionState,
     device,
     connect,
     disconnect,

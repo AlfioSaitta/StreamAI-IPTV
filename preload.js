@@ -8,7 +8,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getLocalIPs: () => ipcRenderer.invoke('get-local-ips'),
   scanIp: (ipOrSubnet) => ipcRenderer.invoke('scan-ip', ipOrSubnet),
   probeDeviceServices: (ip) => ipcRenderer.invoke('probe-device-services', ip),
-  
+  onDeviceFound: (callback) => {
+    const handler = (event, device) => callback(device);
+    ipcRenderer.on('device-found', handler);
+    return () => ipcRenderer.removeListener('device-found', handler);
+  },
+
   // Funzioni di Cast
   castConnect: (options) => ipcRenderer.invoke('cast-connect', options),
   castLoad: (options) => ipcRenderer.invoke('cast-load', options),

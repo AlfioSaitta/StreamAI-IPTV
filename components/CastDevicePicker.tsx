@@ -28,10 +28,13 @@ const CastDevicePicker: React.FC<CastDevicePickerProps> = ({
     isSearching: false,
     devices: [],
     error: null,
+    progress: { phase: 'Inattivo', scannedHosts: 0, totalHosts: 0 },
+    lastUpdatedAt: null,
   });
   const [selectedDevice, setSelectedDevice] = useState<DiscoveredDevice | null>(null);
   const [isCasting, setIsCasting] = useState(false);
   const [castSuccess, setCastSuccess] = useState(false);
+  const [castError, setCastError] = useState<string | null>(null);
   const [manualIP, setManualIP] = useState('');
   const [showManualInput, setShowManualInput] = useState(false);
 
@@ -52,6 +55,7 @@ const CastDevicePicker: React.FC<CastDevicePickerProps> = ({
       setSelectedDevice(null);
       setIsCasting(false);
       setCastSuccess(false);
+      setCastError(null);
       setShowManualInput(false);
       setManualIP('');
     }
@@ -66,10 +70,11 @@ const CastDevicePicker: React.FC<CastDevicePickerProps> = ({
     setSelectedDevice(device);
     setIsCasting(true);
     setCastSuccess(false);
+    setCastError(null);
     onCastStart?.(device);
 
     try {
-      let success = false;
+      let success: boolean;
 
       // Use the callback if provided (new session-based approach)
       if (onDeviceSelect) {
@@ -85,10 +90,14 @@ const CastDevicePicker: React.FC<CastDevicePickerProps> = ({
         setTimeout(() => onClose(), 1500);
       } else {
         await navigator.clipboard.writeText(mediaUrl);
-        onCastError?.(`Impossibile connettersi. URL copiato negli appunti.`);
+        const message = `Impossibile connettersi a ${device.name}. URL copiato negli appunti.`;
+        setCastError(message);
+        onCastError?.(message);
       }
     } catch (err) {
-      onCastError?.(`Errore di connessione a ${device.name}`);
+      const message = err instanceof Error ? err.message : `Errore di connessione a ${device.name}`;
+      setCastError(message);
+      onCastError?.(message);
     } finally {
       setIsCasting(false);
     }
@@ -116,7 +125,11 @@ const CastDevicePicker: React.FC<CastDevicePickerProps> = ({
   }, [manualIP, handleDeviceSelect, onCastError]);
 
   const handleRefresh = useCallback(() => {
-    deviceDiscovery.startDiscovery();
+    deviceDiscovery.startDiscovery(true);
+  }, []);
+
+  const handleStopSearch = useCallback(() => {
+    deviceDiscovery.stopDiscovery();
   }, []);
 
   const getDeviceIcon = (type: DiscoveredDevice['type']) => {
@@ -164,9 +177,29 @@ const CastDevicePicker: React.FC<CastDevicePickerProps> = ({
         {/* Device list */}
         <div className="max-h-[350px] overflow-y-auto">
           {state.isSearching && (
-            <div className="flex items-center gap-3 px-4 py-3 text-blue-400">
-              <Loader2 className="w-5 h-5 animate-spin" />
-              <span className="text-sm">Ricerca dispositivi in corso...</span>
+            <div className="px-4 py-3 text-blue-400 border-b border-white/10 bg-blue-500/5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <Loader2 className="w-5 h-5 animate-spin flex-shrink-0" />
+                  <div className="min-w-0">
+                    <span className="text-sm font-medium block truncate">{state.progress.phase || 'Ricerca dispositivi in corso...'}</span>
+                    {state.progress.totalHosts > 0 && (
+                      <span className="text-xs text-blue-200/70">{state.progress.scannedHosts}/{state.progress.totalHosts} host verificati</span>
+                    )}
+                  </div>
+                </div>
+                <button onClick={handleStopSearch} className="tv-focus px-3 py-1 text-xs rounded-lg bg-white/10 hover:bg-white/20 text-white">
+                  Annulla
+                </button>
+              </div>
+              {state.progress.totalHosts > 0 && (
+                <div className="mt-3 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-blue-500 transition-all"
+                    style={{ width: `${Math.min(100, (state.progress.scannedHosts / state.progress.totalHosts) * 100)}%` }}
+                  />
+                </div>
+              )}
             </div>
           )}
 
@@ -188,6 +221,13 @@ const CastDevicePicker: React.FC<CastDevicePickerProps> = ({
                 </button>
               </div>
               <p className="text-xs text-gray-500 mt-2">Trova l'IP nelle impostazioni di rete del dispositivo</p>
+            </div>
+          )}
+
+          {castError && (
+            <div className="mx-4 mt-3 rounded-xl border border-red-500/30 bg-red-950/40 px-4 py-3 text-sm text-red-100 flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-red-300 flex-shrink-0 mt-0.5" />
+              <span>{castError}</span>
             </div>
           )}
 
@@ -227,7 +267,7 @@ const CastDevicePicker: React.FC<CastDevicePickerProps> = ({
             <div className="py-8 text-center">
               <WifiOff className="w-12 h-12 text-gray-600 mx-auto mb-3" />
               <p className="text-gray-400">Nessun dispositivo trovato</p>
-              <p className="text-sm text-gray-500 mt-1">Assicurati che i dispositivi siano accesi e sulla stessa rete</p>
+              <p className="text-sm text-gray-500 mt-1 px-6">Assicurati che i dispositivi siano accesi, sulla stessa rete Wi‑Fi/LAN e che VPN/firewall non blocchino SSDP, DIAL o Chromecast.</p>
             </div>
           ) : null}
         </div>
@@ -235,7 +275,7 @@ const CastDevicePicker: React.FC<CastDevicePickerProps> = ({
         {/* Footer */}
         <div className="p-4 border-t border-white/10 bg-black/30">
           <div className="flex items-center justify-between">
-            <button onClick={handleRefresh} disabled={state.isSearching} className="flex items-center gap-2 px-3 py-2 text-sm text-gray-400 hover:text-white transition-colors disabled:opacity-50">
+            <button onClick={handleRefresh} disabled={state.isSearching} className="tv-focus flex items-center gap-2 px-3 py-2 text-sm text-gray-400 hover:text-white transition-colors disabled:opacity-50">
               <Search className={`w-4 h-4 ${state.isSearching ? 'animate-spin' : ''}`} />
               Aggiorna
             </button>
@@ -244,7 +284,7 @@ const CastDevicePicker: React.FC<CastDevicePickerProps> = ({
                 navigator.clipboard.writeText(mediaUrl);
                 onCastError?.('URL copiato negli appunti!');
               }}
-              className="px-4 py-2 text-sm bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors"
+              className="tv-focus px-4 py-2 text-sm bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors"
             >
               Copia URL
             </button>
