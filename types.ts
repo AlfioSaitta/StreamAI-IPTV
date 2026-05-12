@@ -57,6 +57,10 @@ export interface ProfilePreferences {
   debugOverlay: boolean; // Show network speed and debug info in player
   theme?: 'dark' | 'oled';
   geminiApiKey?: string; // Custom API Key provided by user
+  contentAutoRefreshEnabled?: boolean; // Refresh Xtream catalog in background
+  contentAutoRefreshIntervalMinutes?: number; // Background refresh interval in minutes
+  contentLastRefreshAt?: number; // Last successful forced catalog refresh timestamp
+  contentLastRefreshError?: string; // Last background/manual refresh error, if any
 }
 
 export interface Profile {

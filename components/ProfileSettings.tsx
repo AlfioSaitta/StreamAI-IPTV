@@ -15,13 +15,19 @@ import {
   Palette,
   Sparkles,
   Zap,
-  Trash2
+  Trash2,
+  Database,
+  RefreshCw,
+  Clock
 } from 'lucide-react';
 
 interface ProfileSettingsProps {
   profile: Profile;
   onBack: () => void;
   onProfileUpdate: (profile: Profile) => void;
+  onRefreshContent?: () => Promise<{ lastRefreshAt?: number } | void>;
+  isContentRefreshing?: boolean;
+  contentRefreshMessage?: string;
 }
 
 const LANGUAGES = [
@@ -44,6 +50,14 @@ const THEME_OPTIONS = [
   { value: 'oled', label: 'OLED (Pure Black)' },
 ];
 
+const CONTENT_REFRESH_INTERVAL_OPTIONS = [
+  { value: '60', label: 'Ogni ora' },
+  { value: '180', label: 'Ogni 3 ore' },
+  { value: '360', label: 'Ogni 6 ore' },
+  { value: '720', label: 'Ogni 12 ore' },
+  { value: '1440', label: 'Ogni 24 ore' },
+];
+
 const PROFILE_COLORS = [
   '#8b5cf6', // Purple
   '#ec4899', // Pink
@@ -57,19 +71,27 @@ const PROFILE_COLORS = [
   '#a855f7', // Violet
 ];
 
-const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onBack, onProfileUpdate }) => {
+const ProfileSettings: React.FC<ProfileSettingsProps> = ({
+  profile,
+  onBack,
+  onProfileUpdate,
+  onRefreshContent,
+  isContentRefreshing = false,
+  contentRefreshMessage,
+}) => {
   const { t } = useLanguage();
   const [preferences, setPreferences] = useState<ProfilePreferences>(
-    profile.preferences || DEFAULT_PREFERENCES
+    { ...DEFAULT_PREFERENCES, ...(profile.preferences || {}) }
   );
   const [profileName, setProfileName] = useState(profile.name);
   const [profileColor, setProfileColor] = useState(profile.color);
   const [hasChanges, setHasChanges] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
+  const [localRefreshMessage, setLocalRefreshMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    const originalPrefs = profile.preferences || DEFAULT_PREFERENCES;
+    const originalPrefs = { ...DEFAULT_PREFERENCES, ...(profile.preferences || {}) };
     const prefsChanged = JSON.stringify(preferences) !== JSON.stringify(originalPrefs);
     const nameChanged = profileName !== profile.name;
     const colorChanged = profileColor !== profile.color;
@@ -104,6 +126,32 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onBack, onPr
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const handleRefreshContent = async () => {
+    if (!onRefreshContent || isContentRefreshing) return;
+    setLocalRefreshMessage(null);
+    try {
+      const result = await onRefreshContent();
+      setPreferences(prev => ({
+        ...prev,
+        contentLastRefreshAt: result?.lastRefreshAt || prev.contentLastRefreshAt,
+        contentLastRefreshError: undefined
+      }));
+      setLocalRefreshMessage('Lista contenuti aggiornata correttamente.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Aggiornamento contenuti non riuscito.';
+      setPreferences(prev => ({ ...prev, contentLastRefreshError: message }));
+      setLocalRefreshMessage(message);
+    }
+  };
+
+  const formatLastRefresh = (timestamp?: number) => {
+    if (!timestamp) return 'Mai eseguito';
+    return new Intl.DateTimeFormat('it-IT', {
+      dateStyle: 'short',
+      timeStyle: 'short'
+    }).format(new Date(timestamp));
   };
 
   const ToggleSwitch: React.FC<{ enabled: boolean; onChange: (v: boolean) => void }> = ({ enabled, onChange }) => (
@@ -376,6 +424,77 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onBack, onPr
         </section>
 
         {/* Data & Cache */}
+        <section className="bg-white/5 rounded-2xl p-6 border border-white/10">
+          <h2 className="text-xl font-semibold mb-6 flex items-center gap-3">
+            <Database className="w-6 h-6 text-purple-500" />
+            Catalogo contenuti
+          </h2>
+
+          <div className="space-y-6">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <RefreshCw className="w-5 h-5 text-gray-400 mt-0.5" />
+                <div>
+                  <h3 className="font-medium text-white">Riscarica lista dal server</h3>
+                  <p className="text-sm text-gray-400 mt-1">
+                    Aggiorna Live, Film e Serie ignorando la cache locale. Utile se il provider ha aggiunto o rimosso contenuti.
+                  </p>
+                  <p className="text-xs text-gray-500 mt-2">Ultimo aggiornamento: {formatLastRefresh(preferences.contentLastRefreshAt)}</p>
+                </div>
+              </div>
+              <button
+                onClick={handleRefreshContent}
+                disabled={!profile.xtreamCreds || isContentRefreshing}
+                className={`tv-focus px-4 py-2 rounded-lg transition-all font-medium flex items-center justify-center gap-2 ${
+                  profile.xtreamCreds && !isContentRefreshing
+                    ? 'bg-purple-600 hover:bg-purple-500 text-white shadow-lg shadow-purple-900/30'
+                    : 'bg-gray-800 text-gray-500 cursor-not-allowed'
+                }`}
+              >
+                <RefreshCw className={`w-4 h-4 ${isContentRefreshing ? 'animate-spin' : ''}`} />
+                {isContentRefreshing ? 'Aggiornamento...' : 'Riscarica lista'}
+              </button>
+            </div>
+
+            {(localRefreshMessage || contentRefreshMessage || preferences.contentLastRefreshError) && (
+              <div className={`rounded-xl border px-4 py-3 text-sm ${preferences.contentLastRefreshError ? 'bg-red-950/30 border-red-500/30 text-red-200' : 'bg-green-950/30 border-green-500/30 text-green-200'}`}>
+                {localRefreshMessage || contentRefreshMessage || preferences.contentLastRefreshError}
+              </div>
+            )}
+
+            <div className="border-t border-white/10" />
+
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <Clock className="w-5 h-5 text-gray-400 mt-0.5" />
+                <div>
+                  <h3 className="font-medium text-white">Aggiornamento in background</h3>
+                  <p className="text-sm text-gray-400 mt-1">
+                    Quando attivo, StreamAI controlla periodicamente il server e aggiorna il catalogo senza bloccare la navigazione.
+                  </p>
+                </div>
+              </div>
+              <ToggleSwitch
+                enabled={Boolean(preferences.contentAutoRefreshEnabled)}
+                onChange={(v) => handlePreferenceChange('contentAutoRefreshEnabled', v)}
+              />
+            </div>
+
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 pl-0 md:pl-8">
+              <div>
+                <h3 className="font-medium text-white">Frequenza aggiornamento</h3>
+                <p className="text-sm text-gray-400 mt-1">Scegli ogni quanto riscaricare la lista dal server.</p>
+              </div>
+              <SelectDropdown
+                value={String(preferences.contentAutoRefreshIntervalMinutes || DEFAULT_PREFERENCES.contentAutoRefreshIntervalMinutes || 360)}
+                options={CONTENT_REFRESH_INTERVAL_OPTIONS}
+                onChange={(v) => handlePreferenceChange('contentAutoRefreshIntervalMinutes', Number(v))}
+              />
+            </div>
+          </div>
+        </section>
+
+        {/* Cache */}
         <section className="bg-white/5 rounded-2xl p-6 border border-white/10">
           <h2 className="text-xl font-semibold mb-6 flex items-center gap-3">
             <Trash2 className="w-6 h-6 text-red-500" />

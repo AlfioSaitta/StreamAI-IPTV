@@ -33,6 +33,7 @@ Si distingue per l'integrazione con **Google Gemini AI**, che offre raccomandazi
 - **Multi-profilo**: Supporto per più utenti con preferenze separate.
 - **Cronologia separata**: Ogni profilo mantiene la propria cronologia di visione.
 - **Progresso salvato**: Riprendi esattamente da dove avevi interrotto.
+- **Catalogo aggiornabile**: da Impostazioni puoi riscaricare manualmente Live/VOD/Serie dal server Xtream e abilitare l'aggiornamento automatico in background con frequenza configurabile.
 
 ### 🔧 Ottimizzazioni Tecniche
 - **Virtualizzazione Liste**: Rendering efficiente per playlist con migliaia di canali (react-window).
@@ -298,6 +299,18 @@ Il player mostra un overlay diagnostico quando uno stream fallisce:
 - pulsante **Info stream** per raccogliere codec video/audio, risoluzione, bitrate, container, protocollo, qualità playback e stato supporto.
 
 Per stream live MPEG-TS/HLS il rilevamento codec usa più fonti: Video.js/HLS.js, track API browser, manifest HLS `CODECS`, byte iniziali dello stream e parsing PAT/PMT MPEG-TS quando possibile. Alcuni provider bloccano fetch paralleli o CORS: in quei casi il pannello mostra comunque il metodo di rilevamento e l'affidabilità del dato.
+
+---
+
+## 🔄 Aggiornamento catalogo contenuti
+
+Nella pagina **Impostazioni → Catalogo contenuti** sono disponibili:
+
+- **Riscarica lista**: forza il download da server Xtream ignorando la cache locale e aggiorna subito Live, Film e Serie in memoria.
+- **Aggiornamento in background**: abilita un controllo periodico del catalogo senza bloccare la UI.
+- **Frequenza aggiornamento**: 1 ora, 3 ore, 6 ore, 12 ore o 24 ore.
+
+Lo stato dell'ultimo aggiornamento riuscito e dell'eventuale ultimo errore viene salvato nel profilo. Il refresh automatico non parte se il browser risulta offline e usa un lock interno per evitare aggiornamenti concorrenti.
 
 ---
 

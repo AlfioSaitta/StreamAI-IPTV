@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import ChannelList from './components/ChannelList.tsx';
 import VideoPlayer from './components/VideoPlayerNew.tsx';
@@ -18,6 +18,14 @@ import { Category, Channel, XtreamCredentials, StreamType, Profile } from './typ
 import { Server, Wifi } from 'lucide-react';
 import { platformService } from './services/platformService.ts';
 import { isAiAvailable } from './services/geminiService.ts';
+
+const MIN_CONTENT_REFRESH_INTERVAL_MINUTES = 60;
+
+interface ContentRefreshStatus {
+  state: 'idle' | 'refreshing' | 'success' | 'error';
+  message?: string;
+  updatedAt?: number;
+}
 
 // Componente per visualizzare lo stato di riproduzione in rete
 const NetworkStatusBanner = () => {
@@ -77,6 +85,8 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [showXtreamModal, setShowXtreamModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [contentRefreshStatus, setContentRefreshStatus] = useState<ContentRefreshStatus>({ state: 'idle' });
+  const contentRefreshInFlightRef = useRef(false);
 
   // Focus Restoration State
   const [lastFocusedChannelId, setLastFocusedChannelId] = useState<string | null>(null);
@@ -216,6 +226,111 @@ function App() {
         setIsLoading(false);
     }
   };
+
+  const refreshContentFromServer = useCallback(async (options: { background?: boolean } = {}) => {
+      if (!activeProfile?.id || !activeProfile.xtreamCreds) {
+          const message = 'Configura prima un server Xtream per questo profilo.';
+          setContentRefreshStatus({ state: 'error', message, updatedAt: Date.now() });
+          throw new Error(message);
+      }
+
+      if (contentRefreshInFlightRef.current) {
+          if (!options.background) {
+              const message = 'Aggiornamento catalogo già in corso.';
+              setContentRefreshStatus({ state: 'refreshing', message, updatedAt: Date.now() });
+              throw new Error(message);
+          }
+          return;
+      }
+
+      contentRefreshInFlightRef.current = true;
+      if (!options.background) {
+          setContentRefreshStatus({ state: 'refreshing', message: 'Riscaricamento lista contenuti in corso...', updatedAt: Date.now() });
+      }
+
+      try {
+          const content = await loginXtream(activeProfile.xtreamCreds, true);
+          setLiveCategories(content.live);
+          setVodCategories(content.vod);
+          setSeriesCategories(content.series);
+          setXtreamCreds(activeProfile.xtreamCreds);
+
+          const refreshedAt = Date.now();
+          const updatedProfile = ProfileService.updatePreferences(activeProfile.id, {
+              contentLastRefreshAt: refreshedAt,
+              contentLastRefreshError: undefined
+          });
+          if (updatedProfile) {
+              setActiveProfile(updatedProfile);
+          }
+
+          setContentRefreshStatus({
+              state: 'success',
+              message: options.background ? 'Catalogo aggiornato automaticamente in background.' : 'Lista contenuti aggiornata dal server.',
+              updatedAt: refreshedAt
+          });
+          return { lastRefreshAt: refreshedAt };
+      } catch (error) {
+          const message = error instanceof Error ? error.message : 'Errore sconosciuto durante aggiornamento catalogo.';
+          const updatedProfile = ProfileService.updatePreferences(activeProfile.id, {
+              contentLastRefreshError: message
+          });
+          if (updatedProfile) {
+              setActiveProfile(updatedProfile);
+          }
+          setContentRefreshStatus({ state: 'error', message, updatedAt: Date.now() });
+          if (!options.background) {
+              throw error;
+          }
+      } finally {
+          contentRefreshInFlightRef.current = false;
+      }
+  }, [activeProfile]);
+
+  useEffect(() => {
+      if (!activeProfile?.id || !activeProfile.xtreamCreds) return;
+
+      const preferences = {
+          ...DEFAULT_PREFERENCES,
+          ...(activeProfile.preferences || {})
+      };
+      if (!preferences.contentAutoRefreshEnabled) return;
+
+      const intervalMinutes = Math.max(
+          MIN_CONTENT_REFRESH_INTERVAL_MINUTES,
+          Number(preferences.contentAutoRefreshIntervalMinutes || DEFAULT_PREFERENCES.contentAutoRefreshIntervalMinutes || 360)
+      );
+      const intervalMs = intervalMinutes * 60 * 1000;
+      const lastRefreshAt = Number(preferences.contentLastRefreshAt || 0);
+      let intervalId: number | null = null;
+
+      const runIfDue = () => {
+          if (!navigator.onLine) {
+              console.info('[ContentRefresh] Skip: offline');
+              return;
+          }
+
+          const latestProfile = ProfileService.getAll().find(p => p.id === activeProfile.id);
+          const latestLastRefreshAt = Number(latestProfile?.preferences?.contentLastRefreshAt || lastRefreshAt || 0);
+          if (Date.now() - latestLastRefreshAt >= intervalMs) {
+              refreshContentFromServer({ background: true }).catch(error => {
+                  console.warn('[ContentRefresh] Background refresh failed:', error);
+              });
+          }
+      };
+
+      const elapsed = lastRefreshAt ? Date.now() - lastRefreshAt : intervalMs;
+      const initialDelay = Math.max(30_000, intervalMs - elapsed);
+      const timeoutId = window.setTimeout(() => {
+          runIfDue();
+          intervalId = window.setInterval(runIfDue, intervalMs);
+      }, initialDelay);
+
+      return () => {
+          window.clearTimeout(timeoutId);
+          if (intervalId !== null) window.clearInterval(intervalId);
+      };
+  }, [activeProfile?.id, activeProfile?.xtreamCreds, activeProfile?.preferences?.contentAutoRefreshEnabled, activeProfile?.preferences?.contentAutoRefreshIntervalMinutes, activeProfile?.preferences?.contentLastRefreshAt, refreshContentFromServer]);
 
   const getCurrentCategories = () => {
       switch (activeTab) {
@@ -415,6 +530,9 @@ function App() {
                 profile={activeProfile}
                 onBack={() => setShowSettings(false)}
                 onProfileUpdate={(updatedProfile) => setActiveProfile(updatedProfile)}
+                onRefreshContent={() => refreshContentFromServer({ background: false })}
+                isContentRefreshing={contentRefreshStatus.state === 'refreshing'}
+                contentRefreshMessage={contentRefreshStatus.message}
             />
         );
     }

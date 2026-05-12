@@ -399,6 +399,36 @@ npm run analyze
 
 ---
 
+### P5.4 Sincronizzazione catalogo Xtream
+
+**File principali:** `App.tsx`, `components/ProfileSettings.tsx`, `services/profileService.ts`, `services/xtream.ts`, `types.ts`.
+
+- [x] Aggiungere nelle impostazioni un tasto `Riscarica lista` che bypassa la cache e richiama il server Xtream.
+- [x] Aggiornare in memoria Live, VOD e Series senza riavviare l'app dopo refresh manuale.
+- [x] Salvare nel profilo timestamp ultimo refresh riuscito ed eventuale ultimo errore.
+- [x] Aggiungere opzione profilo per abilitare/disabilitare aggiornamento catalogo in background.
+- [x] Aggiungere selezione frequenza: 1h, 3h, 6h, 12h, 24h.
+- [x] Eseguire aggiornamento background senza bloccare UI e senza mostrare loader globale.
+- [x] Evitare refresh concorrenti con lock in memoria.
+- [x] Non eseguire refresh background se il browser risulta offline.
+- [x] Preservare `tv-focus` nella nuova UI impostazioni.
+- [x] Aggiornare README con comportamento e note operative.
+
+**Criteri di completamento:**
+
+- [x] `npm run typecheck` OK.
+- [x] `npm run build` OK.
+- [x] Profili esistenti ricevono i default tramite merge in `ProfileService.getAll`.
+- [x] Il refresh manuale forza `loginXtream(creds, true)` e aggiorna la cache contenuti.
+- [x] La frequenza è salvata nelle preferenze profilo e letta dallo scheduler.
+
+**Note operative:**
+
+- Il refresh automatico parte dopo almeno 30 secondi dall'attivazione/apertura app se il catalogo è già scaduto, poi segue la frequenza selezionata.
+- La verifica con server reale richiede credenziali Xtream valide; in assenza di provider, sono stati validati compilazione e flusso applicativo lato codice.
+
+---
+
 ## P6 - Performance catalogo e immagini
 
 ### P6.1 Ricerca indicizzata

@@ -8,7 +8,11 @@ export const DEFAULT_PREFERENCES: ProfilePreferences = {
   subtitleLanguage: 'it',
   aiCaching: true,
   debugOverlay: false,
-  theme: 'dark'
+  theme: 'dark',
+  contentAutoRefreshEnabled: false,
+  contentAutoRefreshIntervalMinutes: 360,
+  contentLastRefreshAt: undefined,
+  contentLastRefreshError: undefined
 };
 
 export const ProfileService = {
@@ -20,7 +24,11 @@ export const ProfileService = {
         ? parsed.map((p: Profile) => ({
             ...p,
             history: p.history || [],
-            watchlist: p.watchlist || []
+            watchlist: p.watchlist || [],
+            preferences: {
+              ...DEFAULT_PREFERENCES,
+              ...(p.preferences || {})
+            }
         }))
         : [];
     } catch (e) {
@@ -66,10 +74,9 @@ export const ProfileService = {
     if (index !== -1) {
       const watchlist = profiles[index].watchlist || [];
       const exists = watchlist.includes(channelId);
-      const updated = exists 
+      profiles[index].watchlist = exists
         ? watchlist.filter(id => id !== channelId)
         : [channelId, ...watchlist].slice(0, 200);
-      profiles[index].watchlist = updated;
       ProfileService.saveAll(profiles);
       return profiles[index];
     }
