@@ -34,3 +34,7 @@ android/**/*.jks
 *.njsproj
 *.sln
 *.sw?
+
+# Test runner
+coverage/
+.vitest-cache/
