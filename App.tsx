@@ -692,9 +692,11 @@ function App() {
 
   // Content rendering logic
   const renderContent = () => {
-    // Get translations for current profile language
+    // Get translations for current profile language. Lazy loader is fired
+    // asynchronously (B.3); `i18n.t()` returns the currently-cached dict
+    // (Italian fallback while a non-default locale is in flight).
     const lang = activeProfile?.preferences?.language || DEFAULT_PREFERENCES.language;
-    i18n.setLanguage(lang);
+    void i18n.setLanguage(lang);
     const t = i18n.t();
 
     if (isLoading) {

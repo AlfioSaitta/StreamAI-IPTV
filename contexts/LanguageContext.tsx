@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { i18n, Translations, SupportedLanguage } from '../services/i18n.ts';
+import { i18n, Translations, SupportedLanguage, loadLanguage } from '../services/i18n.ts';
 import { DEFAULT_PREFERENCES } from '../services/profileService.ts';
 
 interface LanguageContextType {
@@ -20,30 +20,38 @@ interface LanguageProviderProps {
 }
 
 export const LanguageProvider: React.FC<LanguageProviderProps> = ({ children, profileLanguage }) => {
+  const initial = (profileLanguage as SupportedLanguage) || (DEFAULT_PREFERENCES.language as SupportedLanguage);
   const [language, setLanguageState] = useState<SupportedLanguage>(
-    (profileLanguage as SupportedLanguage) || DEFAULT_PREFERENCES.language as SupportedLanguage
+    i18n.isSupported(initial) ? initial : 'it'
   );
-  
+  // Active dictionary kept in state so a lazy-loaded locale triggers a
+  // re-render once resolved. We start from whatever is already cached
+  // (always at least 'it'); other locales are fetched on-demand (B.3).
+  const [t, setT] = useState<Translations>(() => i18n.forLanguage(language));
+
   useEffect(() => {
-    if (profileLanguage && i18n.isSupported(profileLanguage)) {
+    let cancelled = false;
+    i18n.setLanguageSync(language);
+    loadLanguage(language).then((dict) => {
+      if (!cancelled) setT(dict);
+    });
+    return () => { cancelled = true; };
+  }, [language]);
+
+  useEffect(() => {
+    if (profileLanguage && i18n.isSupported(profileLanguage) && profileLanguage !== language) {
       setLanguageState(profileLanguage as SupportedLanguage);
-      i18n.setLanguage(profileLanguage);
     }
-  }, [profileLanguage]);
-  
+  }, [profileLanguage, language]);
+
   const setLanguage = (lang: string) => {
     if (i18n.isSupported(lang)) {
       setLanguageState(lang as SupportedLanguage);
-      i18n.setLanguage(lang);
     }
   };
-  
-  const value: LanguageContextType = {
-    language,
-    setLanguage,
-    t: i18n.forLanguage(language)
-  };
-  
+
+  const value: LanguageContextType = { language, setLanguage, t };
+
   return (
     <LanguageContext.Provider value={value}>
       {children}
