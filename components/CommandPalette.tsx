@@ -1,4 +1,4 @@
-import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { Search, X, Clock, Tv, Film, Library, Sparkles, type LucideIcon } from 'lucide-react';
 import type { Channel, StreamType } from '../types.ts';
 import { indexChannels, searchIndexedChannels, type IndexedChannel } from '../services/catalogIndex.ts';
@@ -121,6 +121,15 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose, channe
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
 
+  // React 19 (B.5): switching the category chip re-runs the (potentially
+  // expensive) filtered-index memo. Wrapping it in a transition keeps the
+  // chip highlight + keyboard focus snappy while the result list catches
+  // up in a low-priority render.
+  const [isFilterPending, startFilterTransition] = useTransition();
+  const changeFilter = useCallback((next: PaletteFilter) => {
+    startFilterTransition(() => setFilter(next));
+  }, []);
+
   const deferredQuery = useDeferredValue(query);
 
   // Reset transient state when (re)opening; also load recent searches.
@@ -215,14 +224,14 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose, channe
       e.preventDefault();
       const idx = FILTER_CONFIG.findIndex(f => f.id === filter);
       const next = FILTER_CONFIG[(idx + 1) % FILTER_CONFIG.length];
-      setFilter(next.id);
+      changeFilter(next.id);
     } else if (e.key === 'Tab' && e.shiftKey) {
       e.preventDefault();
       const idx = FILTER_CONFIG.findIndex(f => f.id === filter);
       const next = FILTER_CONFIG[(idx - 1 + FILTER_CONFIG.length) % FILTER_CONFIG.length];
-      setFilter(next.id);
+      changeFilter(next.id);
     }
-  }, [onClose, results, activeIndex, commit, filter]);
+  }, [onClose, results, activeIndex, commit, filter, changeFilter]);
 
   const clearRecent = useCallback(() => {
     setRecent([]);
@@ -279,7 +288,7 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose, channe
               <button
                 key={id}
                 type="button"
-                onClick={() => setFilter(id)}
+                onClick={() => changeFilter(id)}
                 aria-pressed={isActive}
                 className={`tv-focus flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors whitespace-nowrap ${
                   isActive
@@ -343,7 +352,13 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose, channe
               </p>
             </div>
           ) : (
-            <ul ref={listRef} role="listbox" aria-label="Risultati ricerca">
+            <ul
+              ref={listRef}
+              role="listbox"
+              aria-label="Risultati ricerca"
+              aria-busy={isFilterPending}
+              className={isFilterPending ? 'opacity-70 transition-opacity' : 'transition-opacity'}
+            >
               {results.map((channel, idx) => {
                 const isActive = idx === activeIndex;
                 return (

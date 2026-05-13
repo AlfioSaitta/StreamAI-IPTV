@@ -357,11 +357,23 @@ follow-up di traduzioni separato.
 - [x] Adeguati i tipi `RefObject<T>` → `RefObject<T | null>` nei punti che
   passano `useRef(null)` ai consumer (`useTvFocus`, `useInteractiveTimeline`).
 - [x] `react-window` 2.x e `video.js` 8.23 compatibili (test + build verdi).
-- [ ] `use()` hook per data fetching → semplifica `useMediaMetadata` /
-  `useMediaImages` (refactor opzionale, da fare quando si tocca il flusso).
-- [ ] `useTransition` automatico su input → ricerca canali ancora più
-  reattiva (già abbiamo `useDeferredValue` + debounce, gain marginale).
-- [ ] Form `actions` per ProfileSettings/XtreamLogin (opzionale).
+- [~] `use()` hook per data fetching → **non applicabile** ai due hook
+  citati: `useMediaMetadata` e `useMediaImages` sono pure derivazioni
+  `useMemo` (nessun Promise). `use()` resta a disposizione per future
+  feature realmente async; tracciato per quando si introdurranno data
+  loader basati su Promise (es. TMDB streaming).
+- [x] `useTransition` su filtro CommandPalette: il cambio chip
+  (Live/Film/Serie) ora gira in transition → chip highlight + focus
+  istantanei, lista risultati ri-renderizzata a bassa priorità con
+  `aria-busy` + opacità ridotta come hint visivo. ChannelList già usa
+  `useDeferredValue` (E.2): gain ulteriore marginale, lasciato così.
+- [x] Form `actions` per `XtreamLogin`: migrato a `useActionState` di
+  React 19. Submit handler async wrappato in transizione implicita,
+  `isPending` automatico, stato di errore + echo dei valori inseriti
+  gestito dal reducer del form. Inputs ora dichiarano `name` per
+  `FormData`, `autoComplete` aggiunto per UX (password manager).
+  `ProfileSettings` non ha submit (persistenza inline per campo) →
+  niente da migrare lì.
 
 **Stato 2026-05-13:** baseline aggiornato. `npm run typecheck`, `npm run test:run`
 (95/95), `npm run build` tutti verdi. Bundle main passa da ~146 kB gzip a
