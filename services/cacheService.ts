@@ -9,6 +9,14 @@ const IMAGE_CACHE_MAX_ENTRIES = 1500;
 const IMAGE_CACHE_MAX_BYTES = 512 * 1024 * 1024;
 const IMAGE_CACHE_PRESSURE_RATIO = 0.85;
 
+import { imageCacheApi } from './imageCacheApi';
+import { decodeMaybeGzip, encodeMaybeGzip, gzipSupported } from './gzipUtil';
+
+// E.5 — prefer the Cache API for image storage. We still keep the IDB
+// store as a legacy fallback for entries written before this version, and
+// as a hard fallback when Cache API is unavailable (some Electron contexts).
+const USE_IMAGE_CACHE_API = imageCacheApi.isSupported();
+
 interface ApiCacheOptions {
   maxAgeMs?: number;
 }
@@ -131,12 +139,20 @@ export const CacheService = {
   },
 
   // --- API RESPONSE CACHING ---
+  // E.5 — payloads larger than 4 KB are stored gzip-compressed (typical 60-75%
+  // saving on TMDB / Xtream JSON). Older uncompressed records keep working
+  // because we tag the compressed ones with `_gz: true`.
   saveApiData: async (key: string, data: any) => {
     const db = await CacheService.openDB();
+    const { bytes, compressed } = await encodeMaybeGzip(data);
     return new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_API, 'readwrite');
       const store = tx.objectStore(STORE_API);
-      const payload = { timestamp: Date.now(), data };
+      // Store either the legacy `{ timestamp, data }` shape or, when
+      // compression kicks in, `{ timestamp, _gz: true, bytes }`.
+      const payload = compressed
+        ? { timestamp: Date.now(), _gz: true, bytes }
+        : { timestamp: Date.now(), data };
       store.put(payload, key);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
@@ -145,7 +161,7 @@ export const CacheService = {
 
   getApiData: async (key: string, options: ApiCacheOptions = {}) => {
     const db = await CacheService.openDB();
-    return new Promise<any>((resolve) => {
+    const raw = await new Promise<any>((resolve) => {
       const tx = db.transaction(STORE_API, options.maxAgeMs ? 'readwrite' : 'readonly');
       const store = tx.objectStore(STORE_API);
       const request = store.get(key);
@@ -162,10 +178,20 @@ export const CacheService = {
             return;
           }
 
-          resolve(result.data ?? null);
+          resolve(result);
       };
       request.onerror = () => resolve(null);
     });
+    if (!raw) return null;
+    if (raw._gz && raw.bytes instanceof Uint8Array) {
+      try {
+        return await decodeMaybeGzip(raw.bytes, true);
+      } catch (e) {
+        console.warn(`[Cache] Failed to decompress entry "${key}":`, (e as Error).message);
+        return null;
+      }
+    }
+    return raw.data ?? null;
   },
 
   pruneApiCache: async (prefix: string, maxEntries: number) => {
@@ -224,6 +250,9 @@ export const CacheService = {
   },
 
   // --- IMAGE CACHING ---
+  // Strategy (E.5): write goes to the Cache API when supported; reads check
+  // mem → Cache API → IDB (legacy entries). Migration is implicit — IDB
+  // entries remain readable until they expire.
   saveImage: async (url: string, blob: Blob) => {
     if (!blob || blob.size <= 0) return;
 
@@ -234,6 +263,15 @@ export const CacheService = {
     if (Date.now() - lastImageCleanupAt > 5 * 60 * 1000) {
       lastImageCleanupAt = Date.now();
       await CacheService.cleanupOldImages();
+    }
+
+    if (USE_IMAGE_CACHE_API) {
+      const ok = await imageCacheApi.put(url, blob);
+      if (ok) {
+        CacheService.stats.writes++;
+        return;
+      }
+      // Cache API failed (quota?) — fall through to IDB.
     }
 
     const db = await CacheService.openDB();
@@ -264,6 +302,25 @@ export const CacheService = {
     if (imageUrlCache.has(url)) {
       CacheService.stats.hits++;
       return imageUrlCache.get(url)!;
+    }
+
+    // E.5 — try the Cache API first (the new write path).
+    if (USE_IMAGE_CACHE_API) {
+      const entry = await imageCacheApi.get(url);
+      if (entry) {
+        const now = Date.now();
+        if (entry.cachedAt > 0 && now - entry.cachedAt > IMAGE_CACHE_TTL_MS) {
+          await imageCacheApi.delete(url);
+        } else {
+          CacheService.stats.hits++;
+          // Touch lastAccess so the LRU cleanup keeps frequently-used images.
+          // Fire-and-forget; correctness doesn't depend on completion.
+          void imageCacheApi.touch(url, entry);
+          const objectUrl = URL.createObjectURL(entry.blob);
+          addToUrlCache(url, objectUrl);
+          return objectUrl;
+        }
+      }
     }
 
     const db = await CacheService.openDB();
@@ -309,6 +366,8 @@ export const CacheService = {
     // Prima controlla cache in memoria
     if (imageUrlCache.has(url)) return true;
 
+    if (USE_IMAGE_CACHE_API && await imageCacheApi.has(url)) return true;
+
     const db = await CacheService.openDB();
     return new Promise((resolve) => {
       const tx = db.transaction(STORE_IMAGES, 'readonly');
@@ -331,6 +390,20 @@ export const CacheService = {
       } else {
         urlsToCheck.push(url);
       }
+    }
+
+    // E.5 — second tier: Cache API (parallel checks, browser handles them).
+    if (USE_IMAGE_CACHE_API && urlsToCheck.length > 0) {
+      const cacheApiChecks = await Promise.all(
+        urlsToCheck.map(async (u) => [u, await imageCacheApi.has(u)] as const),
+      );
+      const remaining: string[] = [];
+      for (const [u, hit] of cacheApiChecks) {
+        if (hit) results.set(u, true);
+        else remaining.push(u);
+      }
+      urlsToCheck.length = 0;
+      urlsToCheck.push(...remaining);
     }
 
     if (urlsToCheck.length === 0) return results;
@@ -365,6 +438,10 @@ export const CacheService = {
     tx.objectStore(STORE_API).clear();
     tx.objectStore(STORE_IMAGES).clear();
 
+    if (USE_IMAGE_CACHE_API) {
+      await imageCacheApi.clear();
+    }
+
     // Pulisci anche cache in memoria
     for (const objectUrl of imageUrlCache.values()) {
       URL.revokeObjectURL(objectUrl);
@@ -380,6 +457,10 @@ export const CacheService = {
     const tx = db.transaction(STORE_IMAGES, 'readwrite');
     tx.objectStore(STORE_IMAGES).clear();
 
+    if (USE_IMAGE_CACHE_API) {
+      await imageCacheApi.clear();
+    }
+
     for (const objectUrl of imageUrlCache.values()) {
       URL.revokeObjectURL(objectUrl);
     }
@@ -387,6 +468,16 @@ export const CacheService = {
   },
 
   cleanupOldImages: async (options: { aggressive?: boolean } = {}) => {
+    // E.5 — also prune the Cache API layer. Browser-native eviction usually
+    // handles this for us, but the explicit cleanup keeps the cache focused
+    // on recent / frequent entries (LRU by `x-streamai-last-access`).
+    if (USE_IMAGE_CACHE_API) {
+      const maxEntries = options.aggressive
+        ? Math.floor(IMAGE_CACHE_MAX_ENTRIES * 0.65)
+        : IMAGE_CACHE_MAX_ENTRIES;
+      void imageCacheApi.cleanup(IMAGE_CACHE_TTL_MS, maxEntries);
+    }
+
     const db = await CacheService.openDB();
     return new Promise<{ deleted: number; freedBytes: number }>((resolve) => {
       const tx = db.transaction(STORE_IMAGES, 'readwrite');
@@ -479,13 +570,15 @@ export const CacheService = {
   // Conta immagini in cache
   countImages: async (): Promise<number> => {
     const db = await CacheService.openDB();
-    return new Promise((resolve) => {
+    const idbCount = await new Promise<number>((resolve) => {
       const tx = db.transaction(STORE_IMAGES, 'readonly');
       const store = tx.objectStore(STORE_IMAGES);
       const request = store.count();
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => resolve(0);
     });
+    const cacheApiCount = USE_IMAGE_CACHE_API ? await imageCacheApi.count() : 0;
+    return idbCount + cacheApiCount;
   },
 
   getImageCacheInfo: async () => {
@@ -516,6 +609,7 @@ export const CacheService = {
   getStats: async () => {
     const storageInfo = await CacheService.getStorageInfo();
     const imageCache = await CacheService.getImageCacheInfo();
+    const cacheApiCount = USE_IMAGE_CACHE_API ? await imageCacheApi.count() : 0;
 
     return {
       ...CacheService.stats,
@@ -524,11 +618,16 @@ export const CacheService = {
         ? Math.round(CacheService.stats.hits / (CacheService.stats.hits + CacheService.stats.misses) * 100)
         : 0,
       storage: storageInfo,
-      totalImages: imageCache.count,
+      totalImages: imageCache.count + cacheApiCount,
       imageBytesMB: (imageCache.totalBytes / 1024 / 1024).toFixed(2),
       imageLimitMB: Math.round(imageCache.limitBytes / 1024 / 1024),
       imageLimitEntries: imageCache.limitEntries,
-      imageTtlDays: imageCache.ttlDays
+      imageTtlDays: imageCache.ttlDays,
+      // E.5 — diagnostic flags
+      cacheApiEnabled: USE_IMAGE_CACHE_API,
+      cacheApiImages: cacheApiCount,
+      idbImages: imageCache.count,
+      gzipEnabled: gzipSupported(),
     };
   }
 };
