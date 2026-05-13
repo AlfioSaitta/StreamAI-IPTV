@@ -153,6 +153,16 @@ class EpgServiceClass {
     return await res.text();
   }
 
+  /**
+   * Returns the full, time-sorted programme list for the given tvgId, or an
+   * empty array if none is loaded. The returned array MUST be treated as
+   * read-only by callers.
+   */
+  getProgrammesForChannel(tvgId: string | undefined): EpgProgramme[] {
+    if (!tvgId || !this.currentIndex) return [];
+    return this.currentIndex.byChannel.get(tvgId) ?? [];
+  }
+
   /** Get the programme airing right now on the given tvgId, or null. */
   getCurrentProgramme(tvgId: string | undefined, now: number = Date.now()): EpgProgramme | null {
     if (!tvgId || !this.currentIndex) return null;
