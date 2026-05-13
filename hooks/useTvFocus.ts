@@ -96,7 +96,7 @@ export const moveTvFocus = (root: Document | HTMLElement, key: string): boolean 
   return true;
 };
 
-export const useTvSpatialNavigation = (isActive: boolean, rootRef?: RefObject<HTMLElement>) => {
+export const useTvSpatialNavigation = (isActive: boolean, rootRef?: RefObject<HTMLElement | null>) => {
   useEffect(() => {
     if (!isActive) return;
 
@@ -116,7 +116,7 @@ export const useTvSpatialNavigation = (isActive: boolean, rootRef?: RefObject<HT
 
 export const useInitialTvFocus = (
   isActive: boolean,
-  rootRef?: RefObject<HTMLElement>,
+  rootRef?: RefObject<HTMLElement | null>,
   preferredSelector?: string,
   delay = 80
 ) => {
@@ -155,7 +155,7 @@ export const useEscapeKey = (isActive: boolean, onEscape: () => void) => {
 
 export const useFocusTrap = (
   isActive: boolean,
-  containerRef: RefObject<HTMLElement>,
+  containerRef: RefObject<HTMLElement | null>,
   options: { onEscape?: () => void; initialSelector?: string; restoreFocus?: boolean } = {}
 ) => {
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);

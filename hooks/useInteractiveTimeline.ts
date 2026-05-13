@@ -20,7 +20,7 @@ export interface UseInteractiveTimelineOptions {
 }
 
 export interface UseInteractiveTimelineResult {
-  timelineRef: React.RefObject<HTMLDivElement>;
+  timelineRef: React.RefObject<HTMLDivElement | null>;
   /** Hover-only (mouse hovering without pressing). null when no hover. */
   hoverTime: number | null;
   /** Hover-only horizontal position in percent (0-100). */

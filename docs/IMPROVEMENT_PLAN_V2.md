@@ -6,8 +6,9 @@
 > (14.104 LOC, focus su file > 700 righe) e dalla revisione delle feature di mercato.
 >
 > **Ultimo aggiornamento:** 2026-05-13
-> **Baseline reale (da package.json):** React **18.2** (non 19 come da copilot-instructions),
-> Vite 5, Electron 37, Capacitor 7, Video.js 8.23, hls.js 1.5, mpegts.js 1.7, `@google/genai` 1.34.
+> **Baseline reale (da package.json):** React **19.2** (aggiornato da 18.2 in
+> B.5, 2026-05-13), Vite 5, Electron 37, Capacitor 7, Video.js 8.23,
+> hls.js 1.5, mpegts.js 1.7, `@google/genai` 1.34.
 
 ---
 
@@ -320,27 +321,51 @@ Electron passati senza errori.
 
 ### B.3 i18n lazy + struttura per chiavi
 
-- [ ] Sostituire mega-oggetto con file per-lingua in `locales/{it,en,es}.json`.
-- [ ] Caricamento `import('./locales/...')` dinamico → riduce chunk iniziale di ~80–150 kB.
-- [ ] Tooling controllo chiavi mancanti per lingua (`scripts/check-i18n.mjs`).
+- [x] Sostituito mega-oggetto con file per-lingua in `services/locales/{it,en,es,fr,de,pt,ru,ja,ko,zh,ar}.ts`.
+- [x] Caricamento `import('./locales/...')` dinamico via `loadLanguage()`
+  con cache in-memory + coalescing. Solo `it` resta nel bundle iniziale.
+- [x] Tooling controllo chiavi mancanti per lingua: `scripts/check-i18n.mjs`
+  (validatore drift, exit non-zero su differenze).
+
+**Stato 2026-05-13:** ogni lingua ~1.5–1.85 kB gzip in chunk dedicato,
+caricato solo se il profilo seleziona quella lingua. Test 95/95 verdi.
+Lo script `check-i18n.mjs` rileva subito ~10 lingue con drift di chiavi
+pre-esistenti (debito storico non introdotto dalla split): tracciato come
+follow-up di traduzioni separato.
 
 ### B.4 Routing dichiarativo
 
-- [ ] Stato corrente in `App.tsx` (`activeTab`, `selectedSeries`, `selectedMovie`,
-      `showSettings`, `showXtreamModal`, `currentChannel`) è gestito a mano con
-      4 livelli di back-stack: rischio bug Back/Esc.
-- [ ] Introdurre micro-router (es. `wouter` 2 kB, oppure stato `View[]` con reducer).
-- [ ] Permette deep-link per il companion remote (P8.1).
+- [x] Stato in `App.tsx` (`activeTab`, `selectedSeries`, `selectedMovie`,
+  `showSettings`, `showXtreamModal`, `currentChannel`, `showGuide`,
+  `showCommandPalette`, `showCheatsheet`) ora gestito dichiarativamente da
+  `hooks/useBackStack.ts`: un unico array di layer top-down con `onClose`
+  per layer, `skipEsc` per il player (Esc gestito internamente), `onEmpty`
+  per uscita app su Android.
+- [x] Rimossi i due `useEffect` ad-hoc (`handleEscape` + `handleBackButton`)
+  ⇒ una sola sorgente di verità per l'ordine di chiusura.
+- [x] API `topId` / `openIds` esposte: pronte per il companion remote
+  (deep-link via path = open layer chain).
+- [ ] Eventuale upgrade a micro-router URL-based (`wouter`) rimane
+  opzionale: con `useBackStack` il guadagno marginale non giustifica
+  l'introduzione di una dipendenza nuova.
+- [x] Test `tests/hooks/useBackStack.test.tsx` (6) — Esc/AndroidBack
+  parity, skipEsc, onEmpty, top/openIds, ignore Esc in inputs.
 
 ### B.5 Upgrade React 18 → 19
 
-Le copilot-instructions citano React 19 ma `package.json` ha 18.2.
-React 19 abilita:
+- [x] `react@19.2.6`, `react-dom@19.2.6`, `@types/react@19`, `@types/react-dom@19`.
+- [x] Adeguati i tipi `RefObject<T>` → `RefObject<T | null>` nei punti che
+  passano `useRef(null)` ai consumer (`useTvFocus`, `useInteractiveTimeline`).
+- [x] `react-window` 2.x e `video.js` 8.23 compatibili (test + build verdi).
+- [ ] `use()` hook per data fetching → semplifica `useMediaMetadata` /
+  `useMediaImages` (refactor opzionale, da fare quando si tocca il flusso).
+- [ ] `useTransition` automatico su input → ricerca canali ancora più
+  reattiva (già abbiamo `useDeferredValue` + debounce, gain marginale).
+- [ ] Form `actions` per ProfileSettings/XtreamLogin (opzionale).
 
-- [ ] `use()` hook per data fetching → semplifica `useMediaMetadata`/`useMediaImages`.
-- [ ] `useTransition` automatico su input → ricerca canali ancora più reattiva.
-- [ ] Form `actions` per ProfileSettings/XtreamLogin.
-- [ ] Verifica compatibilità: `react-window` 2.x, `video.js` 8.23 OK; `@google/genai` OK.
+**Stato 2026-05-13:** baseline aggiornato. `npm run typecheck`, `npm run test:run`
+(95/95), `npm run build` tutti verdi. Bundle main passa da ~146 kB gzip a
+~151 kB gzip (+5 kB per le concurrent features di React 19, accettabile).
 
 ---
 

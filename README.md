@@ -1,6 +1,6 @@
 # 📺 StreamAI IPTV Player
 
-**StreamAI** è un player IPTV di nuova generazione sviluppato con **React 18**, **TypeScript**, **Electron** e **Tailwind CSS**. 
+**StreamAI** è un player IPTV di nuova generazione sviluppato con **React 19**, **TypeScript**, **Electron** e **Tailwind CSS**. 
 Si distingue per l'integrazione con **Google Gemini AI**, che offre raccomandazioni intelligenti sui contenuti basate sulle preferenze dell'utente, e per un ecosistema di networking avanzato per il casting e il controllo remoto.
 
 ---
