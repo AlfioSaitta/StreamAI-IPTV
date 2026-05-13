@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useMemo, useDeferredValue } from 'react';
 import { Category, Channel, StreamType, WatchHistoryItem } from '../types.ts';
-import { Search, Play, Info, ChevronRight, LogOut, Clock, RefreshCw, BookmarkPlus, BookmarkCheck, Settings, X, Tv, SearchX, Server } from 'lucide-react';
+import { Search, Play, Info, ChevronRight, LogOut, Clock, RefreshCw, BookmarkPlus, BookmarkCheck, Settings, X, Tv, SearchX, Server, Calendar } from 'lucide-react';
 import CachedImage from './CachedImage.tsx';
 import { useLanguage } from '../contexts/LanguageContext.tsx';
 import EmptyState from './shared/EmptyState.tsx';
@@ -33,11 +33,19 @@ interface ChannelListProps {
   onLogout: () => void;
   onOpenServer: () => void;
   onOpenSettings: () => void;
+  /** Opens the full TV Guide overlay (D.1 EPG). Visible only on Live tab. */
+  onOpenGuide?: () => void;
   history: WatchHistoryItem[];
   watchlistIds: string[];
   onToggleWatchlist: (channelId: string) => void;
   allChannels: Channel[];
   onShowDetails: (channel: Channel) => void;
+  /**
+   * Progress fraction (0..1) at which a title is considered "completed"
+   * and dropped from the "Continue Watching" row. Bounded to [0.7, 0.99];
+   * default 0.95 (preserves previous behaviour). C.4.
+   */
+  continueWatchingCompletedThreshold?: number;
 }
 
 // --- CHANNEL ITEM COMPONENT ---
@@ -234,11 +242,13 @@ const ChannelList: React.FC<ChannelListProps> = ({
   onLogout,
   onOpenServer,
   onOpenSettings,
+  onOpenGuide,
   history,
   watchlistIds,
   onToggleWatchlist,
   allChannels,
-  onShowDetails
+  onShowDetails,
+  continueWatchingCompletedThreshold = 0.95,
 }) => {
   const { t } = useLanguage();
   const screenRef = useRef<HTMLDivElement>(null);
@@ -283,13 +293,16 @@ const ChannelList: React.FC<ChannelListProps> = ({
   }, [history]);
 
   const continueWatching = useMemo(() => {
+      // Soglia "completato" configurabile (C.4). Default 0.95, bound a [0.7, 0.99]
+      // per evitare valori che farebbero scomparire o non scomparire mai i titoli.
+      const completedThreshold = Math.min(0.99, Math.max(0.7, continueWatchingCompletedThreshold ?? 0.95));
       // Per la Home usa tutti i canali, altrimenti usa solo quelli della categoria corrente
       const channelsToUse = activeTab === 'home' ? indexedAllChannels : indexedBaseCategories.flatMap(c => c.channels);
       const channelById = new Map(channelsToUse.map(channel => [channel.id, channel]));
       const seen = new Set<string>();
 
       return history
-          .filter(h => h.progress && h.progress > 0 && h.progress < 0.95)
+          .filter(h => h.progress && h.progress > 0 && h.progress < completedThreshold)
           // Filtra per tipo se non siamo nella Home
           .filter(h => {
               if (activeTab === 'home') return true;
@@ -311,7 +324,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
           })
           .sort((a, b) => b.timestamp - a.timestamp)
           .map(item => item.channel);
-  }, [indexedBaseCategories, history, activeTab, indexedAllChannels]);
+  }, [indexedBaseCategories, history, activeTab, indexedAllChannels, continueWatchingCompletedThreshold]);
 
   const watchlistSet = useMemo(() => new Set(watchlistIds), [watchlistIds]);
 
@@ -573,6 +586,18 @@ const ChannelList: React.FC<ChannelListProps> = ({
              </div>
              
               <button onClick={onOpenServer} className="hidden md:block tv-focus touch-target text-xs font-bold border border-white/30 px-3 py-1.5 rounded hover:bg-white/10 tracking-wide uppercase outline-none" tabIndex={0}>SERVER</button>
+
+              {activeTab === 'live' && onOpenGuide && (
+                <button
+                  onClick={onOpenGuide}
+                  title="Apri Guida TV (G)"
+                  aria-label="Apri Guida TV"
+                  className="tv-focus touch-target inline-flex items-center gap-1.5 text-xs font-bold border border-white/30 px-3 py-1.5 rounded hover:bg-white/10 tracking-wide uppercase outline-none"
+                  tabIndex={0}
+                >
+                  <Calendar className="w-3.5 h-3.5" /> EPG
+                </button>
+              )}
 
              <div className="group relative flex items-center gap-2 cursor-pointer z-50">
                   <button className="tv-focus touch-target rounded-lg outline-none" tabIndex={0}>

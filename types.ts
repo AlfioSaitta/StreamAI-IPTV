@@ -112,6 +112,18 @@ export interface ProfilePreferences {
   contentAutoRefreshIntervalMinutes?: number; // Background refresh interval in minutes
   contentLastRefreshAt?: number; // Last successful forced catalog refresh timestamp
   contentLastRefreshError?: string; // Last background/manual refresh error, if any
+  /**
+   * Progress fraction (0..1) at which a title is considered fully watched
+   * and dropped from the "Continue Watching" row. Bounded to [0.7, 0.99]
+   * in the UI; default 0.95.
+   */
+  continueWatchingCompletedThreshold?: number;
+  /**
+   * Show a 10s "Up Next" countdown overlay during the last seconds of an
+   * episode (Series only) and auto-play the next episode unless dismissed.
+   * Default `true`.
+   */
+  autoNextEpisodeEnabled?: boolean;
 }
 
 export interface Profile {

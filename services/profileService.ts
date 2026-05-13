@@ -12,7 +12,9 @@ export const DEFAULT_PREFERENCES: ProfilePreferences = {
   contentAutoRefreshEnabled: false,
   contentAutoRefreshIntervalMinutes: 360,
   contentLastRefreshAt: undefined,
-  contentLastRefreshError: undefined
+  contentLastRefreshError: undefined,
+  continueWatchingCompletedThreshold: 0.95,
+  autoNextEpisodeEnabled: true
 };
 
 export const ProfileService = {

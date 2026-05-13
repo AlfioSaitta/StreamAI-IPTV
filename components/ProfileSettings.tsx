@@ -21,7 +21,9 @@ import {
   RefreshCw,
   Clock,
   Image as ImageIcon,
-  HardDrive
+  HardDrive,
+  SkipForward,
+  History
 } from 'lucide-react';
 import { useEscapeKey, useInitialTvFocus, useTvSpatialNavigation } from '../hooks/useTvFocus.ts';
 
@@ -494,6 +496,57 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
             <ToggleSwitch
               enabled={preferences.debugOverlay}
               onChange={(v) => handlePreferenceChange('debugOverlay', v)}
+            />
+          </div>
+
+          <div className="border-t border-white/10 my-6" />
+
+          {/* C.4 — Auto-next episode countdown */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <SkipForward className="w-5 h-5 text-gray-400" />
+              <div>
+                <h3 className="font-medium text-white">Episodio successivo automatico</h3>
+                <p className="text-sm text-gray-400 mt-1">
+                  Mostra un conto alla rovescia di 10s a fine episodio e avvia il successivo nelle serie TV.
+                </p>
+              </div>
+            </div>
+            <ToggleSwitch
+              enabled={preferences.autoNextEpisodeEnabled ?? (DEFAULT_PREFERENCES.autoNextEpisodeEnabled ?? true)}
+              onChange={(v) => handlePreferenceChange('autoNextEpisodeEnabled', v)}
+            />
+          </div>
+
+          <div className="border-t border-white/10 my-6" />
+
+          {/* C.4 — Continue Watching completion threshold */}
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <History className="w-5 h-5 text-gray-400" />
+              <div>
+                <h3 className="font-medium text-white">Soglia "completato" — Continua a guardare</h3>
+                <p className="text-sm text-gray-400 mt-1">
+                  Sopra questa percentuale di visione un titolo è considerato completato e sparisce dalla riga "Continua a guardare".
+                </p>
+              </div>
+            </div>
+            <SelectDropdown
+              value={String(
+                Math.round(
+                  ((preferences.continueWatchingCompletedThreshold
+                    ?? DEFAULT_PREFERENCES.continueWatchingCompletedThreshold
+                    ?? 0.95) as number) * 100
+                )
+              )}
+              options={[
+                { value: '80', label: '80%' },
+                { value: '85', label: '85%' },
+                { value: '90', label: '90%' },
+                { value: '95', label: '95% (default)' },
+                { value: '98', label: '98%' },
+              ]}
+              onChange={(v) => handlePreferenceChange('continueWatchingCompletedThreshold', Math.max(0.7, Math.min(0.99, Number(v) / 100)))}
             />
           </div>
         </section>
