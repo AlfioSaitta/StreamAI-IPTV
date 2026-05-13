@@ -1,16 +1,38 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import ChannelList from './components/ChannelList.tsx';
-import VideoPlayer from './components/VideoPlayerNew.tsx';
-import AIRecommender from './components/AIRecommender.tsx';
-import XtreamLogin from './components/XtreamLogin.tsx';
-import SeriesDetail from './components/SeriesDetail.tsx';
-import MovieDetail from './components/MovieDetail.tsx';
 import ProfileSelection from './components/ProfileSelection.tsx';
-import ProfileSettings from './components/ProfileSettings.tsx';
 import CodecWarning from './components/CodecWarning.tsx';
 import EmptyState from './components/shared/EmptyState.tsx';
 import ShortcutsCheatsheet from './components/ShortcutsCheatsheet.tsx';
+import CommandPalette from './components/CommandPalette.tsx';
+
+// E.1 — Heavy components are code-split via React.lazy so the initial chunk
+// stays lean. video.js + hls.js + mpegts.js (~600 kB minified) live entirely
+// inside VideoPlayer's async chunk and only download when the user starts
+// playback. Same idea for the optional AI assistant and detail screens.
+const VideoPlayer = lazy(() => import('./components/VideoPlayerNew.tsx'));
+const AIRecommender = lazy(() => import('./components/AIRecommender.tsx'));
+const XtreamLogin = lazy(() => import('./components/XtreamLogin.tsx'));
+const SeriesDetail = lazy(() => import('./components/SeriesDetail.tsx'));
+const MovieDetail = lazy(() => import('./components/MovieDetail.tsx'));
+const ProfileSettings = lazy(() => import('./components/ProfileSettings.tsx'));
+const GuideView = lazy(() => import('./components/GuideView.tsx'));
+
+const PlayerLoadingFallback = () => (
+  <div className="fixed inset-0 z-[100] bg-black flex items-center justify-center">
+    <div className="flex flex-col items-center gap-3">
+      <div className="w-12 h-12 border-4 border-red-600/20 border-t-red-600 rounded-full animate-spin" />
+      <p className="text-gray-400 text-sm">Caricamento player…</p>
+    </div>
+  </div>
+);
+
+const RouteLoadingFallback = () => (
+  <div className="flex-1 flex items-center justify-center bg-[var(--bg-primary)]">
+    <div className="w-10 h-10 border-4 border-red-600/20 border-t-red-600 rounded-full animate-spin" />
+  </div>
+);
 import { LanguageProvider } from './contexts/LanguageContext.tsx';
 import { loginXtream } from './services/xtream.ts';
 import { ProfileService, DEFAULT_PREFERENCES } from './services/profileService.ts';
@@ -20,6 +42,7 @@ import { Category, Channel, XtreamCredentials, StreamType, Profile } from './typ
 import { Server, Wifi, Sparkles } from 'lucide-react';
 import { platformService } from './services/platformService.ts';
 import { hasAiApiKey, isAiAvailable, isAiTemporarilySuspended } from './services/geminiService.ts';
+import { EpgReminderService, type ReminderFiredEvent } from './services/epg/reminderService.ts';
 
 const MIN_CONTENT_REFRESH_INTERVAL_MINUTES = 60;
 
@@ -113,8 +136,13 @@ function App() {
   const [showXtreamModal, setShowXtreamModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showCheatsheet, setShowCheatsheet] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [contentRefreshStatus, setContentRefreshStatus] = useState<ContentRefreshStatus>({ state: 'idle' });
   const contentRefreshInFlightRef = useRef(false);
+
+  // Latest reminder that fired — shown as an in-app toast.
+  const [reminderToast, setReminderToast] = useState<ReminderFiredEvent['reminder'] | null>(null);
 
   // Focus Restoration State
   const [lastFocusedChannelId, setLastFocusedChannelId] = useState<string | null>(null);
@@ -127,7 +155,8 @@ function App() {
     showSettings,
     showXtreamModal,
     activeTab,
-    activeProfile
+    activeProfile,
+    showGuide,
   });
 
   // Aggiorna i ref quando lo stato cambia
@@ -139,9 +168,10 @@ function App() {
       showSettings,
       showXtreamModal,
       activeTab,
-      activeProfile
+      activeProfile,
+      showGuide,
     };
-  }, [currentChannel, selectedSeries, selectedMovie, showSettings, showXtreamModal, activeTab, activeProfile]);
+  }, [currentChannel, selectedSeries, selectedMovie, showSettings, showXtreamModal, activeTab, activeProfile, showGuide]);
 
   useEffect(() => {
     if (activeProfile?.preferences?.theme === 'oled') {
@@ -152,14 +182,35 @@ function App() {
   }, [activeProfile]);
 
   // Global "?" / "Shift+/" → open keyboard shortcuts cheatsheet.
+  // Global "G" → open full TV Guide (when on Live tab and no overlay open).
+  // Global "Ctrl/Cmd+K" → open command palette (global search).
   // Ignored while typing in inputs/textareas and while the cheatsheet is already open.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const active = document.activeElement;
-      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
+      const isTyping = !!(active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA'));
+      // Ctrl/Cmd+K works even while typing (it's the universal palette shortcut).
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+        const s = stateRef.current;
+        // Don't hijack when the video player is on top — it has its own focus handling.
+        if (s.currentChannel) return;
+        e.preventDefault();
+        setShowCommandPalette(prev => !prev);
+        return;
+      }
+      if (isTyping) return;
       if (e.key === '?' || (e.shiftKey && e.key === '/')) {
         e.preventDefault();
         setShowCheatsheet(prev => !prev);
+        return;
+      }
+      // 'G' / 'g' (no modifiers) → toggle Guide TV. Only when no player/modal
+      // is on top — VideoPlayer captures its own 'G' for the mini-EPG overlay.
+      if ((e.key === 'g' || e.key === 'G') && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+        const s = stateRef.current;
+        if (s.currentChannel || s.selectedMovie || s.selectedSeries || s.showSettings || s.showXtreamModal) return;
+        e.preventDefault();
+        setShowGuide(prev => !prev);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -186,6 +237,10 @@ function App() {
       }
       if (state.selectedSeries) {
         setSelectedSeries(null);
+        return;
+      }
+      if (state.showGuide) {
+        setShowGuide(false);
         return;
       }
       if (state.showSettings) {
@@ -236,6 +291,11 @@ function App() {
               setSelectedSeries(null);
               return;
           }
+          if (state.showGuide) {
+              event.preventDefault();
+              setShowGuide(false);
+              return;
+          }
           if (state.showSettings) {
               event.preventDefault();
               setShowSettings(false);
@@ -260,7 +320,37 @@ function App() {
   useEffect(() => {
     CacheService.init();
     platformService.init();
+    EpgReminderService.ensureScheduler();
 
+    // In-app toast on reminder fire.
+    const offFired = EpgReminderService.onFired(({ reminder }) => {
+      setReminderToast(reminder);
+      window.setTimeout(() => setReminderToast(curr => (curr?.id === reminder.id ? null : curr)), 15000);
+    });
+
+    // OS notification click → jump to that channel.
+    const onNotifClick = (e: Event) => {
+      const ev = e as CustomEvent<ReminderFiredEvent>;
+      const r = ev.detail?.reminder;
+      if (!r) return;
+      const ch = [...liveCategories, ...vodCategories, ...seriesCategories]
+        .flatMap(c => c.channels)
+        .find(c => c.id === r.channelId);
+      if (ch) {
+        setCurrentChannel(ch);
+        setReminderToast(null);
+      }
+    };
+    window.addEventListener('epg-reminder-clicked', onNotifClick);
+    return () => {
+      offFired();
+      window.removeEventListener('epg-reminder-clicked', onNotifClick);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Latency placeholder useEffect was here before — kept platform classes init below.
+  useEffect(() => {
     const deviceMemory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
     const isLowPowerTvDevice = platformService.isNative || (typeof deviceMemory === 'number' && deviceMemory <= 4);
     document.body.classList.toggle('platform-native', platformService.isNative);
@@ -618,52 +708,59 @@ function App() {
 
     if (showSettings) {
         return (
-            <ProfileSettings
-                profile={activeProfile}
-                onBack={() => setShowSettings(false)}
-                onProfileUpdate={(updatedProfile) => setActiveProfile(updatedProfile)}
-                onRefreshContent={() => refreshContentFromServer({ background: false })}
-                isContentRefreshing={contentRefreshStatus.state === 'refreshing'}
-                contentRefreshMessage={contentRefreshStatus.message}
-            />
+            <Suspense fallback={<RouteLoadingFallback />}>
+                <ProfileSettings
+                    profile={activeProfile}
+                    onBack={() => setShowSettings(false)}
+                    onProfileUpdate={(updatedProfile) => setActiveProfile(updatedProfile)}
+                    onRefreshContent={() => refreshContentFromServer({ background: false })}
+                    isContentRefreshing={contentRefreshStatus.state === 'refreshing'}
+                    contentRefreshMessage={contentRefreshStatus.message}
+                />
+            </Suspense>
         );
     }
 
     if (currentChannel) {
         return (
             <div className="fixed inset-0 z-[100] bg-black">
-                 <VideoPlayer
-                    channel={currentChannel} 
-                    playlist={playQueue}
-                    onChannelSelect={setCurrentChannel}
-                    onNext={playQueue.length > 0 ? playNext : undefined}
-                    onPrev={playQueue.length > 0 ? playPrev : undefined}
-                    onProgress={handleVideoProgress}
-                    initialProgress={getInitialProgress()}
-                    onResetProgress={handleResetProgress}
-                    debugOverlay={activeProfile.preferences?.debugOverlay}
-                    xtreamCreds={xtreamCreds}
-                    onBack={() => {
-                        // Refresh history when closing player to update UI
-                        setActiveProfile(prev => prev ? ({...prev, history: ProfileService.getHistory(prev.id)}) : null);
-                        setCurrentChannel(null);
-                    }}
-                />
+                <Suspense fallback={<PlayerLoadingFallback />}>
+                    <VideoPlayer
+                        channel={currentChannel}
+                        playlist={playQueue}
+                        onChannelSelect={setCurrentChannel}
+                        onNext={playQueue.length > 0 ? playNext : undefined}
+                        onPrev={playQueue.length > 0 ? playPrev : undefined}
+                        onProgress={handleVideoProgress}
+                        initialProgress={getInitialProgress()}
+                        onResetProgress={handleResetProgress}
+                        debugOverlay={activeProfile.preferences?.debugOverlay}
+                        xtreamCreds={xtreamCreds}
+                        autoNextEpisodeEnabled={activeProfile.preferences?.autoNextEpisodeEnabled ?? DEFAULT_PREFERENCES.autoNextEpisodeEnabled}
+                        onBack={() => {
+                            // Refresh history when closing player to update UI
+                            setActiveProfile(prev => prev ? ({...prev, history: ProfileService.getHistory(prev.id)}) : null);
+                            setCurrentChannel(null);
+                        }}
+                    />
+                </Suspense>
             </div>
         );
     }
 
     if (selectedSeries && xtreamCreds) {
         return (
-            <SeriesDetail 
-                series={selectedSeries} 
-                creds={xtreamCreds} 
-                onPlayEpisode={handleEpisodePlay}
-                onBack={() => setSelectedSeries(null)}
-                history={activeProfile.history}
-                watchlistIds={activeProfile.watchlist}
-                onToggleWatchlist={handleToggleWatchlist}
-            />
+            <Suspense fallback={<RouteLoadingFallback />}>
+                <SeriesDetail
+                    series={selectedSeries}
+                    creds={xtreamCreds}
+                    onPlayEpisode={handleEpisodePlay}
+                    onBack={() => setSelectedSeries(null)}
+                    history={activeProfile.history}
+                    watchlistIds={activeProfile.watchlist}
+                    onToggleWatchlist={handleToggleWatchlist}
+                />
+            </Suspense>
         );
     }
 
@@ -677,6 +774,22 @@ function App() {
                     actions={[{ label: t.connectServer, onClick: () => setShowXtreamModal(true) }]}
                 />
             </div>
+        );
+    }
+
+    if (showGuide) {
+        return (
+            <Suspense fallback={<RouteLoadingFallback />}>
+                <GuideView
+                    liveCategories={liveCategories}
+                    xtreamCreds={xtreamCreds}
+                    onPlayChannel={(ch) => {
+                        setShowGuide(false);
+                        handleChannelSelect(ch);
+                    }}
+                    onBack={() => setShowGuide(false)}
+                />
+            </Suspense>
         );
     }
 
@@ -697,11 +810,16 @@ function App() {
             onLogout={handleLogoutProfile}
             onOpenServer={() => setShowXtreamModal(true)}
             onOpenSettings={() => setShowSettings(true)}
+            onOpenGuide={() => setShowGuide(true)}
             history={activeProfile.history}
             watchlistIds={activeProfile.watchlist}
             onToggleWatchlist={handleToggleWatchlist}
             allChannels={allChannels}
             onShowDetails={handleShowDetails}
+            continueWatchingCompletedThreshold={
+              activeProfile.preferences?.continueWatchingCompletedThreshold
+              ?? DEFAULT_PREFERENCES.continueWatchingCompletedThreshold
+            }
         />
     );
   };
@@ -712,31 +830,35 @@ function App() {
         {renderContent()}
 
         {selectedMovie && (
-          <MovieDetail
-              key={selectedMovie.id}
-              movie={selectedMovie}
-              onClose={() => setSelectedMovie(null)}
-              onPlay={(ch, opts) => handlePlayMovie(ch, opts)}
-              watchlistIds={activeProfile.watchlist}
-              onToggleWatchlist={handleToggleWatchlist}
-              allChannels={allChannels}
-              onShowDetails={handleShowDetails}
-              history={activeProfile.history}
-              geminiApiKey={activeProfile.preferences?.geminiApiKey}
-          />
+          <Suspense fallback={null}>
+            <MovieDetail
+                key={selectedMovie.id}
+                movie={selectedMovie}
+                onClose={() => setSelectedMovie(null)}
+                onPlay={(ch, opts) => handlePlayMovie(ch, opts)}
+                watchlistIds={activeProfile.watchlist}
+                onToggleWatchlist={handleToggleWatchlist}
+                allChannels={allChannels}
+                onShowDetails={handleShowDetails}
+                history={activeProfile.history}
+                geminiApiKey={activeProfile.preferences?.geminiApiKey}
+            />
+          </Suspense>
         )}
 
         {!currentChannel && !selectedSeries && (liveCategories.length > 0 || vodCategories.length > 0) && isAiAvailable(activeProfile.preferences?.geminiApiKey) && (
-            <AIRecommender
-              channels={getCurrentCategories().flatMap(c => c.channels)}
-              onPlayChannel={handlePlayRecommended}
-              activeTab={activeTab}
-              history={activeProfile.history}
-              aiCaching={activeProfile.preferences?.aiCaching}
-              geminiApiKey={activeProfile.preferences?.geminiApiKey}
-              profileId={activeProfile.id}
-              profileLanguage={activeProfile.preferences?.language || DEFAULT_PREFERENCES.language}
-            />
+            <Suspense fallback={null}>
+              <AIRecommender
+                channels={getCurrentCategories().flatMap(c => c.channels)}
+                onPlayChannel={handlePlayRecommended}
+                activeTab={activeTab}
+                history={activeProfile.history}
+                aiCaching={activeProfile.preferences?.aiCaching}
+                geminiApiKey={activeProfile.preferences?.geminiApiKey}
+                profileId={activeProfile.id}
+                profileLanguage={activeProfile.preferences?.language || DEFAULT_PREFERENCES.language}
+              />
+            </Suspense>
         )}
 
         {!currentChannel && !selectedSeries && (liveCategories.length > 0 || vodCategories.length > 0) && !isAiAvailable(activeProfile.preferences?.geminiApiKey) && (
@@ -748,10 +870,12 @@ function App() {
         )}
 
         {showXtreamModal && (
-          <XtreamLogin
-              onLogin={(creds) => handleXtreamLogin(creds, true)}
-              onClose={() => setShowXtreamModal(false)}
-          />
+          <Suspense fallback={null}>
+            <XtreamLogin
+                onLogin={(creds) => handleXtreamLogin(creds, true)}
+                onClose={() => setShowXtreamModal(false)}
+            />
+          </Suspense>
         )}
 
         {/* Avviso codec HEVC - mostrato solo se necessario */}
@@ -760,8 +884,55 @@ function App() {
         {/* Banner per lo stato di riproduzione in rete */}
         <NetworkStatusBanner />
 
+        {/* Toast promemoria EPG */}
+        {reminderToast && (
+          <div className="fixed top-6 right-6 z-[210] w-80 rounded-2xl border border-amber-500/30 bg-amber-950/90 backdrop-blur-xl shadow-2xl p-4 animate-in fade-in slide-in-from-top-2">
+            <div className="flex items-start gap-3">
+              <div className="rounded-full bg-amber-500/20 p-2 flex-shrink-0">
+                <Sparkles className="w-5 h-5 text-amber-300" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-[10px] font-bold tracking-widest uppercase text-amber-300">Promemoria EPG</div>
+                <div className="text-sm font-semibold text-white truncate">{reminderToast.title}</div>
+                <div className="text-xs text-amber-200/80 truncate">
+                  {reminderToast.channelName} · {new Date(reminderToast.start).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                </div>
+                <div className="flex items-center gap-2 mt-2">
+                  <button
+                    onClick={() => {
+                      const ch = allChannels.find(c => c.id === reminderToast.channelId);
+                      if (ch) {
+                        setCurrentChannel(ch);
+                        setReminderToast(null);
+                      }
+                    }}
+                    className="tv-focus text-xs font-bold bg-amber-500 hover:bg-amber-400 text-black px-3 py-1.5 rounded-full"
+                  >
+                    Guarda
+                  </button>
+                  <button
+                    onClick={() => setReminderToast(null)}
+                    className="tv-focus text-xs font-semibold text-amber-200 hover:text-white px-2 py-1.5"
+                  >
+                    Ignora
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Cheatsheet scorciatoie da tastiera (apertura: ?, Shift+/) */}
         <ShortcutsCheatsheet isOpen={showCheatsheet} onClose={() => setShowCheatsheet(false)} />
+
+        {/* Palette di ricerca globale (apertura: Ctrl/Cmd+K) */}
+        <CommandPalette
+          isOpen={showCommandPalette}
+          onClose={() => setShowCommandPalette(false)}
+          channels={allChannels}
+          profileId={activeProfile?.id}
+          onSelect={(channel) => handleShowDetails(channel)}
+        />
       </div>
     </LanguageProvider>
   );

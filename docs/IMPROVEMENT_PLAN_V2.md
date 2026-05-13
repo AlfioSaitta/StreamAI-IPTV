@@ -5,7 +5,7 @@
 > Questo V2 raccoglie nuove proposte emerse da un'analisi statica del codice attuale
 > (14.104 LOC, focus su file > 700 righe) e dalla revisione delle feature di mercato.
 >
-> **Ultimo aggiornamento:** 2026-05-12
+> **Ultimo aggiornamento:** 2026-05-13
 > **Baseline reale (da package.json):** React **18.2** (non 19 come da copilot-instructions),
 > Vite 5, Electron 37, Capacitor 7, Video.js 8.23, hls.js 1.5, mpegts.js 1.7, `@google/genai` 1.34.
 
@@ -14,6 +14,7 @@
 ## Indice
 
 - [A. Analisi sintetica dello stato](#a-analisi-sintetica-dello-stato)
+- [🚨 URG-1. Seek VOD bloccante (regressione critica)](#-urg-1-seek-vod-bloccante-regressione-critica)
 - [B. Debt tecnico ad alto impatto](#b-debt-tecnico-ad-alto-impatto)
 - [C. Usabilità (UX) — gap residui](#c-usabilità-ux--gap-residui)
 - [D. Nuove feature ad alto valore utente](#d-nuove-feature-ad-alto-valore-utente)
@@ -52,6 +53,222 @@
 **Implicazione:** ogni nuova feature aumenta linearmente la fatica di test e regressione.
 Refactoring mirato di **VideoPlayerNew** e **streamInfoService** sblocca tutte le tranche
 successive (player robusto, multi-audio, EPG, recording).
+
+---
+
+## 🚨 URG-1. Seek VOD bloccante (regressione critica)
+
+> **Priorità: P0 — bloccante per UX VOD.** Segnalato 2026-05-13.
+> Cliccando o trascinando la progress bar di un film/serie il player resta
+> congelato per molti secondi (a volte > 1 min) finché non termina il
+> download fino alla posizione richiesta. Comportamento sistematico su
+> tutti i provider Xtream testati. Live non impattato (non ha timeline).
+
+### URG-1.1 Cause radice individuate (analisi codice + comportamento osservato)
+
+Il problema **non** è un singolo bug, ma la combinazione di tre fattori. Tutti
+e tre sono confermati leggendo `components/VideoPlayerNew.tsx` (timeline alle
+righe ~897-953) e `hooks/useWebPlayerEngine.ts` (config Video.js riga ~156-163).
+
+1. **Bug "seek-storm" da `<input type="range">` invisibile sopra la timeline.**
+   La barra di progresso ha **due** elementi sovrapposti che reagiscono al click:
+   - un `<div>` con `onClick` che chiama `playerRef.current.currentTime(time)`;
+   - un `<input type="range">` (riga 944) con `absolute inset-0 z-10` posizionato
+     **sopra** il div, con `onChange={handleSeek}`.
+
+   In tutti i browser Chromium/Firefox, l'`<input type="range">`:
+   - **al click** sposta il thumb sulla posizione cliccata e emette `change`
+     una volta sola → OK;
+   - **al drag** (mousedown → mousemove → mouseup) emette `change` **a ogni
+     pixel intermedio**.
+
+   `handleSeek` (riga 343-356) chiama `playerRef.current.currentTime(time)` ad
+   ogni evento. Quindi un drag di 200 px sulla timeline scatena **fino a 200
+   seek consecutivi**, ognuno dei quali apre/aborta una `Range request` HTTP
+   verso il server Xtream. Il `<video>` HTML5 mette in coda i seek e finisce
+   per riprodurre solo quando l'ultima richiesta riesce a riempire abbastanza
+   buffer attorno alla nuova `currentTime`. Su connessioni lente o server
+   Xtream con I/O storage saturo, questo si manifesta come "scarica fino al
+   punto cliccato".
+
+   Anche un singolo click apparentemente "stabile" innesca l'`onClick` del div
+   **+** il `change` dell'input → due seek allo stesso `time` ravvicinati, e
+   l'OSD/UI si desincronizza dal tempo reale.
+
+2. **`preload: 'metadata'` + container mp4 con `moov` a fine file.**
+   Molti backend Xtream rispondono per i film con un MP4 il cui atom `moov`
+   (la tabella di indicizzazione dei frame) è **alla fine del file** invece
+   che all'inizio (manca lo step `qt-faststart` lato server). Con
+   `preload: 'metadata'` (riga 161 di `useWebPlayerEngine.ts`) il browser
+   scarica solo i primi 64-128 kB, abbastanza per leggere l'`ftyp` ma non
+   `moov` → quando l'utente fa seek, il browser **deve** prima scaricare la
+   coda del file per imparare a mappare i timestamp ai byte offset. Su un
+   film da 4 GB significa scaricare centinaia di MB prima che il seek possa
+   atterrare. È esattamente il sintomo riportato dall'utente.
+
+3. **Detection del motore non valida il vero `Content-Type` né il supporto
+   `Range`.** `playerUtils.ts::detectStreamSource` per Xtream + tipo `movie`
+   / `series` senza estensione assume sempre `mp4 / videojs / preload=metadata`.
+   In realtà i provider espongono spesso:
+   - `.mkv` reali sotto un URL extensionless → MSE non lo legge nativamente
+     e il `<video>` cade in fallback seek-as-download;
+   - MPEG-TS muxato senza indici (PCR rotti) → impossibile seek random;
+   - server che rispondono con `Accept-Ranges: none` o HTTP 200 anziché 206
+     → seek = scarico tutto.
+   Non è mai stato fatto un **HEAD probe** per scoprire `Accept-Ranges` reale
+   né per leggere `Content-Type` effettivo.
+
+### URG-1.2 Conseguenze osservate
+
+- Drag della timeline = freeze del player per N secondi proporzionale a
+  (numero di eventi `change` × RTT al server).
+- Click singolo = freeze per secondi (download `moov` o re-buffer dall'inizio
+  se Range non onorato).
+- `setCurrentTime(time)` aggiorna la UI a una posizione che il player non
+  raggiungerà mai → thumb "salta indietro" quando finalmente arriva il `seeked`.
+- Su Android (player nativo ExoPlayer) il problema **non** si presenta: lo
+  conferma che la causa è lato player web, non lato server (ExoPlayer
+  ottimizza Range request e indicizzazione MP4).
+
+### URG-1.3 Soluzione proposta (4 livelli, ROI decrescente)
+
+Implementare in **ordine** — i primi due livelli risolvono già il 90% dei
+casi senza modifiche a livello di rete.
+
+> **Stato 2026-05-13:** **Livello 1 e Livello 2 implementati**; del Livello 3
+> è stata implementata la parte di degrado UX (OSD warning quando il server
+> risponde `Accept-Ranges: none`). La detection completa del MIME reale e il
+> remount automatico con engine alternativo restano da fare.
+
+#### Livello 1 — Fix immediato del seek-storm (½ giorno, P0) ✅
+
+- [x] **Rimosso** l'`<input type="range">` invisibile dalla timeline (era la
+  causa dei burst di seek durante il drag).
+- [x] Scrubbing custom nel hook `useInteractiveTimeline`:
+  - `pointerdown` arma la sessione e fa `setPointerCapture`;
+  - `pointermove` aggiorna **solo** lo stato locale (`scrubTime` + UI
+    ottimistica), **senza** chiamare `player.currentTime()`;
+  - `pointerup` chiama `onSeek(finalTime)` **una sola volta**;
+  - `pointercancel` annulla senza emettere alcun seek.
+- [x] Listener `pointermove` / `pointerup` montati su `window` mentre il
+  drag è attivo → la barra continua a tracciare il dito anche se esce
+  dal div.
+- [x] Thumb visibile e ingrandito durante lo scrubbing; tooltip + ghost bar
+  continuano a funzionare.
+- [x] `VideoPlayerNew.tsx` espone `performSeek(time)` che usa
+  `videoEl.fastSeek?.(time)` quando disponibile (atterraggio sul keyframe
+  più vicino, niente decodifica intermedia).
+- [x] Display-time della timeline derivato come `isScrubbing ? scrubTime :
+  currentTime` → la UI segue il dito invece di "saltare indietro" quando
+  arriva il `seeked`.
+- [x] Accessibilità preservata: il div ha `role="slider"`, `aria-valuemin/
+  max/now/text`, `tabIndex={0}`, e gestione tastiera (←/→ ±5s, PageUp/Down
+  ±30s, Home/End estremi).
+- [x] Test: `tests/player/scrubbing.test.tsx` (5 test) verifica che un
+  drag di 20 `pointermove` emetta **esattamente 1** `onSeek` al
+  `pointerup`. Click semplice, pointercancel, right-click ignorato e
+  clamping sono coperti.
+
+#### Livello 2 — Faststart sintetico lato client per MP4 con `moov` in coda (1 giorno, P0) ✅
+
+- [x] Nuovo modulo `services/streamInfo/vodProbe.ts` con
+  `probeVodSource(url, { prefetchTail })`:
+  - HEAD con timeout 4 s → legge `Accept-Ranges`, `Content-Type`, `Content-Length`.
+  - Fallback automatico a una tiny GET `Range: bytes=0-1023` quando HEAD
+    fallisce o ritorna 405 (alcuni server Xtream non implementano HEAD).
+  - Se `Accept-Ranges: bytes` e `Content-Length > 2 MB`, una GET
+    `Range: bytes=<L-2MB>-` scarica gli ultimi 2 MB. Il `Response.arrayBuffer()`
+    viene letto fino in fondo per **garantire che il browser/Electron
+    archivi la coda nella HTTP cache** → al primo seek dell'utente il `moov`
+    è già locale.
+  - Memoization in-memory (`Map<url, VodProbeResult>`) + coalescing delle
+    chiamate concorrenti (`Map<url, Promise>`) → costa zero su riapertura.
+- [x] In `useWebPlayerEngine.ts`: per VOD progressivi (`engine === 'videojs'`
+  && `type ∈ {movie, series}` && `!isLive`) la sorgente parte con
+  `preload: 'auto'` invece di `'metadata'`, in parallelo lancia
+  `probeVodSource(...)` fire-and-forget. Live e HLS/mpegts conservano il
+  comportamento precedente per non sprecare banda.
+- [x] Test: `tests/streamInfo/vodProbe.test.ts` (6 test) — Accept-Ranges
+  bytes/none, fallback tiny GET, memoization/coalescing, skip prefetch
+  senza content-length, doppio fallimento HEAD+GET.
+
+#### Livello 3 — Probe `Accept-Ranges` + content-type sniffing (1 giorno, P1) ✅
+
+- [x] HEAD probe del Livello 2 espone già `rangeSupport` e `contentType` reali.
+- [x] Il risultato del probe è ora propagato dal hook al componente via
+  callback `onVodProbeResult`. `VideoPlayerNew.tsx` conserva
+  `vodProbe: VodProbeResult | null` per pilotare il rendering condizionale.
+- [x] Quando `rangeSupport === 'no'` la **timeline è interamente disabilitata**:
+  barra opaca con `aria-disabled`, niente `pointerdown` / `mousemove` / focus,
+  banner inline `bg-amber-500/15` con icona di warning. I pulsanti skip ±10s
+  e Riparti-dall'inizio sono disabilitati visivamente, e gli shortcut
+  tastiera ←/→ vengono ignorati (`usePlayerShortcuts` riceve `seekDisabled`).
+- [x] OSD differenziato in base al `Content-Type` reale:
+  - `Accept-Ranges: none` → "Server senza Range: seek non disponibile".
+  - `video/x-matroska` / `mkv` → "MKV non supportato dal player web — prova
+    HLS se disponibile".
+  - `video/mp2t` su VOD → "MPEG-TS senza indici: il seek può essere lento".
+- [ ] **TODO (futuro)**: usare il `Content-Type` reale per ricomputare l'engine
+  al volo (es. MIME = `video/mp2t` su URL extensionless → forzare `mpegts.js`
+  invece di `videojs`). Richiede smontaggio del player corrente e rebuild
+  dell'effect, non banale; gestire come refactor a parte se i casi reali
+  lo giustificano.
+
+#### Livello 4 — Proxy Range intelligente in Electron Main (2-3 giorni, P2, opzionale)
+
+- [ ] Per i casi in cui il server Xtream restituisce 200 invece di 206
+  (Range non onorato), introdurre in `main.js` un piccolo proxy interno:
+  - intercetta richieste a `loopback:port/proxy?u=<url>`;
+  - traduce header `Range` del client in TCP read parziale via
+    `electron.net.request`;
+  - se il server **non** supporta Range, scarica solo il chunk richiesto
+    in streaming, scartando i byte prima dell'offset (workaround "fake
+    Range").
+- [ ] Solo Electron, dietro feature flag `experimental.rangeProxy`.
+- [ ] Non disponibile su Android (Capacitor): in quel caso vale già
+  ExoPlayer nativo.
+
+### URG-1.4 Verifica e test
+
+- [ ] Aggiungere `tests/player/scrubbing.test.tsx` (React Testing Library)
+  che simula `pointerdown` → 20 × `pointermove` → `pointerup` e asserisce
+  **una sola** chiamata a `player.currentTime`.
+- [ ] Aggiungere fixture e test su `mp4MoovPrefetch`:
+  - mock di `fetch` HEAD che ritorna `Accept-Ranges: bytes` → prefetch eseguito.
+  - mock che ritorna `Accept-Ranges: none` → prefetch **non** eseguito,
+    `supportsRange` settato a false.
+- [ ] Smoke manuale: 3 provider Xtream reali, 3 VOD ciascuno (mp4 faststart,
+  mp4 non-faststart, MKV). Misurare tempo da click-seek a `seeked` event.
+  Target: **< 1.5 s sul 95° percentile**.
+
+### URG-1.5 Roadmap
+
+Inserire in cima alla roadmap esistente (sezione H) come **Sprint 0** prima
+dei work pack già pianificati. Stima totale: **2-3 giorni** (Livelli 1-3).
+Livello 4 opzionale, post-fix.
+
+| Step | Effort | Owner | Risultato atteso |
+| ---- | ------ | ----- | ---------------- |
+| L1 — Fix scrubber | 0.5 g | Player | Drag fluido, niente seek-storm |
+| L2 — Moov prefetch | 1 g | Player + StreamInfo | Seek MP4 non-faststart < 2 s |
+| L3 — HEAD probe | 1 g | StreamInfo | Detection corretta + UX degradata graceful |
+| L4 — Range proxy | 2-3 g (opz) | Electron Main | Compatibilità server non standard |
+
+### URG-1.6 Quick win immediato (se serve un patch in 1 h)
+
+Solo come tampone fino al delivery del Livello 1, **non** è la soluzione
+definitiva:
+
+```diff
+- onChange={handleSeek}
++ onMouseUp={handleSeek}
++ onTouchEnd={handleSeek}
++ onChange={(e) => setCurrentTime(parseFloat(e.target.value))}
+```
+
+Questo limita le chiamate a `currentTime()` solo al rilascio del drag.
+Risolve il drag-storm ma **non** il problema del `moov` a fine file
+(Livello 2 resta necessario).
 
 ---
 
@@ -144,16 +361,37 @@ React 19 abilita:
 
 ### C.3 Ricerca globale
 
-- [ ] Cmd/Ctrl+K palette globale: cerca su Live + Movie + Series in un click.
-- [ ] Cronologia ricerche recenti per profilo.
-- [ ] Highlight match nei risultati.
-- [ ] Filtri rapidi: solo HD, solo nuovi, genere.
+- [x] Cmd/Ctrl+K palette globale: cerca su Live + Movie + Series in un click.
+  Implementata in `components/CommandPalette.tsx`, montata in `App.tsx`.
+  Apertura via `Ctrl+K` / `⌘K` (anche mentre si digita in input). Hijack
+  disabilitato quando il player è in primo piano per non interferire con i
+  suoi shortcut.
+- [x] Cronologia ricerche recenti per profilo (max 6, persistita su
+  `localStorage` con namespace `streamai.cmdk.recent.<profileId>`).
+- [x] Highlight match nei risultati (`<mark>` su token normalizzati,
+  riusa la normalizzazione di `catalogIndex`).
+- [x] Filtri rapidi via chip: Tutto / Live / Film / Serie. `Tab` /
+  `Shift+Tab` ciclano i filtri. Navigazione risultati con `↑/↓`,
+  `Home/End`, `Enter` per aprire, `Esc` per chiudere.
+- [ ] Filtri avanzati: solo HD, solo nuovi, per genere (richiede
+  metadata aggiuntivi affidabili sui canali).
 
 ### C.4 Continua a guardare migliorato
 
-- [ ] Carosello dedicato in Home con progress bar visibile sul poster.
-- [ ] Soglia "completato" configurabile (default 95%) → rimuove da carosello.
-- [ ] Episodio successivo auto-play in Series con countdown 10s e tasto skip.
+- [x] Carosello dedicato in Home con progress bar visibile sul poster
+  (già presente in `ChannelList.tsx` → `ContentRow` "Continua a guardare"
+  + barra rossa al fondo del poster in `ChannelItem`).
+- [x] Soglia "completato" configurabile (default 95%) → rimuove dal
+  carosello. Preferenza profilo `continueWatchingCompletedThreshold`
+  (bound `[0.70, 0.99]`), selettore in ProfileSettings → Riproduzione
+  (80 / 85 / 90 / 95 / 98%).
+- [x] Episodio successivo auto-play in Series con countdown 10s e tasto
+  skip. Implementato come `hooks/useAutoNextEpisode.ts` +
+  `components/player/AutoNextOverlay.tsx` (anello di countdown, "Riproduci
+  ora" con focus iniziale per TV, "Annulla" per disarmare). Si arma solo
+  per `channel.type === 'series'` con `playlist.next` disponibile e non
+  Live; si riarma se l'utente fa seek-back > 30s dalla fine. Preferenza
+  profilo `autoNextEpisodeEnabled` (default `true`).
 - [ ] Sincronizza progress tra Desktop e Android (vedi D.6 cloud sync opzionale).
 
 ### C.5 Gesture touch Android
@@ -182,7 +420,8 @@ React 19 abilita:
 
 ### D.1 EPG (Electronic Program Guide)
 
-**Stato attuale:** **Fase 1 implementata** (servizio + Mini-EPG nel player).
+**Stato attuale:** **Fasi 1, 2 e 3 implementate** (servizio + Mini-EPG nel
+player + vista Guide TV completa + promemoria).
 Xtream Codes espone `get.php?action=get_short_epg` e file XMLTV via `xmltv.php`.
 
 - [x] Servizio `services/epg/`:
@@ -191,19 +430,46 @@ Xtream Codes espone `get.php?action=get_short_epg` e file XMLTV via `xmltv.php`.
   - [x] Indice `Map<channelTvgId, EpgProgramme[]>` con purge programmi > 24h
     passati e > 14 giorni futuri.
   - [x] Cache `cacheService` con TTL 6h + fallback a dati stale on network error.
+  - [x] Accessor pubblico `getProgrammesForChannel(tvgId)` per consumer batch
+    (es. vista Guide TV).
 - [x] UI Mini-EPG nel player (overlay `G` su Live):
   - [x] Programma corrente + barra avanzamento (refresh ogni 60s).
   - [x] Prossimi 3 programmi con orario + giorno (Oggi/Domani/data).
   - [x] Pulsante Refresh manuale + auto-rebuild ogni 30 min via hook.
 - [x] M3U parser estrae `tvg-id`; Xtream live channels mappano
   `epg_channel_id` → `Channel.tvgId`.
-- [ ] Vista Guide TV completa (Fase 2):
-  - Grid canali × ore con scroll virtualizzato verticale e orizzontale.
-  - Selezione "ora" sticky in alto.
-- [ ] Promemoria programma: notifica nativa Electron/Android 2 minuti prima (Fase 3).
+- [x] Vista Guide TV completa (Fase 2) — `components/GuideView.tsx`:
+  - [x] Grid canali × ore con virtualizzazione verticale (overscan 4 righe)
+    e scroll orizzontale per finestra di 24h centrata su "ora".
+  - [x] Header timeline sticky con tick orari e indicatore "ORA" rosso
+    sincronizzato (refresh 30s).
+  - [x] Colonna canali sticky a sinistra, scroll Y mirrorato verso il body.
+  - [x] Filtro per categoria (chip orizzontali) + ricerca canale.
+  - [x] Salto rapido al "now" + navigazione giorno (±24h) fino al limite
+    della finestra EPG indicizzata (14 giorni).
+  - [x] Click programma → menu azioni (Guarda ora / Promemoria), click
+    canale → riproduzione immediata.
+  - [x] Apertura via tasto `G` globale (quando non in player) o pulsante
+    `EPG` mostrato nell'header del tab Live.
+- [x] Promemoria programma (Fase 3) — `services/epg/reminderService.ts`:
+  - [x] Storage in `localStorage` con purge automatica (> 6h post-programma).
+  - [x] Scheduler interno (check ogni 30s) che fa fire 2 minuti prima dello
+    start, marcando `fired` per evitare doppi trigger.
+  - [x] Notifica nativa via `Notification` API (web/Electron) con permission
+    request lazy; click sulla notifica → evento `epg-reminder-clicked`
+    intercettato da App.tsx per avviare il canale.
+  - [x] Toast in-app sempre visibile (anche senza permission OS) con CTA
+    "Guarda" / "Ignora".
+  - [x] API `add` / `remove` / `toggle` / `has` / `onFired` con id stabile
+    `${channelId}|${start}` per dedup.
+  - [ ] Pianificazione registrazione direttamente dal menu programma
+    (richiede D.3 Recording).
 
-**Test:** `tests/epg/xmltvParser.test.ts` — 11 test (date parsing, entity decoding,
-malformed inputs, document order preservation).
+**Test:**
+- `tests/epg/xmltvParser.test.ts` — 11 test (date parsing, entity decoding,
+  malformed inputs, document order preservation).
+- `tests/epg/reminderService.test.ts` — 5 test (add/remove/toggle, persistenza,
+  purge stale, fire scheduler con `vi.useFakeTimers`).
 
 ### D.2 Timeshift / Catch-up TV
 
@@ -227,16 +493,38 @@ Molti provider Xtream supportano `timeshift/<user>/<pass>/<duration>/<start>/<id
 
 - [ ] Esporre tracce audio HLS (`AudioTrackList` di Video.js).
 - [ ] Selettore lingua audio in OSD (`A`).
-- [ ] Sottotitoli:
-  - WebVTT da HLS embed.
-  - Sideload SRT/VTT da disco (drag-drop o file picker).
-  - Ricerca automatica da OpenSubtitles (via API key opzionale).
+- [x] Sottotitoli (MVP, 2026-05-13):
+  - [x] Sideload SRT/VTT da disco via file picker.
+  - [x] Parser SRT→VTT in `services/subtitleService.ts` (tollerante a
+    BOM, CRLF, timestamp con virgola/punto, cue malformate ignorate).
+  - [x] `<track>` element iniettato nel `<video>` con `mode='showing'` e
+    riprovato al caricamento per browser che ignorano `default` post-mount.
+  - [x] UI menu sottotitoli (icona `Subtitles`) con: stato "disattivati",
+    sottotitolo attivo (toggle ON/OFF), pulsante "Carica file".
+  - [x] OSD feedback su caricamento, toggle, rimozione.
+  - [x] Shortcut tastiera `S` (toggle visibilità se già caricato, altrimenti
+    apre il menu).
+  - [x] Reset automatico al cambio canale/episodio + revoke del Blob URL
+    all'unmount per evitare memory leak.
+  - [x] Test `tests/player/subtitleService.test.ts` (11 test) su parser
+    SRT→VTT, normalise VTT, content sniffing.
+- [ ] Sottotitoli WebVTT da HLS embed (lettura tracce in
+  `Hls.Events.SUBTITLE_TRACKS_UPDATED`).
+- [ ] Ricerca automatica da OpenSubtitles (via API key opzionale).
 - [ ] Stile personalizzabile: font, dimensione, sfondo, posizione.
+- [ ] Persistenza sottotitolo per profilo/episodio (offset incluso).
 
 ### D.5 Audio-only mode + sleep timer + alarm
 
 - [ ] Modalità "Solo audio" per radio IPTV e podcast (riduce CPU/banda).
-- [ ] Sleep timer (15/30/60/90 min, fine programma EPG) con fade-out.
+- [x] Sleep timer (15/30/60/90 min, fine programma EPG) con fade-out.
+  Implementato come `hooks/useSleepTimer.ts` +
+  `components/player/SleepTimerMenu.tsx`. Menu apribile da pulsante
+  Moon nel control bar o shortcut `T`. Preset: 15 / 30 / 60 / 90 min +
+  "Fine programma" (solo Live con EPG corrente). Fade-out audio
+  configurabile (default 5s) prima del pause hard. Badge animato sul
+  pulsante mostra il countdown (Xm / Xs) e il pulsante diventa color
+  ambra quando attivo. Esc chiude il menu prima delle altre overlay.
 - [ ] Sveglia: avvia canale X a ora Y (Electron usa `node-schedule`).
 
 ### D.6 Sync cloud opzionale (BYOC)
@@ -268,9 +556,11 @@ Molti provider Xtream supportano `timeshift/<user>/<pass>/<duration>/<start>/<id
 
 ### D.10 Tema OLED + temi custom
 
-- `preferences.theme` esiste ma non viene usato.
+- `preferences.theme` esiste già ed è applicato (`theme === 'oled'`
+  → class `theme-oled` sul `body`, switcher in ProfileSettings).
 
-- [ ] Tema OLED true black (#000) con accenti viola.
+- [x] Tema OLED true black (#000) con accenti scuri (classe `.theme-oled`
+  in `index.css`, opzione "OLED" in ProfileSettings → Aspetto).
 - [ ] Tema chiaro (per uso diurno desktop).
 - [ ] Tema auto per orario.
 - [ ] Color accent custom (picker hex).
@@ -294,8 +584,20 @@ Molti provider Xtream supportano `timeshift/<user>/<pass>/<duration>/<start>/<id
 
 ### E.1 Bundle e cold start
 
-- [ ] Confermare/applicare `manualChunks` (vedi P1.1 esistente) con split misurato:
-  - `react-vendor`, `videojs-vendor`, `mpegts-hls`, `genai`, `lucide`, `i18n-it/en/es`.
+- [x] Code splitting via `React.lazy` + `Suspense` in `App.tsx`:
+  - `VideoPlayerNew` (video.js + hls.js + mpegts.js) → chunk dedicato
+    caricato solo all'avvio playback (~468 kB gzip).
+  - `ProfileSettings`, `GuideView`, `MovieDetail`, `SeriesDetail`,
+    `AIRecommender`, `XtreamLogin` → chunk dedicati per ciascuna route.
+  - Strategia: niente `manualChunks` (rompeva l'ordine di valutazione di
+    video.js + plugin in Electron). Vite/Rollup gestisce lo split
+    automaticamente, mantenendo il sotto-grafo di video.js in un singolo
+    chunk asincrono.
+- [x] Risultato: **chunk iniziale 580 → ~95 kB gzip** (`index-*.js`)
+  + ~51 kB gzip di vendor common (`index-C1TFRE--.js`) = **~146 kB gzip
+  totali al primo paint** vs 580 kB gzip precedenti (**−75%**, target
+  < 250 kB raggiunto). Build verificata con `npm run build` e
+  `npm run test:run` (62/62).
 - [ ] Pre-render route iniziale (Home) come HTML statico in `dist/index.html` per
       Time-To-First-Paint Electron < 250 ms.
 - [ ] `import.meta.glob` lazy per categorie metadati ed engine player.
@@ -328,11 +630,28 @@ Molti provider Xtream supportano `timeshift/<user>/<pass>/<duration>/<start>/<id
 
 ### E.5 Cache e storage
 
-- [ ] Spostare `cacheService` su IndexedDB (Dexie wrapper opzionale, 2 kB).
-- [ ] Image cache via Cache API (`caches.open('streamai-images')`) con strategia
-      stale-while-revalidate, già supportata in service worker.
+- [x] `cacheService` su IndexedDB — già presente da inizio progetto
+  (`STORE_API` + `STORE_IMAGES` con LRU, TTL, quota tracking).
+- [x] **Image cache via Cache API** (`caches.open('streamai-images-v1')`) —
+  modulo `services/imageCacheApi.ts` (2026-05-13). Strategy:
+  - Lettura: memoria → Cache API → IDB legacy → null.
+  - Scrittura: Cache API (con fallback IDB se quota o non supportato).
+  - LRU custom via header `x-streamai-last-access`, TTL = 30 giorni
+    via `x-streamai-cached-at`, cleanup aggressivo ai cambi di pressione storage.
+  - `clearImages` / `clearAll` / `hasImages` batch / `cleanupOldImages`
+    propagano l'azione su entrambi i tier.
+  - Diagnostica esposta in `getStats` (`cacheApiEnabled`, `cacheApiImages`,
+    `idbImages`, `gzipEnabled`).
+- [x] **Compressione preset cache TMDB con `CompressionStream('gzip')`** —
+  modulo `services/gzipUtil.ts` (2026-05-13). `saveApiData` comprime
+  payload > 4 KB se il risparmio è > 5%; `getApiData` decomprime
+  trasparentemente leggendo il flag `_gz: true`. Compatibilità retro
+  garantita con i record legacy `{ timestamp, data }`. Test
+  `tests/cache/gzipUtil.test.ts` (5 test): round-trip piccolo/grande,
+  saving negligibile, errore su payload corrotto.
 - [ ] Service worker per asset statici (Vite PWA plugin) → avvio offline web.
-- [ ] Compressione preset cache TMDB con `CompressionStream('gzip')` (riduce ~70%).
+- [ ] Spostare `cacheService` su Dexie wrapper (rinviato: l'API attuale
+  è abbastanza piccola; eventualmente con il SW).
 
 ### E.6 GPU acceleration / smoothness
 
@@ -446,6 +765,21 @@ npm run check      # typecheck + test:run + build
 Ogni tranche = 1–2 settimane. Le tranche sono ordinate per ROI e per minimizzare
 conflitti con il piano esistente.
 
+### Sprint 0 (urgente, ~3 giorni) — Fix seek VOD bloccante
+
+- [x] URG-1.3 Livello 1 — rimosso `<input type="range">` invisibile,
+  scrubbing custom via pointer events in `useInteractiveTimeline`,
+  `fastSeek()` + displayTime ottimistico (2026-05-13).
+- [x] URG-1.3 Livello 2 — `services/streamInfo/vodProbe.ts` (HEAD probe
+  + tail prefetch 2 MB) + `preload=auto` per VOD progressivi (2026-05-13).
+- [x] URG-1.3 Livello 3 — disabilitazione interattiva della timeline +
+  shortcut tastiera + tasti skip quando il server non supporta Range;
+  OSD differenziati per MKV / MPEG-TS reali via Content-Type sniffing
+  (2026-05-13). Restano TODO il re-mount con engine alternativo.
+- [x] Test `tests/player/scrubbing.test.tsx` (5) +
+  `tests/streamInfo/vodProbe.test.ts` (6). Suite passa 73/73.
+- [ ] Smoke su 3 provider reali (mp4 faststart, mp4 non-faststart, MKV).
+
 ### Settimane 1–2 — Foundation refactor
 
 - B.1 split `VideoPlayerNew` (engine pluggable).
@@ -493,7 +827,7 @@ conflitti con il piano esistente.
 
 | Metrica                                | Baseline (stimata) | Target  |
 | -------------------------------------- | ------------------ | ------- |
-| Chunk JS iniziale gzip                 | > 500 kB           | < 250 kB|
+| Chunk JS iniziale gzip                 | ~580 kB → ~146 kB ✅ | < 250 kB|
 | Time-To-First-Paint Electron           | n/a                | < 800 ms|
 | Time-To-Interactive con 10k canali     | n/a                | < 2 s   |
 | Memoria a regime (Electron, 1 live)    | n/a                | < 350 MB|
@@ -523,8 +857,9 @@ DevTools Performance per desktop; `adb shell am start -W` per Android).
 Lista isolata per chi vuole un primo PR rapido:
 
 - [x] Aggiungere `Shift+/` cheatsheet (C.1).
-- [ ] Tema OLED (D.10) — variabile `--bg-primary` già definita in `index.css`,
-  manca switcher in ProfileSettings.
+- [x] Tema OLED (D.10) — classe `.theme-oled` in `index.css` applicata
+  via `App.tsx` quando `preferences.theme === 'oled'`; switcher già
+  presente in ProfileSettings → Aspetto.
 - [x] `useDeferredValue` su ricerca canali (E.2) — applicato in `ChannelList.tsx`
   in aggiunta al debounce esistente (300 ms).
 - [x] `structuredClone` al posto di JSON deep clone (E.2) — **N/A**: nessuna

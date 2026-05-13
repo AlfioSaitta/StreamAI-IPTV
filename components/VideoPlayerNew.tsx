@@ -8,6 +8,8 @@ import type { XtreamCredentials } from '../types';
 import { platformService } from '../services/platformService';
 import { nativeVideoPlayer } from '../services/nativeVideoPlayer';
 import { streamInfoService } from '../services/streamInfoService';
+import type { VodProbeResult } from '../services/streamInfo/vodProbe';
+import { subtitleService, loadSubtitleFromFile, type ActiveSubtitle } from '../services/subtitleService';
 import { useCastSession } from '../hooks/useCastSession';
 import { usePlayerOsd } from '../hooks/usePlayerOsd';
 import { useInteractiveTimeline } from '../hooks/useInteractiveTimeline';
@@ -17,8 +19,12 @@ import { useRemoteControl } from '../hooks/useRemoteControl';
 import { useNativePlayerEngine } from '../hooks/useNativePlayerEngine';
 import { useWebPlayerEngine } from '../hooks/useWebPlayerEngine';
 import { useEpg } from '../hooks/useEpg';
+import { useAutoNextEpisode } from '../hooks/useAutoNextEpisode';
+import { useSleepTimer, formatSleepRemaining } from '../hooks/useSleepTimer';
 import CastDevicePicker from './CastDevicePicker';
 import MiniEpgOverlay from './MiniEpgOverlay';
+import AutoNextOverlay from './player/AutoNextOverlay';
+import SleepTimerMenu from './player/SleepTimerMenu';
 import {
   MAX_PLAYBACK_RETRIES,
   type PlayerEngine,
@@ -33,7 +39,8 @@ import {
 import {
   AlertTriangle, Play, Pause, Volume2, VolumeX, Maximize, Minimize,
   SkipForward, SkipBack, List, X, FastForward, Rewind, RotateCcw,
-  PictureInPicture2, Loader2, Info, Cast, Tv, Headphones, Volume1, Calendar
+  PictureInPicture2, Loader2, Info, Cast, Tv, Headphones, Volume1, Calendar, Moon,
+  Subtitles, Upload, CheckCircle2
 } from 'lucide-react';
 
 // --- TYPES ---
@@ -51,6 +58,11 @@ interface VideoPlayerProps {
   debugOverlay?: boolean;
   /** Xtream credentials, used to fetch the EPG for Live channels (D.1). */
   xtreamCreds?: XtreamCredentials | null;
+  /**
+   * If true and a "next" item is queued for a Series episode, show an
+   * Up Next overlay during the last ~15s with a 10s countdown. C.4.
+   */
+  autoNextEpisodeEnabled?: boolean;
 }
 
 
@@ -68,6 +80,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   onResetProgress,
   debugOverlay = false,
   xtreamCreds = null,
+  autoNextEpisodeEnabled = true,
 }) => {
   // Refs
   const videoRef = useRef<HTMLDivElement>(null);
@@ -109,6 +122,17 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   const [streamSourceInfo, setStreamSourceInfo] = useState<StreamSourceInfo | null>(null);
   const [nativePiPSupported, setNativePiPSupported] = useState(false);
   const [showMiniEpg, setShowMiniEpg] = useState(false);
+  // URG-1 L3: result of the async VOD probe (HEAD + tail prefetch).
+  // Used to disable the timeline when the server doesn't support Range.
+  const [vodProbe, setVodProbe] = useState<VodProbeResult | null>(null);
+
+  // D.4 — Sideloaded subtitles (SRT/VTT). MVP: one track at a time, no
+  // persistence beyond the current playback session.
+  const [activeSubtitle, setActiveSubtitle] = useState<ActiveSubtitle | null>(null);
+  const [subtitleEnabled, setSubtitleEnabled] = useState<boolean>(true);
+  const [showSubtitleMenu, setShowSubtitleMenu] = useState<boolean>(false);
+  const subtitleFileInputRef = useRef<HTMLInputElement | null>(null);
+  const subtitleTrackElRef = useRef<HTMLTrackElement | null>(null);
 
   // OSD (extracted hook)
   const { osd, showOsd } = usePlayerOsd();
@@ -121,14 +145,109 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     enabled: isLive && !!xtreamCreds,
   });
 
-  // Interactive timeline (hover ghost bar + tooltip)
+  // Auto-next episode (C.4): peek the next item in the playlist for the
+  // overlay copy, then drive the countdown from playback state. We only
+  // surface it for Series episodes — VOD/Live remain unaffected.
+  const nextChannel = (() => {
+    if (!channel || playlist.length === 0) return null;
+    const idx = playlist.findIndex(c => c.id === channel.id);
+    if (idx === -1 || idx >= playlist.length - 1) return null;
+    return playlist[idx + 1];
+  })();
+  const autoNextEligible = !!(
+    autoNextEpisodeEnabled &&
+    onNext &&
+    nextChannel &&
+    channel?.type === 'series' &&
+    !isLive
+  );
+  const autoNext = useAutoNextEpisode({
+    enabled: autoNextEligible,
+    hasNext: !!nextChannel,
+    currentTime,
+    duration,
+    isLive,
+    onTrigger: () => { onNext?.(); },
+    channelId: channel?.id,
+  });
+
+  // Sleep timer (D.5) — counts down to a hard pause, with a soft volume
+  // fade in the last 5 seconds. Available on any stream type.
+  const [showSleepMenu, setShowSleepMenu] = useState(false);
+  const sleepTimer = useSleepTimer({
+    onFire: () => {
+      if (isUsingNativePlayer) {
+        nativeVideoPlayer.pause().catch(() => undefined);
+      } else if (playerRef.current && !playerRef.current.paused()) {
+        playerRef.current.pause();
+      }
+      setIsPlaying(false);
+      showOsd(<Pause className="w-12 h-12 text-white" fill="white" />, 'Sleep timer scaduto');
+    },
+    fadeOutSeconds: 5,
+    getVolume: () => {
+      if (isUsingNativePlayer) return volume;
+      return playerRef.current?.volume() ?? volume;
+    },
+    setVolume: (v) => {
+      if (isUsingNativePlayer) {
+        nativeVideoPlayer.setVolume(v).catch(() => undefined);
+      } else if (playerRef.current) {
+        playerRef.current.volume(v);
+      }
+      setVolume(v);
+    },
+  });
+
+  // Interactive timeline (hover ghost bar + tooltip + pointer scrubbing).
+  // URG-1: the hook now owns the scrubbing state machine and emits a SINGLE
+  // seek on pointerup, eliminating the seek-storm caused by the previous
+  // invisible <input type="range">.
+  const performSeek = useCallback((time: number) => {
+    if (isUsingNativePlayer) {
+      nativeVideoPlayer.seekTo(time)
+        .then(() => setCurrentTime(time))
+        .catch(err => console.warn('[Player] Native timeline seek failed:', err));
+      return;
+    }
+    if (!playerRef.current) return;
+    // Prefer videoEl.fastSeek() when available — lands on the nearest keyframe
+    // without decoding the intermediate frames, which is dramatically faster
+    // on long VOD files.
+    const videoEl = playerRef.current.el()?.querySelector('video') as HTMLVideoElement | null;
+    if (videoEl && typeof (videoEl as any).fastSeek === 'function') {
+      try { (videoEl as any).fastSeek(time); }
+      catch { playerRef.current.currentTime(time); }
+    } else {
+      playerRef.current.currentTime(time);
+    }
+    setCurrentTime(time);
+  }, [isUsingNativePlayer]);
+
   const {
     timelineRef,
     hoverTime,
     hoverPos,
+    isScrubbing,
+    scrubTime,
+    onPointerDown: handleTimelinePointerDown,
     onMouseMove: handleTimelineMouseMove,
     onMouseLeave: handleTimelineMouseLeave,
-  } = useInteractiveTimeline(duration);
+  } = useInteractiveTimeline({ duration, onSeek: performSeek });
+
+  // While scrubbing, the displayed playhead should track the user's finger
+  // (optimistic UI), not the actual video.currentTime (which won't update
+  // until the seek completes server-side).
+  const displayTime = isScrubbing && scrubTime !== null ? scrubTime : currentTime;
+
+  // URG-1 L3: when the upstream server explicitly advertises `Accept-Ranges:
+  // none` we KNOW any seek will trigger a full re-download. Disable the
+  // timeline interaction entirely (Play/Pause still works) and surface a
+  // clear inline banner instead of letting the user freeze the player.
+  const seekDisabled = vodProbe?.rangeSupport === 'no';
+  const seekDisabledReason = seekDisabled
+    ? 'Il server non supporta il seek (Accept-Ranges: none). Solo Play/Pausa disponibili.'
+    : null;
 
   // Hooks
   const castSession = useCastSession();
@@ -276,20 +395,9 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     }
   }, [currentTime, isUsingNativePlayer, showOsd]);
 
-  const handleSeek = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const time = parseFloat(e.target.value);
-    if (isUsingNativePlayer) {
-      nativeVideoPlayer.seekTo(time)
-        .then(() => setCurrentTime(time))
-        .catch(err => console.warn('[Player] Native timeline seek failed:', err));
-      return;
-    }
-
-    if (playerRef.current) {
-      playerRef.current.currentTime(time);
-      setCurrentTime(time); // Aggiornamento immediato UI
-    }
-  }, [isUsingNativePlayer]);
+  // NOTE: the legacy `handleSeek` (input[type=range] onChange) was removed
+  // on 2026-05-13 as part of URG-1 (seek-storm fix). All seeks now go
+  // through `performSeek` invoked by `useInteractiveTimeline` on pointerup.
 
 
   const toggleFullscreen = useCallback(() => {
@@ -494,15 +602,19 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       openCast: () => setShowDevicePicker(true),
       togglePlaylist: () => setShowPlaylist(prev => !prev),
       toggleEpg: () => setShowMiniEpg(prev => !prev),
+      toggleSleepTimer: () => setShowSleepMenu(prev => !prev),
+      toggleSubtitles: () => toggleSubtitleVisibility(),
       onEscape: () => {
-        if (showMiniEpg) setShowMiniEpg(false);
+        if (showSleepMenu) setShowSleepMenu(false);
+        else if (showSubtitleMenu) setShowSubtitleMenu(false);
+        else if (showMiniEpg) setShowMiniEpg(false);
         else if (showPlaylist) setShowPlaylist(false);
         else if (showDevicePicker) setShowDevicePicker(false);
         else if (showAudioMenu) setShowAudioMenu(false);
         else if (onBack) onBack();
       },
     },
-    { channel }
+    { channel, seekDisabled }
   );
 
 
@@ -525,6 +637,11 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     setStreamInfoLines([]);
     setAudioTracks([]);
     setNativePiPSupported(false);
+    setVodProbe(null);
+    // D.4 — detach any sideloaded subtitle when the channel changes.
+    subtitleService.detach();
+    setActiveSubtitle(null);
+    setShowSubtitleMenu(false);
     cleanupPlaybackEngines();
 
     const source = channel.url;
@@ -595,6 +712,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     cleanupPlaybackEngines,
     broadcastStatus,
     isBuffering,
+    onVodProbeResult: setVodProbe,
   });
 
   // Media Session API integration (extracted hook)
@@ -613,6 +731,100 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   useRemoteControl({ playerRef, setVolume, setIsMuted, broadcastStatus });
 
   // --- UI EFFECTS ---
+
+  // D.4 — Attach / detach a <track> element on the underlying <video> when
+  // the user loads / removes a sideloaded subtitle file. We bypass video.js
+  // text track APIs to keep the implementation portable (works the same on
+  // plain HTMLVideoElement on Android web fallback).
+  useEffect(() => {
+    if (isUsingNativePlayer) return;
+    const videoEl = playerRef.current?.el()?.querySelector('video') as HTMLVideoElement | null;
+    if (!videoEl) return;
+
+    // Remove the previous track element, if any.
+    if (subtitleTrackElRef.current && subtitleTrackElRef.current.parentNode === videoEl) {
+      videoEl.removeChild(subtitleTrackElRef.current);
+      subtitleTrackElRef.current = null;
+    }
+
+    if (!activeSubtitle) return;
+
+    const trackEl = document.createElement('track');
+    trackEl.kind = 'subtitles';
+    trackEl.label = activeSubtitle.label;
+    trackEl.srclang = 'und';
+    trackEl.src = activeSubtitle.blobUrl;
+    trackEl.default = true;
+    videoEl.appendChild(trackEl);
+    subtitleTrackElRef.current = trackEl;
+
+    // Browsers expose the just-added TextTrack on `videoEl.textTracks[i]`.
+    // Force it to `showing` (the `default` attribute is sometimes ignored
+    // when the track is added after `loadedmetadata`).
+    const trySetMode = () => {
+      const tracks = videoEl.textTracks;
+      for (let i = 0; i < tracks.length; i++) {
+        const t = tracks[i];
+        if (t.label === activeSubtitle.label) {
+          t.mode = subtitleEnabled ? 'showing' : 'disabled';
+        } else if (t.mode === 'showing') {
+          // Hide any other showing track to avoid stacking.
+          t.mode = 'disabled';
+        }
+      }
+    };
+    trySetMode();
+    // Also retry once the track has loaded (some browsers expose the mode
+    // only after the .vtt body is fetched).
+    trackEl.addEventListener('load', trySetMode, { once: true });
+  }, [activeSubtitle, subtitleEnabled, isUsingNativePlayer]);
+
+  // Toggle visibility without re-attaching the <track>.
+  useEffect(() => {
+    if (isUsingNativePlayer) return;
+    const videoEl = playerRef.current?.el()?.querySelector('video') as HTMLVideoElement | null;
+    if (!videoEl || !activeSubtitle) return;
+    const tracks = videoEl.textTracks;
+    for (let i = 0; i < tracks.length; i++) {
+      if (tracks[i].label === activeSubtitle.label) {
+        tracks[i].mode = subtitleEnabled ? 'showing' : 'disabled';
+      }
+    }
+  }, [subtitleEnabled, activeSubtitle, isUsingNativePlayer]);
+
+  const handleSubtitleFile = useCallback(async (file: File | null | undefined) => {
+    if (!file) return;
+    try {
+      const sub = await loadSubtitleFromFile(file);
+      subtitleService.setActive(sub);
+      setActiveSubtitle(sub);
+      setSubtitleEnabled(true);
+      setShowSubtitleMenu(false);
+      showOsd(<Subtitles className="w-12 h-12 text-white" />, `Sottotitoli: ${sub.label}`);
+    } catch (e) {
+      showOsd(<AlertTriangle className="w-12 h-12 text-white" />, (e as Error).message ?? 'Sottotitoli non validi');
+    }
+  }, [showOsd]);
+
+  const removeSubtitle = useCallback(() => {
+    subtitleService.detach();
+    setActiveSubtitle(null);
+    setSubtitleEnabled(false);
+    showOsd(<Subtitles className="w-12 h-12 text-white" />, 'Sottotitoli rimossi');
+  }, [showOsd]);
+
+  const toggleSubtitleVisibility = useCallback(() => {
+    if (!activeSubtitle) {
+      // No subtitle loaded — open the menu to let the user pick a file.
+      setShowSubtitleMenu(prev => !prev);
+      return;
+    }
+    setSubtitleEnabled(prev => {
+      const next = !prev;
+      showOsd(<Subtitles className="w-12 h-12 text-white" />, next ? 'Sottotitoli ON' : 'Sottotitoli OFF');
+      return next;
+    });
+  }, [activeSubtitle, showOsd]);
 
   useEffect(() => {
     const show = () => {
@@ -636,6 +848,13 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
     };
   }, [isPlaying]);
+
+  // Detach any sideloaded subtitle on unmount to free the Blob URL (D.4).
+  useEffect(() => {
+    return () => {
+      subtitleService.detach();
+    };
+  }, []);
 
   if (!channel) return <div className="w-full h-full flex items-center justify-center bg-black text-gray-400">Seleziona un canale</div>;
 
@@ -811,6 +1030,72 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         </div>
       )}
 
+      {/* SUBTITLE MENU (D.4) */}
+      {showSubtitleMenu && (channel.type === 'movie' || channel.type === 'series') && (
+        <div className="absolute bottom-20 right-4 w-72 bg-black/90 backdrop-blur-xl border border-white/10 rounded-2xl p-2 z-[70] shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-200">
+          <div className="p-3 border-b border-white/10 flex items-center justify-between mb-2">
+            <h3 className="font-bold text-white text-sm flex items-center gap-2"><Subtitles className="w-4 h-4" /> Sottotitoli</h3>
+            <button onClick={() => setShowSubtitleMenu(false)} aria-label="Chiudi menu sottotitoli" className="tv-focus touch-target p-1 rounded-full hover:bg-white/10"><X className="w-4 h-4 text-gray-400" /></button>
+          </div>
+          <div className="space-y-1 p-1">
+            {/* "Off" entry */}
+            <button
+              onClick={removeSubtitle}
+              className={`tv-focus w-full text-left p-3 rounded-xl flex items-center justify-between transition-all ${
+                !activeSubtitle ? 'bg-red-600/20 text-red-500 border border-red-500/30' : 'hover:bg-white/10 text-gray-300 border border-transparent'
+              }`}
+            >
+              <span className="text-sm font-bold">Disattivati</span>
+              {!activeSubtitle && <CheckCircle2 className="w-4 h-4" />}
+            </button>
+
+            {/* Currently loaded subtitle */}
+            {activeSubtitle && (
+              <button
+                onClick={() => setSubtitleEnabled(prev => !prev)}
+                className={`tv-focus w-full text-left p-3 rounded-xl flex items-center justify-between transition-all ${
+                  subtitleEnabled ? 'bg-red-600/20 text-red-500 border border-red-500/30' : 'hover:bg-white/10 text-gray-300 border border-transparent'
+                }`}
+              >
+                <div className="flex flex-col min-w-0">
+                  <span className="text-sm font-bold truncate">{activeSubtitle.label}</span>
+                  <span className="text-[10px] opacity-60 uppercase tracking-widest">
+                    {activeSubtitle.format} · {activeSubtitle.cueCount} cue
+                  </span>
+                </div>
+                {subtitleEnabled && <CheckCircle2 className="w-4 h-4 shrink-0" />}
+              </button>
+            )}
+
+            {/* Load file */}
+            <button
+              onClick={() => subtitleFileInputRef.current?.click()}
+              className="tv-focus w-full text-left p-3 rounded-xl flex items-center gap-2 hover:bg-white/10 text-gray-200 border border-transparent transition-all"
+            >
+              <Upload className="w-4 h-4" />
+              <span className="text-sm font-medium">Carica file (.srt / .vtt)</span>
+            </button>
+
+            <p className="px-3 py-2 text-[11px] text-gray-500 leading-relaxed">
+              MVP: un solo file alla volta, conversione SRT→VTT automatica.
+              I sottotitoli si resettano al cambio di episodio/film.
+            </p>
+          </div>
+          <input
+            ref={subtitleFileInputRef}
+            type="file"
+            accept=".srt,.vtt,application/x-subrip,text/vtt,text/plain"
+            className="hidden"
+            onChange={e => {
+              const f = e.target.files?.[0];
+              void handleSubtitleFile(f);
+              // Allow picking the same file twice in a row.
+              if (e.target) e.target.value = '';
+            }}
+          />
+        </div>
+      )}
+
       {/* CONTROLS BAR */}
       <div className={`absolute inset-0 z-30 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
         <div className="absolute top-0 left-0 right-0 p-4 bg-gradient-to-b from-black/80 to-transparent flex justify-between items-center">
@@ -830,63 +1115,70 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 to-transparent">
           {channel.type !== 'live' && duration > 0 && (
             <div className="mb-4">
-              <div 
+              {seekDisabledReason && (
+                <div className="mb-2 px-3 py-2 rounded-md bg-amber-500/15 border border-amber-400/40 text-amber-100 text-xs flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>{seekDisabledReason}</span>
+                </div>
+              )}
+              <div
                 ref={timelineRef}
-                className="relative h-2 bg-white/20 rounded-full cursor-pointer group/timeline hover:h-3 transition-all duration-200"
-                onMouseMove={handleTimelineMouseMove}
-                onMouseLeave={handleTimelineMouseLeave}
-                onClick={(e) => {
-                  if (!timelineRef.current) return;
-                  const rect = timelineRef.current.getBoundingClientRect();
-                  const offsetX = e.clientX - rect.left;
-                  const percentage = offsetX / rect.width;
-                  const time = percentage * duration;
-                  if (playerRef.current) {
-                    playerRef.current.currentTime(time);
-                    setCurrentTime(time);
-                  }
+                className={`relative h-2 bg-white/20 rounded-full group/timeline transition-all duration-200 touch-none ${seekDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:h-3'}`}
+                role="slider"
+                aria-label="Posizione di riproduzione"
+                aria-valuemin={0}
+                aria-valuemax={duration}
+                aria-valuenow={displayTime}
+                aria-valuetext={formatTime(displayTime)}
+                aria-disabled={seekDisabled}
+                tabIndex={seekDisabled ? -1 : 0}
+                onPointerDown={seekDisabled ? undefined : handleTimelinePointerDown}
+                onMouseMove={seekDisabled ? undefined : handleTimelineMouseMove}
+                onMouseLeave={seekDisabled ? undefined : handleTimelineMouseLeave}
+                onKeyDown={(e) => {
+                  if (seekDisabled) return;
+                  // Keyboard accessibility: arrows seek ±5s, PageUp/Down ±30s,
+                  // Home/End jump to start/end. Single seek per keystroke.
+                  let next: number | null = null;
+                  if (e.key === 'ArrowRight') next = Math.min(duration, displayTime + 5);
+                  else if (e.key === 'ArrowLeft') next = Math.max(0, displayTime - 5);
+                  else if (e.key === 'PageUp') next = Math.min(duration, displayTime + 30);
+                  else if (e.key === 'PageDown') next = Math.max(0, displayTime - 30);
+                  else if (e.key === 'Home') next = 0;
+                  else if (e.key === 'End') next = Math.max(0, duration - 1);
+                  if (next !== null) { e.preventDefault(); performSeek(next); }
                 }}
               >
                 {/* Buffered Bar */}
                 <div className="absolute h-full bg-white/30 rounded-full" style={{ width: '0%' }} />
                 
-                {/* Played Bar */}
-                <div className="absolute h-full bg-red-600 rounded-full" style={{ width: `${(currentTime / duration) * 100}%` }} />
-                
+                {/* Played Bar — tracks displayTime so the playhead follows the
+                    user's finger during scrubbing instead of lagging behind. */}
+                <div className="absolute h-full bg-red-600 rounded-full" style={{ width: `${(displayTime / duration) * 100}%` }} />
+
                 {/* Hover Ghost Bar */}
                 {hoverTime !== null && (
                   <div className="absolute h-full bg-white/20 rounded-full" style={{ width: `${hoverPos}%` }} />
                 )}
 
-                {/* Thumb (visible on hover) */}
-                <div 
-                  className="absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-red-600 rounded-full shadow-lg scale-0 group-hover/timeline:scale-100 transition-transform duration-200"
-                  style={{ left: `${(currentTime / duration) * 100}%`, transform: 'translate(-50%, -50%) scale(var(--tw-scale-x))' }}
+                {/* Thumb — always visible during scrubbing, otherwise on hover */}
+                <div
+                  className={`absolute top-1/2 w-4 h-4 bg-red-600 rounded-full shadow-lg transition-transform duration-200 ${isScrubbing ? 'scale-125' : 'scale-0 group-hover/timeline:scale-100'}`}
+                  style={{ left: `${(displayTime / duration) * 100}%`, transform: 'translate(-50%, -50%)' }}
                 />
 
                 {/* Tooltip */}
-                {hoverTime !== null && (
-                  <div 
+                {(hoverTime !== null || isScrubbing) && (
+                  <div
                     className="absolute bottom-5 -translate-x-1/2 bg-black/80 text-white text-xs px-2 py-1 rounded border border-white/10 whitespace-nowrap pointer-events-none"
                     style={{ left: `${hoverPos}%` }}
                   >
-                    {formatTime(hoverTime)}
+                    {formatTime(hoverTime ?? scrubTime ?? 0)}
                   </div>
                 )}
-
-                {/* Input Range (Invisible but functional for dragging) */}
-                <input 
-                  type="range" 
-                  min={0} 
-                  max={duration} 
-                  value={currentTime} 
-                  onChange={handleSeek} 
-                  aria-label="Posizione di riproduzione"
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                />
               </div>
               <div className="flex justify-between text-xs text-gray-400 mt-2 font-medium">
-                <span>{formatTime(currentTime)}</span><span>{formatTime(duration)}</span>
+                <span>{formatTime(displayTime)}</span><span>{formatTime(duration)}</span>
               </div>
             </div>
           )}
@@ -906,7 +1198,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
                   />
                 </div>
               </div>
-              {(channel.type === 'movie' || channel.type === 'series') && currentTime > 30 && (
+              {(channel.type === 'movie' || channel.type === 'series') && currentTime > 30 && !seekDisabled && (
                 <button onClick={restartFromBeginning} aria-label="Riparti dall'inizio" className="tv-focus touch-target p-2 hover:bg-white/10 rounded-full" title="Riparti dall'inizio">
                   <RotateCcw className="w-6 h-6 text-white" />
                 </button>
@@ -916,9 +1208,9 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
             {/* Center Controls */}
             <div className="flex items-center gap-2">
               {onPrev && <button onClick={onPrev} aria-label="Precedente" title="Precedente" className="tv-focus touch-target p-2 hover:bg-white/10 rounded-full"><SkipBack className="w-6 h-6 text-white" /></button>}
-              <button onClick={() => skip(-10)} aria-label="Indietro 10 secondi" title="Indietro 10s (←)" className="tv-focus touch-target p-2 hover:bg-white/10 rounded-full"><Rewind className="w-6 h-6 text-white" /></button>
+              <button onClick={() => skip(-10)} disabled={seekDisabled} aria-label="Indietro 10 secondi" title={seekDisabled ? 'Seek non supportato dal server' : 'Indietro 10s (←)'} className={`tv-focus touch-target p-2 rounded-full ${seekDisabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-white/10'}`}><Rewind className="w-6 h-6 text-white" /></button>
               <button onClick={togglePlay} aria-label={isPlaying ? 'Pausa' : 'Play'} title={`${isPlaying ? 'Pausa' : 'Play'} (Spazio)`} className="tv-focus touch-target p-3 bg-white/10 hover:bg-white/20 rounded-full">{isPlaying ? <Pause className="w-8 h-8 text-white" /> : <Play className="w-8 h-8 text-white" fill="white" />}</button>
-              <button onClick={() => skip(10)} aria-label="Avanti 10 secondi" title="Avanti 10s (→)" className="tv-focus touch-target p-2 hover:bg-white/10 rounded-full"><FastForward className="w-6 h-6 text-white" /></button>
+              <button onClick={() => skip(10)} disabled={seekDisabled} aria-label="Avanti 10 secondi" title={seekDisabled ? 'Seek non supportato dal server' : 'Avanti 10s (→)'} className={`tv-focus touch-target p-2 rounded-full ${seekDisabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-white/10'}`}><FastForward className="w-6 h-6 text-white" /></button>
               {onNext && <button onClick={onNext} aria-label="Successivo" title="Successivo" className="tv-focus touch-target p-2 hover:bg-white/10 rounded-full"><SkipForward className="w-6 h-6 text-white" /></button>}
             </div>
 
@@ -951,8 +1243,41 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
                   <Headphones className="w-6 h-6" />
                 </button>
               )}
+              {/* D.4 — Subtitles (sideload SRT/VTT) */}
+              {(channel.type === 'movie' || channel.type === 'series') && (
+                <button
+                  onClick={() => setShowSubtitleMenu(prev => !prev)}
+                  aria-label="Sottotitoli"
+                  aria-pressed={showSubtitleMenu || (activeSubtitle !== null && subtitleEnabled)}
+                  className={`tv-focus touch-target p-2 hover:bg-white/10 rounded-full transition-colors ${
+                    activeSubtitle && subtitleEnabled ? 'text-red-500 bg-white/10' : showSubtitleMenu ? 'text-white bg-white/10' : 'text-white'
+                  }`}
+                  title="Sottotitoli (S)"
+                >
+                  <Subtitles className="w-6 h-6" />
+                </button>
+              )}
               <button onClick={updateStreamInfo} aria-label="Info stream/codec" className="tv-focus touch-target p-2 hover:bg-white/10 rounded-full" title="Info Codec">
                 <Info className="w-6 h-6 text-white" />
+              </button>
+              {/* D.5 — Sleep timer */}
+              <button
+                onClick={() => setShowSleepMenu(prev => !prev)}
+                aria-label={sleepTimer.preset !== 'off' ? `Sleep timer attivo (${formatSleepRemaining(sleepTimer.remainingSeconds)})` : 'Sleep timer'}
+                aria-pressed={showSleepMenu || sleepTimer.preset !== 'off'}
+                className={`tv-focus touch-target relative p-2 hover:bg-white/10 rounded-full transition-colors ${
+                  sleepTimer.preset !== 'off' ? 'text-amber-300' : 'text-white'
+                }`}
+                title={sleepTimer.preset !== 'off' ? `Sleep timer: ${formatSleepRemaining(sleepTimer.remainingSeconds)} (T)` : 'Sleep timer (T)'}
+              >
+                <Moon className="w-6 h-6" />
+                {sleepTimer.preset !== 'off' && sleepTimer.remainingSeconds > 0 && (
+                  <span className="absolute -bottom-1 -right-1 bg-amber-500 text-black text-[9px] font-mono font-bold rounded-full px-1 leading-tight min-w-[18px] text-center">
+                    {sleepTimer.remainingSeconds >= 60
+                      ? `${Math.ceil(sleepTimer.remainingSeconds / 60)}m`
+                      : `${sleepTimer.remainingSeconds}s`}
+                  </span>
+                )}
               </button>
               <button
                 onClick={() => setShowDevicePicker(true)}
@@ -989,6 +1314,45 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
           onRefresh={epg.refresh}
         />
       )}
+
+      {/* Auto-Next Episode (C.4) — Series only, last ~15s of an episode */}
+      <AutoNextOverlay
+        isVisible={autoNext.isVisible}
+        secondsLeft={autoNext.secondsLeft}
+        totalSeconds={10}
+        nextChannel={nextChannel}
+        onPlayNow={autoNext.playNow}
+        onCancel={autoNext.cancel}
+      />
+
+      {/* Sleep Timer Menu (D.5) */}
+      <SleepTimerMenu
+        isOpen={showSleepMenu}
+        onClose={() => setShowSleepMenu(false)}
+        current={sleepTimer.preset}
+        remainingSeconds={sleepTimer.remainingSeconds}
+        onPick={(p) => {
+          if (p === 'endOfProgramme') {
+            const stop = epg.current?.stop;
+            sleepTimer.setPreset('endOfProgramme', { endOfProgrammeAt: stop });
+            showOsd(<Moon className="w-12 h-12 text-amber-300" />, 'Sleep: fine programma');
+          } else if (p === 'off') {
+            sleepTimer.setPreset('off');
+            showOsd(<Moon className="w-12 h-12 text-gray-400" />, 'Sleep timer disattivato');
+          } else {
+            sleepTimer.setPreset(p);
+            const labels: Record<string, string> = {
+              '15min': '15 minuti',
+              '30min': '30 minuti',
+              '60min': '1 ora',
+              '90min': '1 ora 30 min',
+            };
+            showOsd(<Moon className="w-12 h-12 text-amber-300" />, `Sleep: ${labels[p] ?? p}`);
+          }
+        }}
+        endOfProgrammeAvailable={isLive && !!epg.current && (epg.current.stop > Date.now() + 60_000)}
+        endOfProgrammeAt={epg.current?.stop ?? null}
+      />
 
       {/* Cast Device Picker */}
       {channel && (

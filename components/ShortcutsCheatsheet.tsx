@@ -33,11 +33,13 @@ export const DEFAULT_SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: ['C'], description: 'Menu Cast (Chromecast / DLNA / AirPlay)' },
       { keys: ['L'], description: 'Lista canali (Live) o episodi (Serie)' },
       { keys: ['G'], description: 'Guida TV / Mini-EPG (Live)' },
+      { keys: ['T'], description: 'Sleep timer (menu spegnimento)' },
     ],
   },
   {
     title: 'Navigazione',
     entries: [
+      { keys: ['Ctrl+K', '⌘K'], description: 'Ricerca globale (Command Palette)' },
       { keys: ['Tab', 'Shift+Tab'], description: 'Spostamento focus (TV / Telecomando)' },
       { keys: ['Esc'], description: 'Indietro / Chiudi modale' },
       { keys: ['?', 'Shift+/'], description: 'Mostra questa scheda' },

@@ -61,6 +61,9 @@ Queste funzionalità definiscono l'identità di StreamAI e devono essere preserv
   - `F`: Fullscreen Toggle
   - `C`: Cast (apre menu dispositivi)
   - `L`: Lista canali (LIVE) o Lista episodi (SERIE TV)
+  - `S`: Sottotitoli (toggle visibilità o apre menu caricamento file)
+  - `T`: Menu sleep timer
+  - `G`: Mini-EPG (solo Live)
   - `Esc`: Indietro/Chiudi menu
 
 ### 4. Interfaccia Unificata (Uniform UI)

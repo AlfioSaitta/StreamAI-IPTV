@@ -12,12 +12,20 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
-    // NOTE: il chunk splitting manuale (commit E.1) è stato rimosso perché
-    // spezzava l'ordine di valutazione delle classi tra video.js e i suoi
-    // plugin (errore runtime "Class extends value undefined" nel renderer
-    // Electron). Per ora si lascia decidere a Rollup il chunking di default.
-    // Una versione corretta richiede dynamic import() del route player
-    // oppure tenere in un unico chunk tutto il sotto-grafo di video.js.
+    // E.1 — Code splitting strategy:
+    //
+    // Manual `manualChunks` was tried and rolled back because it broke the
+    // evaluation order between video.js and its plugins (runtime error
+    // "Class extends value undefined" in the Electron renderer).
+    //
+    // Current approach (works with Rollup default chunking):
+    // `App.tsx` lazy-imports every heavy component via `React.lazy`:
+    //   VideoPlayerNew (video.js + hls.js + mpegts.js), ProfileSettings,
+    //   GuideView, MovieDetail, SeriesDetail, AIRecommender, XtreamLogin.
+    // This keeps the whole video.js sub-graph in a single async chunk
+    // (correct evaluation order preserved) while the initial bundle stays
+    // small (~95 kB gzip + ~51 kB vendor gzip; player chunk ~468 kB gzip
+    // is fetched only when the user starts playback).
     chunkSizeWarningLimit: 2000,
   }
 });
