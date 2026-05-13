@@ -1,5 +1,6 @@
 
 import { Profile, XtreamCredentials, WatchHistoryItem, ProfilePreferences } from '../types.ts';
+import { pickDefaultAvatarFor } from './avatars.ts';
 
 const STORAGE_KEY = 'streamai_profiles';
 
@@ -42,13 +43,14 @@ export const ProfileService = {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(profiles));
   },
 
-  create: (name: string): Profile => {
+  create: (name: string, options: { color?: string; avatar?: string } = {}): Profile => {
     const profiles = ProfileService.getAll();
     const colors = ['#8b5cf6', '#ec4899', '#3b82f6', '#10b981', '#f59e0b', '#ef4444'];
     const newProfile: Profile = {
       id: crypto.randomUUID(),
       name,
-      color: colors[profiles.length % colors.length],
+      color: options.color ?? colors[profiles.length % colors.length],
+      avatar: options.avatar ?? pickDefaultAvatarFor(profiles.length),
       xtreamCreds: null,
       history: [],
       watchlist: [],
@@ -166,12 +168,13 @@ export const ProfileService = {
       return profile?.preferences || DEFAULT_PREFERENCES;
   },
 
-  updateProfile: (profileId: string, updates: { name?: string; color?: string }): Profile | null => {
+  updateProfile: (profileId: string, updates: { name?: string; color?: string; avatar?: string }): Profile | null => {
       const profiles = ProfileService.getAll();
       const index = profiles.findIndex(p => p.id === profileId);
       if (index !== -1) {
           if (updates.name) profiles[index].name = updates.name;
           if (updates.color) profiles[index].color = updates.color;
+          if (updates.avatar) profiles[index].avatar = updates.avatar;
           ProfileService.saveAll(profiles);
           return profiles[index];
       }

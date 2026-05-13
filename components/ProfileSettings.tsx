@@ -5,13 +5,13 @@ import { CacheService } from '../services/cacheService.ts';
 import { useLanguage } from '../contexts/LanguageContext.tsx';
 import XtreamHealthBadge from './XtreamHealthBadge.tsx';
 import {
-  ArrowLeft, 
-  User, 
-  Globe, 
-  Subtitles, 
-  Play, 
-  Monitor, 
-  ShieldCheck, 
+  ArrowLeft,
+  User,
+  Globe,
+  Subtitles,
+  Play,
+  Monitor,
+  ShieldCheck,
   Check,
   Palette,
   Sparkles,
@@ -23,9 +23,11 @@ import {
   Image as ImageIcon,
   HardDrive,
   SkipForward,
-  History
+  History,
 } from 'lucide-react';
 import { useEscapeKey, useInitialTvFocus, useTvSpatialNavigation } from '../hooks/useTvFocus.ts';
+import { Avatar, AvatarPicker, Button, Card, FormField, Input, Select } from './shared';
+import { DEFAULT_AVATAR_ID } from '../services/avatars';
 
 interface ProfileSettingsProps {
   profile: Profile;
@@ -51,7 +53,6 @@ const LANGUAGES = [
   { code: 'ar', name: 'العربية' },
 ];
 
-
 const THEME_OPTIONS = [
   { value: 'dark', label: 'Dark Mode' },
   { value: 'oled', label: 'OLED (Pure Black)' },
@@ -66,16 +67,8 @@ const CONTENT_REFRESH_INTERVAL_OPTIONS = [
 ];
 
 const PROFILE_COLORS = [
-  '#8b5cf6', // Purple
-  '#ec4899', // Pink
-  '#3b82f6', // Blue
-  '#10b981', // Green
-  '#f59e0b', // Amber
-  '#ef4444', // Red
-  '#06b6d4', // Cyan
-  '#f97316', // Orange
-  '#84cc16', // Lime
-  '#a855f7', // Violet
+  '#8b5cf6', '#ec4899', '#3b82f6', '#10b981', '#f59e0b',
+  '#ef4444', '#06b6d4', '#f97316', '#84cc16', '#a855f7',
 ];
 
 interface CacheStatsView {
@@ -94,6 +87,57 @@ interface CacheStatsView {
   };
 }
 
+// --- Local helpers --------------------------------------------------------
+
+const SectionCard: React.FC<{
+  icon: React.ComponentType<{ className?: string; 'aria-hidden'?: boolean }>;
+  title: string | undefined;
+  iconTone?: 'brand' | 'accent' | 'state-error';
+  children: React.ReactNode;
+}> = ({ icon: Icon, title, iconTone = 'brand', children }) => {
+  const tone =
+    iconTone === 'accent'
+      ? 'text-brand-accent'
+      : iconTone === 'state-error'
+        ? 'text-state-error'
+        : 'text-brand-primary';
+  return (
+    <Card elevation="raised" padding="lg" className="space-y-0">
+      <h2 className="text-xl font-semibold mb-6 flex items-center gap-3 text-content-primary">
+        <Icon className={`w-icon-lg h-icon-lg ${tone}`} aria-hidden={true} />
+        {title}
+      </h2>
+      {children}
+    </Card>
+  );
+};
+
+const ToggleSwitch: React.FC<{
+  enabled: boolean;
+  onChange: (v: boolean) => void;
+  ariaLabel?: string;
+}> = ({ enabled, onChange, ariaLabel }) => (
+  <button
+    onClick={() => onChange(!enabled)}
+    role="switch"
+    aria-checked={enabled}
+    aria-label={ariaLabel}
+    className={`tv-focus touch-target relative w-14 h-8 rounded-full transition-colors duration-200 ${
+      enabled ? 'bg-brand-primary' : 'bg-surface-3'
+    }`}
+  >
+    <span
+      className={`absolute top-1 w-6 h-6 rounded-full bg-white shadow-md transition-transform duration-200 ${
+        enabled ? 'translate-x-7' : 'translate-x-1'
+      }`}
+    />
+  </button>
+);
+
+const Divider: React.FC = () => <div className="border-t border-subtle my-6" />;
+
+// --- Component ------------------------------------------------------------
+
 const ProfileSettings: React.FC<ProfileSettingsProps> = ({
   profile,
   onBack,
@@ -108,9 +152,10 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
   );
   const [profileName, setProfileName] = useState(profile.name);
   const [profileColor, setProfileColor] = useState(profile.color);
+  const [profileAvatar, setProfileAvatar] = useState<string>(profile.avatar || DEFAULT_AVATAR_ID);
   const [hasChanges, setHasChanges] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [showColorPicker, setShowColorPicker] = useState(false);
+  const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [localRefreshMessage, setLocalRefreshMessage] = useState<string | null>(null);
   const [aiCacheMessage, setAiCacheMessage] = useState<string | null>(null);
   const [imageCacheMessage, setImageCacheMessage] = useState<string | null>(null);
@@ -126,8 +171,9 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
     const prefsChanged = JSON.stringify(preferences) !== JSON.stringify(originalPrefs);
     const nameChanged = profileName !== profile.name;
     const colorChanged = profileColor !== profile.color;
-    setHasChanges(prefsChanged || nameChanged || colorChanged);
-  }, [preferences, profileName, profileColor, profile]);
+    const avatarChanged = profileAvatar !== (profile.avatar || DEFAULT_AVATAR_ID);
+    setHasChanges(prefsChanged || nameChanged || colorChanged || avatarChanged);
+  }, [preferences, profileName, profileColor, profileAvatar, profile]);
 
   const refreshCacheStats = async () => {
     const stats = await CacheService.getStats();
@@ -148,17 +194,19 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      // Update preferences
       let updatedProfile = ProfileService.updatePreferences(profile.id, preferences);
-      
-      // Update name/color if changed
-      if (profileName !== profile.name || profileColor !== profile.color) {
+      const originalAvatar = profile.avatar || DEFAULT_AVATAR_ID;
+      if (
+        profileName !== profile.name ||
+        profileColor !== profile.color ||
+        profileAvatar !== originalAvatar
+      ) {
         updatedProfile = ProfileService.updateProfile(profile.id, {
           name: profileName,
-          color: profileColor
+          color: profileColor,
+          avatar: profileAvatar,
         });
       }
-
       if (updatedProfile) {
         onProfileUpdate(updatedProfile);
         setHasChanges(false);
@@ -176,7 +224,7 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
       setPreferences(prev => ({
         ...prev,
         contentLastRefreshAt: result?.lastRefreshAt || prev.contentLastRefreshAt,
-        contentLastRefreshError: undefined
+        contentLastRefreshError: undefined,
       }));
       setLocalRefreshMessage('Lista contenuti aggiornata correttamente.');
     } catch (error) {
@@ -194,7 +242,9 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
   const handleOptimizeImageCache = async () => {
     const result = await CacheService.cleanupOldImages({ aggressive: true });
     await refreshCacheStats();
-    setImageCacheMessage(`Cache immagini ottimizzata: ${result.deleted} elementi rimossi, ${(result.freedBytes / 1024 / 1024).toFixed(2)} MB liberati.`);
+    setImageCacheMessage(
+      `Cache immagini ottimizzata: ${result.deleted} elementi rimossi, ${(result.freedBytes / 1024 / 1024).toFixed(2)} MB liberati.`,
+    );
   };
 
   const handleClearImageCache = async () => {
@@ -207,307 +257,288 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
     if (!timestamp) return 'Mai eseguito';
     return new Intl.DateTimeFormat('it-IT', {
       dateStyle: 'short',
-      timeStyle: 'short'
+      timeStyle: 'short',
     }).format(new Date(timestamp));
   };
 
-  const ToggleSwitch: React.FC<{ enabled: boolean; onChange: (v: boolean) => void }> = ({ enabled, onChange }) => (
-    <button
-      onClick={() => onChange(!enabled)}
-      className={`tv-focus touch-target relative w-14 h-8 rounded-full transition-colors duration-200 ${
-        enabled ? 'bg-purple-600' : 'bg-gray-700'
-      }`}
-    >
-      <span
-        className={`absolute top-1 w-6 h-6 rounded-full bg-white shadow-md transition-transform duration-200 ${
-          enabled ? 'translate-x-7' : 'translate-x-1'
-        }`}
-      />
-    </button>
-  );
-
-  const SelectDropdown: React.FC<{
-    value: string;
-    options: { value?: string; label?: string; name?: string; code?: string }[];
-    onChange: (v: string) => void;
-    valueKey?: string;
-    labelKey?: string;
-  }> = ({ value, options, onChange, valueKey = 'value', labelKey = 'label' }) => (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="tv-focus bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-white focus:border-purple-500 focus:outline-none transition-colors cursor-pointer min-w-[180px]"
-    >
-      {options.map((opt) => (
-        <option key={(opt as Record<string, string>)[valueKey]} value={(opt as Record<string, string>)[valueKey]}>
-          {(opt as Record<string, string>)[labelKey] || opt.name}
-        </option>
-      ))}
-    </select>
-  );
-
   return (
-    <div ref={screenRef} className="min-h-screen bg-[var(--bg-primary)] text-white safe-area-screen">
+    <div
+      ref={screenRef}
+      className="min-h-screen bg-surface-0 text-content-primary safe-area-screen"
+    >
       {/* Header */}
-      <div className="sticky top-0 z-50 bg-gradient-to-b from-[var(--bg-primary)] via-[var(--bg-primary)] to-transparent pb-8">
+      <div className="sticky top-0 z-50 bg-gradient-to-b from-surface-0 via-surface-0 to-transparent pb-8">
         <div className="max-w-4xl mx-auto px-6 pt-8">
           <div className="flex items-center justify-between">
-            <button
+            <Button
+              variant="ghost"
+              size="md"
+              leftIcon={ArrowLeft}
               onClick={onBack}
-              className="tv-focus flex items-center gap-2 text-gray-400 hover:text-white transition-colors px-4 py-2 rounded-lg hover:bg-white/10"
               data-initial-focus="true"
             >
-              <ArrowLeft className="w-5 h-5" />
-              <span className="font-medium">{t.back}</span>
-            </button>
+              {t.back}
+            </Button>
 
-            <button
+            <Button
+              variant="primary"
+              size="md"
               onClick={handleSave}
               disabled={!hasChanges || isSaving}
-              className={`tv-focus flex items-center gap-2 px-6 py-2.5 rounded-lg font-semibold transition-all ${
-                hasChanges
-                  ? 'bg-purple-600 hover:bg-purple-500 text-white shadow-lg shadow-purple-900/50'
-                  : 'bg-gray-800 text-gray-500 cursor-not-allowed'
-              }`}
+              loading={isSaving}
+              leftIcon={isSaving ? undefined : Check}
             >
-              {isSaving ? (
-                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              ) : (
-                <Check className="w-5 h-5" />
-              )}
               {t.saveChanges}
-            </button>
+            </Button>
           </div>
         </div>
       </div>
 
       <div className="max-w-4xl mx-auto px-6 pb-16 space-y-8">
         {/* Profile Section */}
-        <section className="bg-white/5 rounded-2xl p-6 border border-white/10">
-          <h2 className="text-xl font-semibold mb-6 flex items-center gap-3">
-            <User className="w-6 h-6 text-purple-500" />
-            {t.profile}
-          </h2>
-
-          <div className="flex flex-col md:flex-row gap-8 items-start">
-            {/* Avatar with color picker */}
-            <div className="relative">
+        <SectionCard icon={User} title={t.profile}>
+          <div className="flex flex-col gap-8">
+            <div className="flex flex-col md:flex-row gap-8 items-start">
+              {/* Avatar preview (uses selected avatar + color) */}
               <button
-                onClick={() => setShowColorPicker(!showColorPicker)}
-                className="tv-focus w-28 h-28 rounded-2xl flex items-center justify-center transition-transform hover:scale-105 relative group"
-                style={{ backgroundColor: profileColor }}
+                type="button"
+                onClick={() => setShowAvatarPicker((v) => !v)}
+                className="tv-focus rounded-card transition-transform hover:scale-105 relative group"
+                aria-label="Modifica avatar"
+                aria-expanded={showAvatarPicker}
               >
-                <User className="w-14 h-14 text-white/90" />
-                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl flex items-center justify-center">
-                  <Palette className="w-8 h-8 text-white" />
+                <Avatar
+                  avatarId={profileAvatar}
+                  color={profileColor}
+                  size="xl"
+                  shape="card"
+                  label={profileName}
+                />
+                <div className="absolute inset-0 bg-surface-overlay-hard opacity-0 group-hover:opacity-60 transition-opacity rounded-card flex items-center justify-center pointer-events-none">
+                  <Palette className="w-icon-xl h-icon-xl text-white" aria-hidden="true" />
                 </div>
               </button>
 
-              {showColorPicker && (
-                <div className="absolute top-full left-0 mt-2 p-3 bg-gray-900 rounded-xl border border-white/10 shadow-2xl z-10 animate-fade-in">
-                  <div className="grid grid-cols-5 gap-2">
+              {/* Name + color */}
+              <div className="flex-1 flex flex-col gap-4 w-full">
+                <FormField label={t.profileName} htmlFor="profile-settings-name">
+                  <Input
+                    id="profile-settings-name"
+                    type="text"
+                    value={profileName}
+                    onChange={(e) => setProfileName(e.target.value)}
+                    placeholder={t.profileName}
+                    inputSize="lg"
+                  />
+                </FormField>
+
+                <FormField label="Colore">
+                  <div
+                    role="radiogroup"
+                    aria-label="Colore profilo"
+                    className="flex flex-wrap gap-2"
+                  >
                     {PROFILE_COLORS.map((color) => (
                       <button
                         key={color}
-                        onClick={() => {
-                          setProfileColor(color);
-                          setShowColorPicker(false);
-                        }}
-                        className={`tv-focus touch-target w-8 h-8 rounded-full transition-transform hover:scale-110 ${
-                          profileColor === color ? 'ring-2 ring-white ring-offset-2 ring-offset-gray-900' : ''
+                        type="button"
+                        role="radio"
+                        aria-checked={profileColor === color}
+                        onClick={() => setProfileColor(color)}
+                        className={`tv-focus-dense w-9 h-9 rounded-full transition-transform hover:scale-110 ${
+                          profileColor === color
+                            ? 'ring-2 ring-content-primary ring-offset-2 ring-offset-surface-1'
+                            : ''
                         }`}
                         style={{ backgroundColor: color }}
+                        aria-label={`Colore ${color}`}
                       />
                     ))}
                   </div>
-                </div>
-              )}
+                </FormField>
+              </div>
             </div>
 
-            {/* Name input */}
-            <div className="flex-1 space-y-2">
-              <label className="text-sm text-gray-400">{t.profileName}</label>
-              <input
-                type="text"
-                value={profileName}
-                onChange={(e) => setProfileName(e.target.value)}
-                className="tv-focus w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white text-lg focus:border-purple-500 focus:outline-none transition-colors"
-                placeholder={t.profileName}
-              />
-            </div>
+            {/* Avatar picker (collapsible) */}
+            {showAvatarPicker && (
+              <div className="animate-fade-in">
+                <FormField label="Avatar">
+                  <AvatarPicker
+                    value={profileAvatar}
+                    color={profileColor}
+                    onChange={setProfileAvatar}
+                  />
+                </FormField>
+              </div>
+            )}
           </div>
-        </section>
+        </SectionCard>
 
         {/* Language Settings */}
-        <section className="bg-white/5 rounded-2xl p-6 border border-white/10">
-          <h2 className="text-xl font-semibold mb-6 flex items-center gap-3">
-            <Globe className="w-6 h-6 text-purple-500" />
-            {t.languageAndSubtitles}
-          </h2>
-
+        <SectionCard icon={Globe} title={t.languageAndSubtitles}>
           <div className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-4">
               <div>
-                <h3 className="font-medium text-white">{t.contentLanguage}</h3>
-                <p className="text-sm text-gray-400 mt-1">{t.contentLanguageDesc}</p>
+                <h3 className="font-medium text-content-primary">{t.contentLanguage}</h3>
+                <p className="text-sm text-content-muted mt-1">{t.contentLanguageDesc}</p>
               </div>
-              <SelectDropdown
+              <Select
                 value={preferences.language}
-                options={LANGUAGES}
-                onChange={(v) => handlePreferenceChange('language', v)}
-                valueKey="code"
-                labelKey="name"
-              />
+                onChange={(e) => handlePreferenceChange('language', e.target.value)}
+                className="min-w-[180px] max-w-[220px]"
+                aria-label={t.contentLanguage}
+              >
+                {LANGUAGES.map((l) => (
+                  <option key={l.code} value={l.code}>{l.name}</option>
+                ))}
+              </Select>
             </div>
 
-            <div className="border-t border-white/10" />
+            <Divider />
 
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-3">
-                <Subtitles className="w-5 h-5 text-gray-400" />
+                <Subtitles className="w-icon-md h-icon-md text-content-muted" aria-hidden="true" />
                 <div>
-                  <h3 className="font-medium text-white">{t.subtitleLanguage}</h3>
-                  <p className="text-sm text-gray-400 mt-1">{t.subtitleLanguageDesc}</p>
+                  <h3 className="font-medium text-content-primary">{t.subtitleLanguage}</h3>
+                  <p className="text-sm text-content-muted mt-1">{t.subtitleLanguageDesc}</p>
                 </div>
               </div>
-              <SelectDropdown
+              <Select
                 value={preferences.subtitleLanguage}
-                options={LANGUAGES}
-                onChange={(v) => handlePreferenceChange('subtitleLanguage', v)}
-                valueKey="code"
-                labelKey="name"
-              />
+                onChange={(e) => handlePreferenceChange('subtitleLanguage', e.target.value)}
+                className="min-w-[180px] max-w-[220px]"
+                aria-label={t.subtitleLanguage}
+              >
+                {LANGUAGES.map((l) => (
+                  <option key={l.code} value={l.code}>{l.name}</option>
+                ))}
+              </Select>
             </div>
           </div>
-        </section>
+        </SectionCard>
 
         {/* Appearance Settings */}
-        <section className="bg-white/5 rounded-2xl p-6 border border-white/10">
-          <h2 className="text-xl font-semibold mb-6 flex items-center gap-3">
-            <Palette className="w-6 h-6 text-purple-500" />
-            {t.appearance}
-          </h2>
-
-          <div className="flex items-center justify-between">
+        <SectionCard icon={Palette} title={t.appearance}>
+          <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <Monitor className="w-5 h-5 text-gray-400" />
+              <Monitor className="w-icon-md h-icon-md text-content-muted" aria-hidden="true" />
               <div>
-                <h3 className="font-medium text-white">{t.themeInterface}</h3>
-                <p className="text-sm text-gray-400 mt-1">{t.themeInterfaceDesc}</p>
+                <h3 className="font-medium text-content-primary">{t.themeInterface}</h3>
+                <p className="text-sm text-content-muted mt-1">{t.themeInterfaceDesc}</p>
               </div>
             </div>
-            <SelectDropdown
+            <Select
               value={preferences.theme || 'dark'}
-              options={THEME_OPTIONS}
-              onChange={(v) => handlePreferenceChange('theme', v as 'dark' | 'oled')}
-            />
+              onChange={(e) => handlePreferenceChange('theme', e.target.value as 'dark' | 'oled')}
+              className="min-w-[200px]"
+              aria-label={t.themeInterface}
+            >
+              {THEME_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </Select>
           </div>
-        </section>
+        </SectionCard>
 
-        {/* AI Settings */}
-        <section className="bg-white/5 rounded-2xl p-6 border border-white/10">
-          <h2 className="text-xl font-semibold mb-6 flex items-center gap-3">
-            <Sparkles className="w-6 h-6 text-purple-500" />
-            {t.aiSettings}
-          </h2>
-
-          <div className="flex items-center justify-between">
+        {/* AI Settings — icona AI accent (viola) */}
+        <SectionCard icon={Sparkles} title={t.aiSettings} iconTone="accent">
+          <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <Zap className="w-5 h-5 text-gray-400" />
+              <Zap className="w-icon-md h-icon-md text-content-muted" aria-hidden="true" />
               <div>
-                <h3 className="font-medium text-white">{t.aiCaching}</h3>
-                <p className="text-sm text-gray-400 mt-1">{t.aiCachingDesc}</p>
+                <h3 className="font-medium text-content-primary">{t.aiCaching}</h3>
+                <p className="text-sm text-content-muted mt-1">{t.aiCachingDesc}</p>
               </div>
             </div>
             <ToggleSwitch
               enabled={preferences.aiCaching}
               onChange={(v) => handlePreferenceChange('aiCaching', v)}
+              ariaLabel={t.aiCaching}
             />
           </div>
 
-          <div className="border-t border-white/10 my-6" />
+          <Divider />
 
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div className="flex items-start gap-3">
-              <Sparkles className="w-5 h-5 text-gray-400 mt-0.5" />
+              <Sparkles className="w-icon-md h-icon-md text-content-muted mt-0.5" aria-hidden="true" />
               <div>
-                <h3 className="font-medium text-white">Svuota cache AI</h3>
-                <p className="text-sm text-gray-400 mt-1">Cancella solo risposte Gemini e arricchimenti AI salvati per questo dispositivo.</p>
-                {aiCacheMessage && <p className="text-xs text-green-300 mt-2">{aiCacheMessage}</p>}
+                <h3 className="font-medium text-content-primary">Svuota cache AI</h3>
+                <p className="text-sm text-content-muted mt-1">
+                  Cancella solo risposte Gemini e arricchimenti AI salvati per questo dispositivo.
+                </p>
+                {aiCacheMessage && (
+                  <p className="text-xs text-state-success mt-2">{aiCacheMessage}</p>
+                )}
               </div>
             </div>
-            <button
-              onClick={handleClearAiCache}
-              className="tv-focus touch-target bg-purple-600/20 hover:bg-purple-600 text-purple-300 hover:text-white border border-purple-500/30 px-4 py-2 rounded-lg transition-all font-medium"
-            >
+            <Button variant="accent" size="sm" onClick={handleClearAiCache}>
               Svuota cache AI
-            </button>
+            </Button>
           </div>
 
-          <div className="border-t border-white/10 my-6" />
+          <Divider />
 
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <ShieldCheck className="w-5 h-5 text-gray-400" />
+                <ShieldCheck className="w-icon-md h-icon-md text-content-muted" aria-hidden="true" />
                 <div>
-                  <h3 className="font-medium text-white">{t.geminiApiKey}</h3>
-                  <p className="text-sm text-gray-400 mt-1">{t.geminiApiKeyDesc}</p>
+                  <h3 className="font-medium text-content-primary">{t.geminiApiKey}</h3>
+                  <p className="text-sm text-content-muted mt-1">{t.geminiApiKeyDesc}</p>
                 </div>
               </div>
             </div>
-            
+
             <div className="flex flex-col gap-3">
-              <input
+              <Input
                 type="password"
                 value={preferences.geminiApiKey || ''}
                 onChange={(e) => handlePreferenceChange('geminiApiKey', e.target.value)}
-                className="tv-focus w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:border-purple-500 focus:outline-none transition-colors font-mono text-sm"
                 placeholder="AIza..."
+                accent="accent"
+                className="font-mono"
+                aria-label={t.geminiApiKey}
               />
-              <a 
-                href="https://aistudio.google.com/app/apikey" 
-                target="_blank" 
+              <a
+                href="https://aistudio.google.com/app/apikey"
+                target="_blank"
                 rel="noopener noreferrer"
-                className="tv-focus text-xs text-purple-400 hover:text-purple-300 transition-colors flex items-center gap-1 w-fit rounded-lg px-2 py-1"
+                className="tv-focus text-xs text-brand-accent hover:text-brand-accent-hover transition-colors flex items-center gap-1 w-fit rounded-control px-2 py-1"
               >
-                <Globe className="w-3 h-3" />
+                <Globe className="w-icon-xs h-icon-xs" aria-hidden="true" />
                 {t.getApiKeyLink}
               </a>
             </div>
           </div>
-        </section>
+        </SectionCard>
 
         {/* Playback & Debug Settings */}
-        <section className="bg-white/5 rounded-2xl p-6 border border-white/10">
-          <h2 className="text-xl font-semibold mb-6 flex items-center gap-3">
-            <Play className="w-6 h-6 text-purple-500" />
-            {t.playback}
-          </h2>
-
-          <div className="flex items-center justify-between">
+        <SectionCard icon={Play} title={t.playback}>
+          <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <Monitor className="w-5 h-5 text-gray-400" />
+              <Monitor className="w-icon-md h-icon-md text-content-muted" aria-hidden="true" />
               <div>
-                <h3 className="font-medium text-white">{t.debugOverlay}</h3>
-                <p className="text-sm text-gray-400 mt-1">{t.debugOverlayDesc}</p>
+                <h3 className="font-medium text-content-primary">{t.debugOverlay}</h3>
+                <p className="text-sm text-content-muted mt-1">{t.debugOverlayDesc}</p>
               </div>
             </div>
             <ToggleSwitch
               enabled={preferences.debugOverlay}
               onChange={(v) => handlePreferenceChange('debugOverlay', v)}
+              ariaLabel={t.debugOverlay}
             />
           </div>
 
-          <div className="border-t border-white/10 my-6" />
+          <Divider />
 
-          {/* C.4 — Auto-next episode countdown */}
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <SkipForward className="w-5 h-5 text-gray-400" />
+              <SkipForward className="w-icon-md h-icon-md text-content-muted" aria-hidden="true" />
               <div>
-                <h3 className="font-medium text-white">Episodio successivo automatico</h3>
-                <p className="text-sm text-gray-400 mt-1">
+                <h3 className="font-medium text-content-primary">Episodio successivo automatico</h3>
+                <p className="text-sm text-content-muted mt-1">
                   Mostra un conto alla rovescia di 10s a fine episodio e avvia il successivo nelle serie TV.
                 </p>
               </div>
@@ -515,50 +546,52 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
             <ToggleSwitch
               enabled={preferences.autoNextEpisodeEnabled ?? (DEFAULT_PREFERENCES.autoNextEpisodeEnabled ?? true)}
               onChange={(v) => handlePreferenceChange('autoNextEpisodeEnabled', v)}
+              ariaLabel="Episodio successivo automatico"
             />
           </div>
 
-          <div className="border-t border-white/10 my-6" />
+          <Divider />
 
-          {/* C.4 — Continue Watching completion threshold */}
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <History className="w-5 h-5 text-gray-400" />
+              <History className="w-icon-md h-icon-md text-content-muted" aria-hidden="true" />
               <div>
-                <h3 className="font-medium text-white">Soglia "completato" — Continua a guardare</h3>
-                <p className="text-sm text-gray-400 mt-1">
+                <h3 className="font-medium text-content-primary">
+                  Soglia "completato" — Continua a guardare
+                </h3>
+                <p className="text-sm text-content-muted mt-1">
                   Sopra questa percentuale di visione un titolo è considerato completato e sparisce dalla riga "Continua a guardare".
                 </p>
               </div>
             </div>
-            <SelectDropdown
+            <Select
               value={String(
                 Math.round(
                   ((preferences.continueWatchingCompletedThreshold
                     ?? DEFAULT_PREFERENCES.continueWatchingCompletedThreshold
-                    ?? 0.95) as number) * 100
-                )
+                    ?? 0.95) as number) * 100,
+                ),
               )}
-              options={[
-                { value: '80', label: '80%' },
-                { value: '85', label: '85%' },
-                { value: '90', label: '90%' },
-                { value: '95', label: '95% (default)' },
-                { value: '98', label: '98%' },
-              ]}
-              onChange={(v) => handlePreferenceChange('continueWatchingCompletedThreshold', Math.max(0.7, Math.min(0.99, Number(v) / 100)))}
-            />
+              onChange={(e) =>
+                handlePreferenceChange(
+                  'continueWatchingCompletedThreshold',
+                  Math.max(0.7, Math.min(0.99, Number(e.target.value) / 100)),
+                )
+              }
+              className="min-w-[160px]"
+              aria-label='Soglia completato'
+            >
+              <option value="80">80%</option>
+              <option value="85">85%</option>
+              <option value="90">90%</option>
+              <option value="95">95% (default)</option>
+              <option value="98">98%</option>
+            </Select>
           </div>
-        </section>
+        </SectionCard>
 
         {/* Data & Cache */}
-        <section className="bg-white/5 rounded-2xl p-6 border border-white/10">
-          <h2 className="text-xl font-semibold mb-6 flex items-center gap-3">
-            <Database className="w-6 h-6 text-purple-500" />
-            Catalogo contenuti
-          </h2>
-
-          {/* F.3 Xtream account health-check badge */}
+        <SectionCard icon={Database} title="Catalogo contenuti">
           {profile.xtreamCreds && (
             <div className="mb-6">
               <XtreamHealthBadge creds={profile.xtreamCreds} />
@@ -568,43 +601,57 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
           <div className="space-y-6">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
               <div className="flex items-start gap-3">
-                <RefreshCw className="w-5 h-5 text-gray-400 mt-0.5" />
+                <RefreshCw className="w-icon-md h-icon-md text-content-muted mt-0.5" aria-hidden="true" />
                 <div>
-                  <h3 className="font-medium text-white">Riscarica lista dal server</h3>
-                  <p className="text-sm text-gray-400 mt-1">
+                  <h3 className="font-medium text-content-primary">Riscarica lista dal server</h3>
+                  <p className="text-sm text-content-muted mt-1">
                     Aggiorna Live, Film e Serie ignorando la cache locale. Utile se il provider ha aggiunto o rimosso contenuti.
                   </p>
-                  <p className="text-xs text-gray-500 mt-2">Ultimo aggiornamento: {formatLastRefresh(preferences.contentLastRefreshAt)}</p>
+                  <p className="text-xs text-content-disabled mt-2">
+                    Ultimo aggiornamento: {formatLastRefresh(preferences.contentLastRefreshAt)}
+                  </p>
                 </div>
               </div>
-              <button
+              <Button
+                variant="primary"
+                size="sm"
                 onClick={handleRefreshContent}
                 disabled={!profile.xtreamCreds || isContentRefreshing}
-                className={`tv-focus px-4 py-2 rounded-lg transition-all font-medium flex items-center justify-center gap-2 ${
-                  profile.xtreamCreds && !isContentRefreshing
-                    ? 'bg-purple-600 hover:bg-purple-500 text-white shadow-lg shadow-purple-900/30'
-                    : 'bg-gray-800 text-gray-500 cursor-not-allowed'
-                }`}
+                loading={isContentRefreshing}
+                leftIcon={isContentRefreshing ? undefined : RefreshCw}
               >
-                <RefreshCw className={`w-4 h-4 ${isContentRefreshing ? 'animate-spin' : ''}`} />
                 {isContentRefreshing ? 'Aggiornamento...' : 'Riscarica lista'}
-              </button>
+              </Button>
             </div>
 
             {(localRefreshMessage || contentRefreshMessage || preferences.contentLastRefreshError) && (
-              <div className={`rounded-xl border px-4 py-3 text-sm ${preferences.contentLastRefreshError ? 'bg-red-950/30 border-red-500/30 text-red-200' : 'bg-green-950/30 border-green-500/30 text-green-200'}`}>
-                {localRefreshMessage || contentRefreshMessage || preferences.contentLastRefreshError}
-              </div>
+              <Card
+                elevation="flat"
+                padding="sm"
+                className={
+                  preferences.contentLastRefreshError
+                    ? '!border-state-error/30 !bg-state-error/10'
+                    : '!border-state-success/30 !bg-state-success/10'
+                }
+              >
+                <p
+                  className={`text-sm ${
+                    preferences.contentLastRefreshError ? 'text-state-error' : 'text-state-success'
+                  }`}
+                >
+                  {localRefreshMessage || contentRefreshMessage || preferences.contentLastRefreshError}
+                </p>
+              </Card>
             )}
 
-            <div className="border-t border-white/10" />
+            <Divider />
 
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
               <div className="flex items-start gap-3">
-                <Clock className="w-5 h-5 text-gray-400 mt-0.5" />
+                <Clock className="w-icon-md h-icon-md text-content-muted mt-0.5" aria-hidden="true" />
                 <div>
-                  <h3 className="font-medium text-white">Aggiornamento in background</h3>
-                  <p className="text-sm text-gray-400 mt-1">
+                  <h3 className="font-medium text-content-primary">Aggiornamento in background</h3>
+                  <p className="text-sm text-content-muted mt-1">
                     Quando attivo, StreamAI controlla periodicamente il server e aggiorna il catalogo senza bloccare la navigazione.
                   </p>
                 </div>
@@ -612,98 +659,122 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
               <ToggleSwitch
                 enabled={Boolean(preferences.contentAutoRefreshEnabled)}
                 onChange={(v) => handlePreferenceChange('contentAutoRefreshEnabled', v)}
+                ariaLabel="Aggiornamento in background"
               />
             </div>
 
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 pl-0 md:pl-8">
               <div>
-                <h3 className="font-medium text-white">Frequenza aggiornamento</h3>
-                <p className="text-sm text-gray-400 mt-1">Scegli ogni quanto riscaricare la lista dal server.</p>
+                <h3 className="font-medium text-content-primary">Frequenza aggiornamento</h3>
+                <p className="text-sm text-content-muted mt-1">
+                  Scegli ogni quanto riscaricare la lista dal server.
+                </p>
               </div>
-              <SelectDropdown
-                value={String(preferences.contentAutoRefreshIntervalMinutes || DEFAULT_PREFERENCES.contentAutoRefreshIntervalMinutes || 360)}
-                options={CONTENT_REFRESH_INTERVAL_OPTIONS}
-                onChange={(v) => handlePreferenceChange('contentAutoRefreshIntervalMinutes', Number(v))}
-              />
+              <Select
+                value={String(
+                  preferences.contentAutoRefreshIntervalMinutes
+                    || DEFAULT_PREFERENCES.contentAutoRefreshIntervalMinutes
+                    || 360,
+                )}
+                onChange={(e) =>
+                  handlePreferenceChange('contentAutoRefreshIntervalMinutes', Number(e.target.value))
+                }
+                className="min-w-[180px]"
+                aria-label="Frequenza aggiornamento"
+              >
+                {CONTENT_REFRESH_INTERVAL_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </Select>
             </div>
           </div>
-        </section>
+        </SectionCard>
 
         {/* Cache */}
-        <section className="bg-white/5 rounded-2xl p-6 border border-white/10">
-          <h2 className="text-xl font-semibold mb-6 flex items-center gap-3">
-            <Trash2 className="w-6 h-6 text-red-500" />
-            Cache
-          </h2>
-
+        <SectionCard icon={Trash2} title="Cache" iconTone="state-error">
           <div className="space-y-6">
             {cacheStats && (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-                  <div className="flex items-center gap-2 text-gray-400 text-sm"><ImageIcon className="w-4 h-4" /> Immagini</div>
-                  <p className="mt-2 text-2xl font-bold text-white">{cacheStats.totalImages}</p>
-                  <p className="text-xs text-gray-500">{cacheStats.imageBytesMB} MB / {cacheStats.imageLimitMB} MB · TTL {cacheStats.imageTtlDays} giorni</p>
-                </div>
-                <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-                  <div className="flex items-center gap-2 text-gray-400 text-sm"><HardDrive className="w-4 h-4" /> Storage</div>
-                  <p className="mt-2 text-2xl font-bold text-white">{cacheStats.storage.percentUsed}%</p>
-                  <p className="text-xs text-gray-500">{cacheStats.storage.usageMB} MB usati / {cacheStats.storage.quotaGB} GB</p>
-                </div>
-                <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-                  <div className="flex items-center gap-2 text-gray-400 text-sm"><RefreshCw className="w-4 h-4" /> Hit rate</div>
-                  <p className="mt-2 text-2xl font-bold text-white">{cacheStats.hitRate}%</p>
-                  <p className="text-xs text-gray-500">Memoria: {cacheStats.memCacheSize} URL · max {cacheStats.imageLimitEntries} immagini</p>
-                </div>
+                <Card elevation="flat" padding="md">
+                  <div className="flex items-center gap-2 text-content-muted text-sm">
+                    <ImageIcon className="w-icon-sm h-icon-sm" aria-hidden="true" /> Immagini
+                  </div>
+                  <p className="mt-2 text-2xl font-bold text-content-primary">{cacheStats.totalImages}</p>
+                  <p className="text-xs text-content-disabled">
+                    {cacheStats.imageBytesMB} MB / {cacheStats.imageLimitMB} MB · TTL {cacheStats.imageTtlDays} giorni
+                  </p>
+                </Card>
+                <Card elevation="flat" padding="md">
+                  <div className="flex items-center gap-2 text-content-muted text-sm">
+                    <HardDrive className="w-icon-sm h-icon-sm" aria-hidden="true" /> Storage
+                  </div>
+                  <p className="mt-2 text-2xl font-bold text-content-primary">
+                    {cacheStats.storage.percentUsed}%
+                  </p>
+                  <p className="text-xs text-content-disabled">
+                    {cacheStats.storage.usageMB} MB usati / {cacheStats.storage.quotaGB} GB
+                  </p>
+                </Card>
+                <Card elevation="flat" padding="md">
+                  <div className="flex items-center gap-2 text-content-muted text-sm">
+                    <RefreshCw className="w-icon-sm h-icon-sm" aria-hidden="true" /> Hit rate
+                  </div>
+                  <p className="mt-2 text-2xl font-bold text-content-primary">{cacheStats.hitRate}%</p>
+                  <p className="text-xs text-content-disabled">
+                    Memoria: {cacheStats.memCacheSize} URL · max {cacheStats.imageLimitEntries} immagini
+                  </p>
+                </Card>
               </div>
             )}
 
             {imageCacheMessage && (
-              <div className="rounded-xl border border-green-500/30 bg-green-950/30 px-4 py-3 text-sm text-green-200">
-                {imageCacheMessage}
-              </div>
+              <Card
+                elevation="flat"
+                padding="sm"
+                className="!border-state-success/30 !bg-state-success/10"
+              >
+                <p className="text-sm text-state-success">{imageCacheMessage}</p>
+              </Card>
             )}
 
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
               <div>
-                <h3 className="font-medium text-white">Cache immagini</h3>
-                <p className="text-sm text-gray-400 mt-1">Mantiene poster e loghi con limite massimo, TTL e cleanup automatico quando lo storage è sotto pressione.</p>
+                <h3 className="font-medium text-content-primary">Cache immagini</h3>
+                <p className="text-sm text-content-muted mt-1">
+                  Mantiene poster e loghi con limite massimo, TTL e cleanup automatico quando lo storage è sotto pressione.
+                </p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={handleOptimizeImageCache}
-                  className="tv-focus touch-target bg-white/5 hover:bg-white/10 text-gray-200 border border-white/10 px-4 py-2 rounded-lg transition-all font-medium"
-                >
+                <Button variant="secondary" size="sm" onClick={handleOptimizeImageCache}>
                   Ottimizza immagini
-                </button>
-                <button
-                  onClick={handleClearImageCache}
-                  className="tv-focus touch-target bg-red-600/10 hover:bg-red-600 text-red-300 hover:text-white border border-red-500/30 px-4 py-2 rounded-lg transition-all font-medium"
-                >
+                </Button>
+                <Button variant="danger" size="sm" onClick={handleClearImageCache}>
                   Svuota immagini
-                </button>
+                </Button>
               </div>
             </div>
 
-            <div className="border-t border-white/10" />
+            <Divider />
 
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
               <div>
-                <h3 className="font-medium text-white">{t.clearCache}</h3>
-                <p className="text-sm text-gray-400 mt-1">{t.clearCacheDesc}</p>
+                <h3 className="font-medium text-content-primary">{t.clearCache}</h3>
+                <p className="text-sm text-content-muted mt-1">{t.clearCacheDesc}</p>
               </div>
-              <button
+              <Button
+                variant="danger"
+                size="sm"
                 onClick={() => {
                   CacheService.clearAll();
                   alert(t.cacheCleared);
                   window.location.reload();
                 }}
-                className="tv-focus touch-target bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white border border-red-500/30 px-4 py-2 rounded-lg transition-all font-medium"
               >
                 {t.clearCache}
-              </button>
+              </Button>
             </div>
           </div>
-        </section>
+        </SectionCard>
       </div>
     </div>
   );

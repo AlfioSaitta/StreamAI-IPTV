@@ -130,6 +130,12 @@ export interface Profile {
   id: string;
   name: string;
   color: string; // Hex color for avatar
+  /**
+   * ID dell'avatar dal catalogo `services/avatars.ts`. Opzionale per
+   * retro-compatibilità con i profili creati prima del 2026-05-13: in
+   * quel caso il render fa fallback a `DEFAULT_AVATAR_ID`.
+   */
+  avatar?: string;
   xtreamCreds: XtreamCredentials | null;
   history: WatchHistoryItem[];
   watchlist: string[];
