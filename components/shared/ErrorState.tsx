@@ -1,4 +1,5 @@
 import React from 'react';
+import Button from './Button';
 
 interface ErrorStateProps {
   message: string;
@@ -9,25 +10,27 @@ interface ErrorStateProps {
 
 const ErrorState: React.FC<ErrorStateProps> = ({ message, buttonText, onButtonClick, variant = 'movie' }) => {
   const isMovie = variant === 'movie';
-  
+
   const containerClasses = isMovie
-    ? 'fixed inset-0 bg-black/80 backdrop-blur-md z-[90] flex flex-col items-center justify-center text-white px-8 text-center safe-area-screen'
-    : 'fixed inset-0 bg-[var(--bg-primary)] z-50 flex flex-col items-center justify-center text-white safe-area-screen';
+    ? 'fixed inset-0 bg-surface-overlay-hard backdrop-blur-md z-[90] flex flex-col items-center justify-center text-content-primary px-8 text-center safe-area-screen'
+    : 'fixed inset-0 bg-surface-0 z-50 flex flex-col items-center justify-center text-content-primary safe-area-screen';
 
   const messageClasses = isMovie
-    ? 'text-2xl text-red-400 mb-6'
-    : 'text-3xl text-red-400 mb-8';
-  
-  const buttonClasses = isMovie
-    ? 'tv-focus px-6 py-3 bg-white/10 rounded-lg hover:bg-white/20 border border-white/10'
-    : 'tv-focus text-xl bg-gray-800 px-8 py-4 rounded-lg';
-  
+    ? 'text-2xl text-state-error mb-6'
+    : 'text-3xl text-state-error mb-8';
+
   return (
-    <div className={containerClasses}>
+    <div className={containerClasses} role="alert">
       <p className={messageClasses}>{message}</p>
-      <button onClick={onButtonClick} className={buttonClasses} autoFocus data-initial-focus="true">
+      <Button
+        onClick={onButtonClick}
+        variant={isMovie ? 'secondary' : 'primary'}
+        size="lg"
+        autoFocus
+        data-initial-focus="true"
+      >
         {buttonText}
-      </button>
+      </Button>
     </div>
   );
 };

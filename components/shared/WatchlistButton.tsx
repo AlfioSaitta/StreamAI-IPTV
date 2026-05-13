@@ -1,5 +1,6 @@
 import React from 'react';
 import { BookmarkPlus, BookmarkCheck } from 'lucide-react';
+import Button, { ButtonSize } from './Button';
 
 interface WatchlistButtonProps {
   isInWatchlist: boolean;
@@ -9,24 +10,28 @@ interface WatchlistButtonProps {
   variant?: 'movie' | 'series';
 }
 
-const WatchlistButton: React.FC<WatchlistButtonProps> = ({ 
-  isInWatchlist, 
-  onToggle, 
-  addText, 
+const SIZE_BY_VARIANT: Record<NonNullable<WatchlistButtonProps['variant']>, ButtonSize> = {
+  movie: 'lg',
+  series: 'md',
+};
+
+const WatchlistButton: React.FC<WatchlistButtonProps> = ({
+  isInWatchlist,
+  onToggle,
+  addText,
   removeText,
-  variant = 'movie'
+  variant = 'movie',
 }) => {
-  const isMovie = variant === 'movie';
-  const iconSize = isMovie ? 'w-5 h-5' : 'w-4 h-4';
-  
   return (
-    <button
+    <Button
       onClick={onToggle}
-      className="tv-focus flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg border border-white/10 transition-colors"
+      variant="secondary"
+      size={SIZE_BY_VARIANT[variant]}
+      leftIcon={isInWatchlist ? BookmarkCheck : BookmarkPlus}
+      aria-pressed={isInWatchlist}
     >
-      {isInWatchlist ? <BookmarkCheck className={iconSize} /> : <BookmarkPlus className={iconSize} />}
-      <span className="text-sm font-semibold">{isInWatchlist ? removeText : addText}</span>
-    </button>
+      {isInWatchlist ? removeText : addText}
+    </Button>
   );
 };
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Loader2 } from 'lucide-react';
+import Spinner from './Spinner';
 
 interface LoadingStateProps {
   message: string;
@@ -8,22 +8,18 @@ interface LoadingStateProps {
 
 const LoadingState: React.FC<LoadingStateProps> = ({ message, variant = 'movie' }) => {
   const isMovie = variant === 'movie';
-  
-  const containerClasses = isMovie 
-    ? 'fixed inset-0 bg-black/80 backdrop-blur-md z-[90] flex flex-col items-center justify-center text-white safe-area-screen'
-    : 'fixed inset-0 bg-[var(--bg-primary)] z-50 flex flex-col items-center justify-center text-white safe-area-screen';
 
-  const spinnerClasses = isMovie
-    ? 'w-14 h-14 text-red-500 mb-4 animate-spin'
-    : 'w-16 h-16 text-red-600 mb-6 animate-spin';
-  
+  const containerClasses = isMovie
+    ? 'fixed inset-0 bg-surface-overlay-hard backdrop-blur-md z-[90] flex flex-col items-center justify-center text-content-primary safe-area-screen'
+    : 'fixed inset-0 bg-surface-0 z-50 flex flex-col items-center justify-center text-content-primary safe-area-screen';
+
   const messageClasses = isMovie
-    ? 'text-lg text-gray-300'
-    : 'text-2xl text-gray-400';
-  
+    ? 'mt-4 text-lg text-content-secondary'
+    : 'mt-6 text-2xl text-content-muted';
+
   return (
-    <div className={containerClasses}>
-      <Loader2 className={spinnerClasses} />
+    <div className={containerClasses} role="status" aria-live="polite">
+      <Spinner size={isMovie ? 'lg' : 'xl'} tone="brand" />
       <p className={messageClasses}>{message}</p>
     </div>
   );
