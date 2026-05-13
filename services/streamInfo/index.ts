@@ -17,4 +17,10 @@ export {
   analyzeMpegTsProgramMap,
 } from './mpegtsProbe';
 export { type VideoByteAnalysis, analyzeVideoBytes } from './videoBytesAnalyzer';
-
+export {
+  type VodRangeSupport,
+  type VodProbeResult,
+  probeVodSource,
+  getCachedVodProbe,
+  clearVodProbeCache,
+} from './vodProbe';

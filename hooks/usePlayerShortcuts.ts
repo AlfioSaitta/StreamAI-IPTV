@@ -17,10 +17,16 @@ export interface UsePlayerShortcutsHandlers {
   onEscape: () => void;
   /** Optional: toggle Mini-EPG overlay (key 'g'), only fires for Live channels. */
   toggleEpg?: () => void;
+  /** Optional: toggle Sleep timer menu (key 't'). D.5. */
+  toggleSleepTimer?: () => void;
+  /** Optional: toggle subtitle visibility / open subtitle menu (key 's'). D.4. */
+  toggleSubtitles?: () => void;
 }
 
 export interface UsePlayerShortcutsContext {
   channel: Channel | null;
+  /** When true, ←/→ keyboard seek shortcuts are no-ops (URG-1 L3). */
+  seekDisabled?: boolean;
 }
 
 export function usePlayerShortcuts(handlers: UsePlayerShortcutsHandlers, ctx: UsePlayerShortcutsContext) {
@@ -35,6 +41,8 @@ export function usePlayerShortcuts(handlers: UsePlayerShortcutsHandlers, ctx: Us
     togglePlaylist,
     onEscape,
     toggleEpg,
+    toggleSleepTimer,
+    toggleSubtitles,
   } = handlers;
 
   useEffect(() => {
@@ -52,11 +60,11 @@ export function usePlayerShortcuts(handlers: UsePlayerShortcutsHandlers, ctx: Us
           break;
         case 'arrowleft':
           e.preventDefault();
-          skip(-10);
+          if (!ctx.seekDisabled) skip(-10);
           break;
         case 'arrowright':
           e.preventDefault();
-          skip(10);
+          if (!ctx.seekDisabled) skip(10);
           break;
         case 'arrowup':
           e.preventDefault();
@@ -91,6 +99,20 @@ export function usePlayerShortcuts(handlers: UsePlayerShortcutsHandlers, ctx: Us
             toggleEpg();
           }
           break;
+        case 't':
+          // Sleep timer menu (D.5).
+          if (toggleSleepTimer) {
+            e.preventDefault();
+            toggleSleepTimer();
+          }
+          break;
+        case 's':
+          // Subtitles toggle / menu (D.4).
+          if (toggleSubtitles) {
+            e.preventDefault();
+            toggleSubtitles();
+          }
+          break;
         case 'escape':
           e.preventDefault();
           onEscape();
@@ -100,6 +122,6 @@ export function usePlayerShortcuts(handlers: UsePlayerShortcutsHandlers, ctx: Us
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [togglePlay, skip, setVolume, currentVolume, toggleMute, toggleFullscreen, openCast, togglePlaylist, onEscape, toggleEpg, ctx.channel]);
+  }, [togglePlay, skip, setVolume, currentVolume, toggleMute, toggleFullscreen, openCast, togglePlaylist, onEscape, toggleEpg, toggleSleepTimer, toggleSubtitles, ctx.channel, ctx.seekDisabled]);
 }
 

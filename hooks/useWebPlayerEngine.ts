@@ -14,6 +14,7 @@ import { AlertTriangle } from 'lucide-react';
 import type { Channel } from '../types';
 import { platformService } from '../services/platformService';
 import { streamInfoService } from '../services/streamInfoService';
+import { probeVodSource, type VodProbeResult } from '../services/streamInfo/vodProbe';
 import {
   type PlaybackErrorState,
   type StreamSourceInfo,
@@ -56,6 +57,14 @@ export interface WebPlayerEngineOptions {
   scheduleRetry: (err: PlaybackErrorState) => void;
   cleanupPlaybackEngines: () => void;
   broadcastStatus: (force?: boolean) => void;
+
+  /**
+   * Optional callback invoked once the asynchronous VOD probe (HEAD + tail
+   * prefetch) completes. Lets the UI degrade gracefully when the server
+   * doesn't support Range or when the real Content-Type is unsupported
+   * (e.g. MKV / x-matroska).
+   */
+  onVodProbeResult?: (result: VodProbeResult) => void;
 
   /**
    * Flag describing the current "isBuffering" state at effect setup time.
@@ -103,6 +112,7 @@ export const useWebPlayerEngine = (opts: WebPlayerEngineOptions): void => {
     cleanupPlaybackEngines,
     broadcastStatus,
     isBuffering,
+    onVodProbeResult,
   } = opts;
 
   useEffect(() => {
@@ -153,12 +163,52 @@ export const useWebPlayerEngine = (opts: WebPlayerEngineOptions): void => {
       });
     }
 
+    // URG-1 L2: for VOD progressive sources (videojs engine on a likely MP4),
+    // warm the moov cache asynchronously and probe Range support so the UI
+    // can degrade gracefully if the server refuses Range. Fire-and-forget —
+    // we never block the player on this.
+    const isVodProgressive = detectedSource.engine === 'videojs'
+      && !detectedSource.isLive
+      && (channel.type === 'movie' || channel.type === 'series');
+    if (isVodProgressive) {
+      probeVodSource(source, { prefetchTail: true })
+        .then(result => {
+          onVodProbeResult?.(result);
+          if (result.rangeSupport === 'no') {
+            showOsd(
+              createElement(AlertTriangle, { className: 'w-12 h-12 text-white' }),
+              'Server senza Range: seek non disponibile',
+            );
+            return;
+          }
+          // Real Content-Type may reveal a container the videojs progressive
+          // engine cannot play correctly. Warn explicitly so the user
+          // understands the freeze is not a bug.
+          const ct = (result.contentType ?? '').toLowerCase();
+          if (ct.includes('matroska') || ct.includes('mkv')) {
+            showOsd(
+              createElement(AlertTriangle, { className: 'w-12 h-12 text-white' }),
+              'MKV non supportato dal player web — prova HLS se disponibile',
+            );
+          } else if (ct.includes('mp2t') && !detectedSource.isLive) {
+            showOsd(
+              createElement(AlertTriangle, { className: 'w-12 h-12 text-white' }),
+              'MPEG-TS senza indici: il seek può essere lento',
+            );
+          }
+        })
+        .catch(() => undefined);
+    }
+
     const player = videojs(videoEl, {
       autoplay: false,
       controls: false,
       responsive: true,
       fluid: true,
-      preload: 'metadata',
+      // URG-1 L2: VOD needs `auto` so the browser can fetch the moov index
+      // (especially for non-faststart MP4s where the index lives at the end
+      // of the file). Live keeps `metadata` to avoid wasting bandwidth.
+      preload: isVodProgressive ? 'auto' : 'metadata',
       sources: detectedSource.engine === 'videojs' ? [{ src: source, type: detectedSource.mimeType }] : [],
     });
     playerRef.current = player;
