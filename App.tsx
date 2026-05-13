@@ -43,6 +43,7 @@ import { Server, Wifi, Sparkles } from 'lucide-react';
 import { platformService } from './services/platformService.ts';
 import { hasAiApiKey, isAiAvailable, isAiTemporarilySuspended } from './services/geminiService.ts';
 import { EpgReminderService, type ReminderFiredEvent } from './services/epg/reminderService.ts';
+import { useBackStack } from './hooks/useBackStack.ts';
 
 const MIN_CONTENT_REFRESH_INTERVAL_MINUTES = 60;
 
@@ -217,104 +218,40 @@ function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // Gestione Tasto Back (Android Hardware Button)
-  useEffect(() => {
-    if (!platformService.isNative) return;
-
-    const handleBackButton = async () => {
-      const state = stateRef.current;
-
-      // 1. Chiudi Player Video
-      if (state.currentChannel) {
-        setCurrentChannel(null);
-        return;
-      }
-
-      // 2. Chiudi Modali/Dettagli
-      if (state.selectedMovie) {
-        setSelectedMovie(null);
-        return;
-      }
-      if (state.selectedSeries) {
-        setSelectedSeries(null);
-        return;
-      }
-      if (state.showGuide) {
-        setShowGuide(false);
-        return;
-      }
-      if (state.showSettings) {
-        setShowSettings(false);
-        return;
-      }
-      if (state.showXtreamModal && state.activeProfile?.xtreamCreds) {
-        // Chiudi modale login solo se abbiamo già credenziali (annulla modifica)
-        setShowXtreamModal(false);
-        return;
-      }
-
-      // 3. Navigazione Tab
-      if (state.activeTab !== 'home') {
-        setActiveTab('home');
-        return;
-      }
-
-      // 4. Logout Profilo (se siamo nella home) o Uscita App
-      // Se siamo nella root (Home), chiediamo conferma o usciamo
-      // Per ora usciamo dall'app come comportamento standard Android
-      CapacitorApp.exitApp();
-    };
-
-    const listener = CapacitorApp.addListener('backButton', handleBackButton);
-
-    return () => {
-      listener.then(l => l.remove());
-    };
-  }, []);
-
-  // Gestione coerente di Esc per tastiera e telecomandi desktop/TV.
-  useEffect(() => {
-      const handleEscape = (event: KeyboardEvent) => {
-          if (event.key !== 'Escape') return;
-
-          const state = stateRef.current;
-
-          if (state.currentChannel) return; // Il player gestisce Esc/Back autonomamente.
-
-          if (state.selectedMovie) {
-              event.preventDefault();
-              setSelectedMovie(null);
-              return;
-          }
-          if (state.selectedSeries) {
-              event.preventDefault();
-              setSelectedSeries(null);
-              return;
-          }
-          if (state.showGuide) {
-              event.preventDefault();
-              setShowGuide(false);
-              return;
-          }
-          if (state.showSettings) {
-              event.preventDefault();
-              setShowSettings(false);
-              return;
-          }
-          if (state.showXtreamModal && state.activeProfile?.xtreamCreds) {
-              event.preventDefault();
-              setShowXtreamModal(false);
-              return;
-          }
-          if (state.activeTab !== 'home') {
-              event.preventDefault();
-              setActiveTab('home');
-          }
-      };
-
-      window.addEventListener('keydown', handleEscape);
-      return () => window.removeEventListener('keydown', handleEscape);
-  }, []);
+  // ─── Routing dichiarativo (B.4) ─────────────────────────────────────
+  // Single declarative back-stack: replaces the two ad-hoc handlers
+  // (Android hardware Back + keyboard Esc) and centralises the order in
+  // which layers are closed. The player has `skipEsc: true` because it
+  // owns its own Esc handling (PiP exit, OSD dismiss, …) — for Esc it
+  // only blocks the chain; for Android Back it closes normally.
+  useBackStack(
+    [
+      { id: 'player', isOpen: !!currentChannel, onClose: () => setCurrentChannel(null), skipEsc: true },
+      { id: 'commandPalette', isOpen: showCommandPalette, onClose: () => setShowCommandPalette(false) },
+      { id: 'cheatsheet', isOpen: showCheatsheet, onClose: () => setShowCheatsheet(false) },
+      { id: 'movieDetail', isOpen: !!selectedMovie, onClose: () => setSelectedMovie(null) },
+      { id: 'seriesDetail', isOpen: !!selectedSeries, onClose: () => setSelectedSeries(null) },
+      { id: 'guide', isOpen: showGuide, onClose: () => setShowGuide(false) },
+      { id: 'settings', isOpen: showSettings, onClose: () => setShowSettings(false) },
+      {
+        id: 'xtreamModal',
+        // Only treat as "closable" if credentials already exist, mirroring
+        // the previous heuristic (a fresh first-time setup cannot be cancelled).
+        isOpen: showXtreamModal && !!activeProfile?.xtreamCreds,
+        onClose: () => setShowXtreamModal(false),
+      },
+      { id: 'tab', isOpen: activeTab !== 'home', onClose: () => setActiveTab('home') },
+    ],
+    {
+      // On Android, when no layer absorbed the Back action, exit the app
+      // (preserves the previous behaviour). On desktop Esc just no-ops.
+      onEmpty: () => {
+        if (platformService.isNative) {
+          CapacitorApp.exitApp();
+        }
+      },
+    },
+  );
 
   // Initialize Cache Persistence
   useEffect(() => {
