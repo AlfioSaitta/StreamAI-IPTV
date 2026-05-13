@@ -21,6 +21,8 @@ android/app/src/main/assets/public/
 android/streamai-release.keystore
 android/**/*.keystore
 android/**/*.jks
+android/keystore.properties
+android/.jdk-mirror/
 *.apk
 *.aab
 

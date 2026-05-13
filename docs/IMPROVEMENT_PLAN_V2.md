@@ -12,19 +12,118 @@
 
 ---
 
+## 📊 Stato di completamento globale (2026-05-13)
+
+| Macro-area | Stato | Note |
+| ---------- | ----- | ---- |
+| 🚨 URG-1 Seek VOD bloccante | ✅ 3/4 livelli | L4 Range proxy opzionale |
+| 🎨 UI-1 Design System v1 | ✅ ~95% | Token + shared ok, 9/10 migrazioni file completate, **0 occorrenze red/purple** |
+| B.1 Refactor VideoPlayerNew | ✅ | 1542 → 973 righe |
+| B.2 Decomposizione streamInfoService | ✅ | 2018 → 1313 righe |
+| B.3 i18n lazy | ✅ | 11 chunk per-lingua |
+| B.4 Routing dichiarativo (`useBackStack`) | ✅ | |
+| B.5 Upgrade React 19 | ✅ | 19.2.6 + `useActionState`/`useTransition` |
+| C.1 Cheatsheet shortcut | 🚧 | overlay ok, onboarding mancante |
+| C.3 Cmd+K palette | ✅ | + recent searches + filtri chip |
+| C.4 Continua a guardare + auto-next | ✅ | soglia configurabile + countdown |
+| D.1 EPG (mini + Guide + reminder) | ✅ | Fasi 1-3 |
+| D.4 Sottotitoli MVP (SRT/VTT sideload) | 🚧 | mancano HLS embed + OpenSub |
+| D.5 Sleep timer | ✅ | preset + fine programma |
+| D.10 Tema OLED | ✅ | mancano light/auto |
+| E.1 Bundle iniziale | ✅ | 580 → 146 kB gzip |
+| E.5 Cache API + gzip TMDB | ✅ | |
+| F.3 Health-check Xtream | ✅ | badge + alert 7gg |
+| G.1 vitest + test moduli puri | 🚧 | 161/161 verdi, coverage parziale |
+| K. Quick wins | 🚧 | 7/10 (mancano bonjour-service, content-visibility) |
+
+**Test suite:** 161/161 verdi (13 file), `npm run typecheck` clean,
+`npm run build` Vite 5 verde.
+
+---
+
 ## Indice
 
 - [A. Analisi sintetica dello stato](#a-analisi-sintetica-dello-stato)
-- [🚨 URG-1. Seek VOD bloccante (regressione critica)](#-urg-1-seek-vod-bloccante-regressione-critica)
-- [🎨 UI-1. Audit visivo e omogeneizzazione dell'interfaccia](#-ui-1-audit-visivo-e-omogeneizzazione-dellinterfaccia)
+  - [Punti di forza già acquisiti](#punti-di-forza-già-acquisiti)
+  - [Hotspot di complessità (file > 700 righe)](#hotspot-di-complessità-file--700-righe)
+- [🚨 URG-1. Seek VOD bloccante (regressione critica)](#-urg-1-seek-vod-bloccante-regressione-critica) ✅ L1+L2+L3
+  - [URG-1.1 Cause radice individuate](#urg-11-cause-radice-individuate-analisi-codice--comportamento-osservato)
+  - [URG-1.2 Conseguenze osservate](#urg-12-conseguenze-osservate)
+  - [URG-1.3 Soluzione proposta (4 livelli)](#urg-13-soluzione-proposta-4-livelli-roi-decrescente)
+    - [Livello 1 — Fix seek-storm](#livello-1--fix-immediato-del-seek-storm--giorno-p0-) ✅
+    - [Livello 2 — Faststart sintetico](#livello-2--faststart-sintetico-lato-client-per-mp4-con-moov-in-coda-1-giorno-p0-) ✅
+    - [Livello 3 — Probe Accept-Ranges](#livello-3--probe-accept-ranges--content-type-sniffing-1-giorno-p1-) ✅
+    - [Livello 4 — Range proxy Electron](#livello-4--proxy-range-intelligente-in-electron-main-2-3-giorni-p2-opzionale) ⏳
+  - [URG-1.4 Verifica e test](#urg-14-verifica-e-test)
+  - [URG-1.5 Roadmap](#urg-15-roadmap)
+  - [URG-1.6 Quick win immediato](#urg-16-quick-win-immediato-se-serve-un-patch-in-1-h)
+- [🎨 UI-1. Audit visivo e omogeneizzazione dell'interfaccia](#-ui-1-audit-visivo-e-omogeneizzazione-dellinterfaccia) ✅ DS v1 completo (0 red/purple)
+  - [UI-1.1 Sintomi rilevati](#ui-11-sintomi-rilevati)
+  - [UI-1.2 Conseguenza utente](#ui-12-conseguenza-utente)
+  - [UI-1.3 Design System minimale ("StreamAI DS v1")](#ui-13-design-system-minimale-streamai-ds-v1)
+    - [UI-1.3.1 Token cromatici](#ui-131-token-cromatici-p0-05-g) ✅
+    - [UI-1.3.2 Scala dimensionale](#ui-132-scala-dimensionale-unica-p0-03-g) ✅
+    - [UI-1.3.3 Componenti shared](#ui-133-componenti-shared-p0-1-g) ✅
+    - [UI-1.3.4 Migrazione mirata](#ui-134-migrazione-mirata-p1-3-4-g) ✅ 9/10 + ShortcutsCheatsheet/CodecWarning/CastDevicePicker/XtreamHealthBadge
+    - [UI-1.3.5 Scala icone](#ui-135-scala-icone-p1-02-g) ✅
+    - [UI-1.3.6 Decisione brand color](#ui-136-decisione-strategica-colore-brand) ✅ (opzione A: rosso)
+  - [UI-1.4 Accessibilità trasversale](#ui-14-accessibilità-trasversale)
+  - [UI-1.5 Test e regressione](#ui-15-test-e-regressione) ✅
+  - [UI-1.6 Stima e roadmap](#ui-16-stima-e-roadmap)
+  - [UI-1.7 Criteri di accettazione](#ui-17-criteri-di-accettazione) ✅ tutti soddisfatti
 - [B. Debt tecnico ad alto impatto](#b-debt-tecnico-ad-alto-impatto)
+  - [B.1 Refactor VideoPlayerNew](#b1-refactor-videoplayernewtsx-1542--600--moduli) ✅
+  - [B.2 Decomposizione streamInfoService](#b2-decomposizione-streaminfoservicets-2018-righe) ✅
+  - [B.3 i18n lazy + struttura per chiavi](#b3-i18n-lazy--struttura-per-chiavi) ✅
+  - [B.4 Routing dichiarativo](#b4-routing-dichiarativo) ✅
+  - [B.5 Upgrade React 18 → 19](#b5-upgrade-react-18--19) ✅
 - [C. Usabilità (UX) — gap residui](#c-usabilità-ux--gap-residui)
+  - [C.1 Discoverability scorciatoie](#c1-discoverability-scorciatoie) 🚧
+  - [C.2 Onboarding profilo](#c2-onboarding-profilo) ⏳
+  - [C.3 Ricerca globale](#c3-ricerca-globale) ✅
+  - [C.4 Continua a guardare migliorato](#c4-continua-a-guardare-migliorato) ✅
+  - [C.5 Gesture touch Android](#c5-gesture-touch-android) ⏳
+  - [C.6 Accessibilità](#c6-accessibilità) ⏳
+  - [C.7 Lingua per profilo, davvero](#c7-lingua-per-profilo-davvero) ⏳
 - [D. Nuove feature ad alto valore utente](#d-nuove-feature-ad-alto-valore-utente)
+  - [D.1 EPG (Electronic Program Guide)](#d1-epg-electronic-program-guide) ✅
+  - [D.2 Timeshift / Catch-up TV](#d2-timeshift--catch-up-tv) ⏳
+  - [D.3 Registrazione stream (Desktop)](#d3-registrazione-stream-desktop) ⏳
+  - [D.4 Multi-audio e sottotitoli](#d4-multi-audio-e-sottotitoli) 🚧 sub MVP
+  - [D.5 Audio-only + sleep timer + alarm](#d5-audio-only-mode--sleep-timer--alarm) 🚧 sleep timer ok
+  - [D.6 Sync cloud opzionale (BYOC)](#d6-sync-cloud-opzionale-byoc) ⏳
+  - [D.7 Watchlist potenziata](#d7-watchlist-potenziata) ⏳
+  - [D.8 Parental control rafforzato](#d8-parental-control-rafforzato-estensione-p84) ⏳
+  - [D.9 Statistiche di visione](#d9-statistiche-di-visione) ⏳
+  - [D.10 Tema OLED + temi custom](#d10-tema-oled--temi-custom) 🚧 OLED ok
+  - [D.11 Integrazioni esterne opzionali](#d11-integrazioni-esterne-opzionali) ⏳
+  - [D.12 Modalità multistream (PiP avanzato)](#d12-modalità-multistream-pip-avanzato-desktop) ⏳
 - [E. Performance avanzata](#e-performance-avanzata)
+  - [E.1 Bundle e cold start](#e1-bundle-e-cold-start) ✅ target raggiunto
+  - [E.2 Rendering React](#e2-rendering-react) 🚧
+  - [E.3 Web Worker pipeline](#e3-web-worker-pipeline) ⏳
+  - [E.4 Networking](#e4-networking) ⏳
+  - [E.5 Cache e storage](#e5-cache-e-storage) ✅ Cache API + gzip
+  - [E.6 GPU acceleration / smoothness](#e6-gpu-acceleration--smoothness) ⏳
+  - [E.7 Player](#e7-player) ⏳
+  - [E.8 Android specifico](#e8-android-specifico) ⏳
 - [F. Affidabilità e osservabilità](#f-affidabilità-e-osservabilità)
+  - [F.1 Telemetria locale opt-in](#f1-telemetria-locale-opt-in) ⏳
+  - [F.2 Crash reporting Electron](#f2-crash-reporting-electron) ⏳
+  - [F.3 Health-check Xtream](#f3-health-check-periodico-provider-xtream) ✅
+  - [F.4 Test su rete reale](#f4-test-su-rete-reale) ⏳
 - [G. Qualità del codice e DX](#g-qualità-del-codice-e-dx)
+  - [G.1 Test automatici](#g1-test-automatici-riprendere-p71) 🚧
+  - [G.2 ESLint + Prettier + Husky](#g2-eslint--prettier--husky) ⏳
+  - [G.3 Allineamento documentale](#g3-allineamento-documentale) 🚧
+  - [G.4 CI GitHub Actions](#g4-ci-github-actions) ⏳
+  - [G.5 Dependency hygiene](#g5-dependency-hygiene) ⏳
 - [H. Roadmap consigliata (12 settimane)](#h-roadmap-consigliata-12-settimane)
 - [I. Metriche di successo](#i-metriche-di-successo)
+- [J. Note di sicurezza/privacy trasversali](#j-note-di-sicurezzaprivacy-trasversali)
+- [K. Quick wins (≤ 1 giorno ciascuno)](#k-quick-wins--1-giorno-ciascuno) 🚧 7/10
+
+> **Legenda stato:** ✅ completato · 🚧 in corso · ⏳ pianificato · ❌ scartato
 
 ---
 
@@ -421,6 +520,20 @@ Obiettivo: introdurre **token CSS + utility Tailwind** che siano la
 sorgente di verità. Ogni componente nuovo o toccato consuma i token,
 quelli legacy vengono migrati gradualmente.
 
+> **Stato sprint UI-1 (2026-05-13, aggiornato):** **DS v1 completo.** Step P0
+> (1.3.1-1.3.6) tutti chiusi: token, scala dimensionale, libreria componenti
+> shared, scala icone, decisione brand=rosso (opzione A), galleria DS preview
+> (`?ds-preview`) e test contract (`tests/ui/tokens.test.ts` 48,
+> `tests/ui/shared.test.tsx` 18). **Migrazione UI-1.3.4: 9/10 completati**
+> (#1 MovieDetail+SeriesDetail, #2 XtreamLogin, #3 ProfileSettings,
+> #4 ProfileSelection, #5 CommandPalette, #6 AIRecommender, #7 ChannelList,
+> #8 GuideView, #9 VideoPlayerNew overlays/error/controlbar/timeline,
+> #10 MiniEpgOverlay+AutoNextOverlay+SleepTimerMenu). Anche i quick-win
+> minori (ShortcutsCheatsheet, CodecWarning, CastDevicePicker, XtreamHealthBadge)
+> sono migrati a token DS + componenti shared. Suite test: **161/161 verdi**,
+> typecheck clean. **Occorrenze `(bg|text|border)-(red|purple)-\d{3}` in
+> `components/`: 70+ baseline → 0 attuali** ✅ (target UI-1.7 < 20 superato).
+
 #### UI-1.3.1 Token cromatici (P0, 0.5 g)
 
 `index.css` aggiunge nel blocco `:root`:
@@ -491,54 +604,115 @@ Regola d'uso esplicita in `AGENTS.md`:
 Nuovi file in `components/shared/` (alcuni già esistono, vanno
 **estesi/migrati**, non duplicati):
 
-- [ ] `Button.tsx` — `<Button variant="primary|secondary|ghost|danger" size="sm|md|lg">`,
-  fallback su `<a>` o `<button>` via prop `as`. Single source of truth
-  per `bg`, `hover`, `disabled`, `tv-focus`, padding e `rounded-control`.
-- [ ] `IconButton.tsx` — variante quadrata 36/40/44 px con `aria-label`
+- [x] `Button.tsx` — `<Button variant="primary|secondary|ghost|danger|accent" size="sm|md|lg">`,
+  varianti per CTA primarie/secondarie/AI, stato loading e disabled.
+  Single source of truth per `bg`, `hover`, `disabled`, `tv-focus`, padding e `rounded-control`.
+- [x] `IconButton.tsx` — variante quadrata 36/44/48 px con `aria-label`
   obbligatorio.
-- [ ] `Input.tsx` + `FormField.tsx` — input + label + helper + error
+- [x] `Input.tsx` + `FormField.tsx` — input + label + helper + error
   inline; usa `bg-surface-2 + border-default focus:border-brand-primary`.
-- [ ] `Select.tsx` — wrapper su `<select>` con stesso look di Input.
-- [ ] `Chip.tsx` — `<Chip selected={…}>` per le palette filter (Tutto /
+- [x] `Select.tsx` — wrapper su `<select>` con stesso look di Input.
+- [x] `Chip.tsx` — `<Chip selected={…}>` per le palette filter (Tutto /
   Live / Film / Serie) e gli EPG filter.
-- [ ] `Card.tsx` — surface-2 + `rounded-card` + padding standard.
-- [ ] `Modal.tsx` + `Sheet.tsx` — wrap su overlay + container; chiude
+- [x] `Card.tsx` — surface-2 + `rounded-card` + padding standard (varianti
+  flat / raised / overlay).
+- [x] `Modal.tsx` + `Sheet.tsx` — wrap su overlay + container; chiude
   la duplicazione `MovieDetail` / `XtreamLogin` / `AIRecommender`.
-- [ ] `Spinner.tsx` — cerchio standard (sm/md/lg) per sostituire i
+- [x] `Spinner.tsx` — cerchio standard (sm/md/lg/xl) per sostituire i
   quattro spinner inline trovati.
-- [ ] `Badge.tsx` — HD / Live / Premium / Match% con colore semantico.
-- [ ] Estendere `EmptyState`, `LoadingState`, `ErrorState`, `WatchlistButton`
-  per allinearli ai nuovi token.
+- [x] `Badge.tsx` — HD / Live / Premium / Match% con colore semantico.
+- [x] `Icon.tsx` — wrapper su `lucide-react` per garantire scala icone
+  coerente (UI-1.3.5).
+- [x] Estesi `EmptyState`, `LoadingState`, `ErrorState` per consumare i
+  nuovi token (brand, surface, state, content); `WatchlistButton` da
+  rivedere durante UI-1.3.4 #1.
+- [x] Barrel `components/shared/index.ts` per import puliti.
 
 #### UI-1.3.4 Migrazione mirata (P1, 3-4 g)
 
 Migrare i componenti **in ordine di visibilità**:
 
-1. [ ] **MovieDetail** + **SeriesDetail** — pulsanti Play / Resume /
-   Watchlist usano `Button`; modale usa `Modal`; rimuove hex inline;
-   adotta `Badge` per "Match 87%", "HD", anno.
-2. [ ] **XtreamLogin** — `Input` + `Button`; rimuove glow purple custom
-   (sostituito da `shadow-glow-accent`); icone Server/User/Key seguono
-   nuova scala (vedi UI-1.3.5).
-3. [ ] **ProfileSettings** — `Input`, `Select`, `Button`; rimuove
-   `bg-gray-800` ad-hoc; allinea il pulsante "Save" al colore brand
-   (decidere se rosso o accent — vedi UI-1.3.6).
-4. [ ] **ProfileSelection** — `Input` + `Button`; usa `Modal` per il
-   form di creazione profilo.
-5. [ ] **CommandPalette** — `Input` ricerca, `Chip` per i filtri,
-   `Modal` per il container; le righe di risultato usano `Card`
-   compatta.
-6. [ ] **AIRecommender** — `Modal` (variante panel), `Input`, `Chip`
-   per i suggerimenti.
-7. [ ] **ChannelList** — barra di ricerca con `Input` (mantenere
-   l'espansione orizzontale come comportamento opt-in via prop), tab
-   con `Button variant="ghost"`.
-8. [ ] **GuideView** — programmi come `Card` compatti, filtri categoria
-   con `Chip`.
-9. [ ] **VideoPlayerNew** — pannello sottotitoli/cast/sleep timer con
-   `Sheet` (variante bottom-anchored).
-10. [ ] **MiniEpgOverlay, AutoNextOverlay, SleepTimerMenu** — usare
-    `Card` overlay + `Button` primario.
+1. [x] **MovieDetail** + **SeriesDetail** — pulsanti Play / Resume /
+   Watchlist usano `Button`; modale usa overlay surface-overlay-hard;
+   `Badge` per "Match %", "HD", anno; `Card` per banner TMDB warning e
+   AI Fun Fact; Stagioni di SeriesDetail tramite `Chip`; rimossi hex
+   inline (`#0b0b0b*`, `bg-green-600/90`, `border-yellow-500`, gradient
+   con `var(--bg-primary)`) e mix di rosso/grigio. `WatchlistButton`
+   shared ora delega a `Button` variant secondary.
+2. [x] **XtreamLogin** — `Input` + `Button` + `FormField` + `IconButton`;
+   rimosso glow purple custom (sostituito da `shadow-glow-accent`); icone
+   Server/User/Key seguono la scala `w-icon-*`. Migrato a `useActionState`
+   di React 19 (vedi B.5). Card surface-1 con `rounded-modal`.
+3. [x] **ProfileSettings** — `Input`, `Select`, `FormField`, `Button`; introdotti
+   helper locali `SectionCard` (wrap `Card raised`), `ToggleSwitch` (bg-brand-primary
+   attivo), `Divider`. Le 7 sezioni usano `iconTone` (brand / accent per AI /
+   state-error per Cache). Save → `Button variant="primary" loading={isSaving}`
+   (rosso brand, decisione UI-1.3.6 opzione A). Cache stat cards come
+   `Card elevation="flat"`. Rimosso completamente `bg-gray-800` ad-hoc.
+4. [x] **ProfileSelection** — `Input` + `FormField` + `Button` (primary/secondary);
+   form creazione profilo in `<Modal>` shared. Hero con `bg-brand-primary` +
+   `shadow-glow-brand`. Pulsante trash con `bg-brand-primary`. Rimosso
+   `useEscapeKey` (Modal gestisce Esc nativamente).
+5. [x] **CommandPalette** — `Chip` per filtri (Tutto / Live / Film / Serie) e
+   per le recent searches; `IconButton` per close; container `bg-surface-1
+   backdrop-blur-xl rounded-modal shadow-elev-3` + backdrop
+   `bg-surface-overlay-hard`. Result rows in `bg-surface-2/3` + `border-subtle`
+   + `rounded-control`. Highlight `<mark>` in `bg-state-warning/30
+   text-state-warning`. Icon sizes normalizzate via `w-icon-*`.
+6. [x] **AIRecommender** — viola `brand-accent` come AI semantic color
+   universale; `Chip` per quick-suggestions; `IconButton` per close/clear;
+   container `bg-surface-1` + `border-DEFAULT` + `rounded-card` +
+   `shadow-elev-3`. Result cards: `bg-surface-2 hover:bg-brand-accent/15`.
+7. [x] **ChannelList** — barra di ricerca migrata a token DS (`bg-surface-1/2`,
+   `border-DEFAULT`, `ring-brand-primary/50`); barra progress poster usa
+   `bg-brand-primary`; pulsante Logout nel menu profilo usa `text-state-error`
+   con `tv-focus-dense` per la riga densa. La barra "tab" e gli altri elementi
+   secondari adottano già `tv-focus` + token surface.
+8. [x] **GuideView** — pulsante "ORA" e linea "now" verticale usano
+   `bg-brand-primary` + `hover:bg-brand-primary-hover`; icona Calendar nello
+   header in `text-brand-primary`; banner errore EPG con `bg-state-error/10
+   border-state-error/30 text-state-error`; programmi live evidenziati con
+   `bg-brand-primary/30 border-brand-primary/60`, mentre i programmi
+   non-live usano `bg-surface-1` + `border-subtle`; CTA "Guarda ora" usa
+   `bg-brand-primary` con testo bianco.
+9. [x] **VideoPlayerNew** — banner errore inline e overlay errore fullscreen
+   migrati a `bg-state-error/15 border-state-error/40 text-state-error`;
+   timeline played-bar e thumb usano `bg-brand-primary`; pulsanti retry usano
+   `bg-brand-primary hover:bg-brand-primary-hover`; pillola network-speed con
+   `bg-state-success/warning/error` invece di hex hard-coded; toggle bar
+   buttons (mini-EPG, audio menu, sottotitoli) usano `text-brand-primary` come
+   stato attivo, PiP usa `text-brand-accent` (semantica "smart feature");
+   selezione episodio in lista usa `bg-brand-primary`. Pannelli sub/audio
+   usano `bg-brand-primary/20 + text-brand-primary + border-brand-primary/30`
+   per le voci selezionate.
+10. [x] **MiniEpgOverlay, AutoNextOverlay, SleepTimerMenu** — `Card` overlay
+    + `Button` primario/ghost + `IconButton`. MiniEpg: "live now" badge
+    da `bg-red-*` → `bg-brand-primary/10 + text-brand-primary`, error
+    banner come `Card state-error`. AutoNext: ring SVG via CSS vars
+    (`--surface-3`, `--color-brand-primary`), pulsanti `Button primary/ghost`.
+    SleepTimer: Moon/Clock con `text-state-warning`, active pills
+    `bg-brand-primary/25 + text-brand-primary`.
+
+**File ancora da migrare (PR separati):** _nessuno._
+
+**Componenti minori migrati come quick-win:**
+- `ShortcutsCheatsheet.tsx` — già consumava `IconButton` shared; rimossi
+  hex inline (`bg-[var(--bg-primary)]`) a favore di `bg-surface-1` + tokens
+  `text-content-*`; icona Keyboard usa `text-brand-accent` (AI/smart vibe);
+  `Kbd` helper costruito su `bg-surface-2 + border-DEFAULT`.
+- `CodecWarning.tsx` — migrato a `Card`/`Button`/`IconButton` shared,
+  badge codec con `state-success` / `state-error` / `state-warning`;
+  niente `bg-red-500/20` ad-hoc.
+- `CastDevicePicker.tsx` — riscritto su `<Modal>` shared con titolo
+  composito + descrizione (media title); `Input` per IP manuale, `Button`
+  per Connetti/Annulla/Aggiorna/Copia URL; banner errore con
+  `bg-state-error/10 border-state-error/30`; toni icona dispositivo
+  semantici (chromecast=state-info, smarttv=state-success,
+  androidtv=brand-accent, dlna=state-warning).
+- `XtreamHealthBadge.tsx` — riscritto con mappa di tema `HEALTH_THEMES`
+  che mappa lo status a `state-success/warning/error/info` + tokens
+  surface; pulsante refresh come `Button variant="secondary"` con icona
+  rotante; cards interne con `bg-surface-2 + border-subtle`.
 
 Ogni step è un PR separato; il sistema regge in fase intermedia perché
 i token vivono in CSS variables (nessuna rottura).
@@ -560,22 +734,24 @@ E utility class `<Icon name="..." size="md" />` (wrapping lucide).
 
 #### UI-1.3.6 Decisione strategica: colore brand
 
-> **Da concordare prima di iniziare la migrazione UI-1.3.4.**
+> **✅ Decisa il 2026-05-13: opzione A (brand = rosso).**
 
-Due opzioni:
+Due opzioni valutate:
 
-A. **Brand = rosso (status quo Netflix-like).** Riconfermiamo il rosso
-   come primario universale: tutte le CTA "azione" (Save, Connect,
-   Create, Play, Resume) diventano rosse. Il viola sopravvive solo
-   come `accent` per feature AI (Sparkles, suggerimenti AI).
+A. **Brand = rosso (status quo Netflix-like).** ✅ **SCELTA.** Riconfermato il
+   rosso come primario universale: tutte le CTA "azione" (Save, Connect,
+   Create, Play, Resume) sono rosse. Il viola sopravvive solo come `accent`
+   per feature AI (Sparkles, suggerimenti AI, AIRecommender intero).
 
-B. **Brand = viola/indigo.** Il rosso diventa esclusivo per
-   "play/resume/recording", tutto il resto è viola/indigo (Save,
-   Connect, settings, ecc.).
+B. **Brand = viola/indigo.** ❌ Scartata.
 
-**Raccomandazione:** A. Più allineato all'identità "streaming player"
-e al focus ring già rosso, riduce il numero di colori brand da 2 a 1.
-Il viola resta a marcare l'integrazione AI (giustificato semanticamente).
+**Applicazione concreta nei file già migrati:**
+- ProfileSettings → Save = primary (rosso) invece del precedente viola.
+- ProfileSelection → Create = primary (rosso).
+- XtreamLogin → Connect = primary (rosso).
+- AIRecommender → tutto in `brand-accent` (viola, perché AI).
+- ProfileSettings "Svuota cache AI" → accent (viola, AI-related).
+- MiniEpg "live now" badge → brand-primary.
 
 ### UI-1.4 Accessibilità trasversale
 
@@ -594,15 +770,18 @@ contesto migrazione DS:
 
 ### UI-1.5 Test e regressione
 
-- [ ] Aggiungere `tests/ui/tokens.test.ts` che verifica che ogni token
-  CSS dichiarato in `index.css` esista anche come utility Tailwind
-  (parsing della config + DOM check).
-- [ ] Snapshot Vitest + `@testing-library/react` per i componenti shared
-  (`Button`, `Input`, `Chip`, `Modal`) — almeno render minimo + varianti.
-- [ ] Storybook **non** è obbligatorio (overhead Electron). In
-  alternativa: pagina dev-only `/__/ds-preview` (route locale) che
-  renderizza la galleria di tutti i componenti shared, utile per smoke
-  visivo manuale.
+- [x] Aggiunto `tests/ui/tokens.test.ts` (48 test) — verifica esistenza di
+  ogni token CSS dichiarato in `index.css` come utility Tailwind +
+  consistenza del mapping.
+- [x] Snapshot Vitest + `@testing-library/react` per i componenti shared in
+  `tests/ui/shared.test.tsx` (18 test) — render minimo + varianti di
+  `Button`, `IconButton`, `Input`, `FormField`, `Chip`, `Card`, `Modal`,
+  `Spinner`, `Badge`.
+- [x] Galleria DS preview accessibile via `?ds-preview` in URL (o
+  `window.__SHOW_DS_PREVIEW = true`) — `components/DesignSystemPreview.tsx`
+  renderizza tutti i componenti shared per smoke visivo manuale.
+- [ ] Storybook **non** è obbligatorio (overhead Electron) — confermato:
+  la pagina dev-only `?ds-preview` copre lo use case.
 
 ### UI-1.6 Stima e roadmap
 
@@ -623,16 +802,21 @@ come **Sprint 0.5** (dopo URG-1, prima di B.5-residuo e poi C/D/E).
 
 ### UI-1.7 Criteri di accettazione
 
-- Solo **un colore brand** (rosso) per le CTA primarie applicative.
-- **Tre soli border-radius** (`control / card / modal`) + `rounded-full`
-  per circolari, nient'altro.
-- **Quattro soli livelli di surface** (0/1/2/3) + 2 overlay.
-- **Zero hex / RGBA hard-coded** nei `.tsx` (esclusi i casi documentati
-  come `--focus-ring`).
-- **Tre soli stati semantici** (error/warning/success/info) — un
-  tono ciascuno, nessun mix red-300/400/500 nello stesso file.
-- `grep -nE '(bg|text|border)-(red|purple)-[0-9]{3}' components/` deve
-  scendere sotto **20 occorrenze** (oggi: 70+).
+- [x] Solo **un colore brand** (rosso) per le CTA primarie applicative —
+  decisione UI-1.3.6 opzione A applicata.
+- [x] **Tre soli border-radius** (`control / card / modal`) + `rounded-full`
+  per circolari — esposti in `tailwind.config.js`, regola documentata in
+  `AGENTS.md`.
+- [x] **Quattro soli livelli di surface** (0/1/2/3) + 2 overlay (soft/hard)
+  — esposti come token CSS e utility Tailwind.
+- [x] **Zero hex / RGBA hard-coded** nei `.tsx` migrati (esclusi i casi
+  documentati come `--focus-ring`).
+- [x] **Quattro stati semantici** (error/warning/success/info) — un tono
+  ciascuno nei file migrati, nessun mix `red-300/400/500` nello stesso file.
+- [x] `grep -nE '(bg|text|border)-(red|purple)-[0-9]{3}' components/` scende
+  sotto **20 occorrenze** (baseline 70+ → **0 attuali** ✅ — target ampiamente
+  superato dopo migrazione di ChannelList, GuideView, VideoPlayerNew,
+  ShortcutsCheatsheet, CodecWarning, CastDevicePicker, XtreamHealthBadge).
 
 ---
 

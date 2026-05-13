@@ -90,10 +90,38 @@ Queste funzionalità definiscono l'identità di StreamAI e devono essere preserv
 - **Android:** Gestisci sempre il tasto fisico "Back" in `App.tsx` usando `App.addListener('backButton', ...)`.
 - **Electron Main Process:** I file eseguiti nel main process (es. `advertisingService.js`) devono essere in JavaScript CommonJS (`require`), non TypeScript, poiché non vengono transpilati da Vite.
 
-### 3. Styling (Tailwind)
+### 3. Styling (Tailwind + Design System v1)
 - Tema scuro di default: Background `#141414`, Testo `gray-100/gray-300`.
-- Usa classi `tv-focus` per elementi che devono essere navigabili via tastiera/telecomando.
+- Usa classi `tv-focus` (scale-105 + ring) per elementi navigabili via tastiera/telecomando.
+  In liste dense (ChannelList, CommandPalette, EPG rows) preferisci `tv-focus-dense`
+  (solo ring, no scale) per evitare overflow.
 - Responsive: Mobile-first, con override `md:` e `lg:` per Desktop.
+
+#### Design System v1 (UI-1) — regole d'uso obbligatorie
+- **Sorgente di verità:** token CSS in `index.css` (`--surface-*`, `--brand-*`,
+  `--state-*`, `--text-*`) ed esposti come utility Tailwind via `tailwind.config.js`.
+- **Componenti shared:** importa SEMPRE da `components/shared` (barrel `index.ts`):
+  `Button`, `IconButton`, `Input`, `FormField`, `Select`, `Chip`, `Badge`, `Card`,
+  `Modal`, `Sheet`, `Spinner`, `Icon`, `EmptyState`, `LoadingState`, `ErrorState`,
+  `WatchlistButton`. Non duplicare bottoni/input/spinner ad-hoc.
+- **Colore brand:** rosso (`bg-brand-primary`) per le CTA primarie (Play, Resume,
+  Connect, Save, Create). Viola (`bg-brand-accent`) **solo** per feature AI/smart.
+- **Border-radius:** usa la scala dei tre token DS:
+  - `rounded-control` (12 px) → button, input, chip
+  - `rounded-card` (16 px) → card poster, panel info
+  - `rounded-modal` (24 px) → dialog, sheet
+  - `rounded-full` consentito solo per badge/avatar circolari.
+- **Surface tier:** `bg-surface-0` (body), `bg-surface-1` (pannelli secondari),
+  `bg-surface-2` (pannelli primari / input), `bg-surface-3` (hover / selected).
+  Niente hex inline o `bg-white/X` ad-hoc.
+- **Stato:** un solo tono per ruolo — `text-state-error|warning|success|info`.
+  Non mischiare `red-300/400/500` nello stesso file.
+- **Icone:** scala fissa `w-icon-xs|sm|md|lg|xl` (12/16/20/24/32). Usa il wrapper
+  `Icon` per garantirla.
+- **Smoke test visivo:** apri l'app con `?ds-preview` in URL (o `window.__SHOW_DS_PREVIEW = true`)
+  per vedere la galleria `components/DesignSystemPreview.tsx`.
+- **Test contract:** i token DS sono protetti dai test in `tests/ui/tokens.test.ts`
+  e `tests/ui/shared.test.tsx` — eseguili dopo ogni modifica al sistema.
 
 ### 4. Integrazione AI
 - Le richieste a Gemini devono includere il contesto (orario, cronologia, tipo di stream).
