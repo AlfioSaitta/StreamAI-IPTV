@@ -16,6 +16,7 @@
 
 - [A. Analisi sintetica dello stato](#a-analisi-sintetica-dello-stato)
 - [🚨 URG-1. Seek VOD bloccante (regressione critica)](#-urg-1-seek-vod-bloccante-regressione-critica)
+- [🎨 UI-1. Audit visivo e omogeneizzazione dell'interfaccia](#-ui-1-audit-visivo-e-omogeneizzazione-dellinterfaccia)
 - [B. Debt tecnico ad alto impatto](#b-debt-tecnico-ad-alto-impatto)
 - [C. Usabilità (UX) — gap residui](#c-usabilità-ux--gap-residui)
 - [D. Nuove feature ad alto valore utente](#d-nuove-feature-ad-alto-valore-utente)
@@ -270,6 +271,368 @@ definitiva:
 Questo limita le chiamate a `currentTime()` solo al rilascio del drag.
 Risolve il drag-storm ma **non** il problema del `moov` a fine file
 (Livello 2 resta necessario).
+
+---
+
+## 🎨 UI-1. Audit visivo e omogeneizzazione dell'interfaccia
+
+> **Priorità: P1 — usabilità percepita.** Aggiunto 2026-05-13.
+> Audit statico su 6.542 LOC di `components/` (20 file `.tsx`, escluso
+> `VideoPlayerNew`). Numeri ottenuti via `grep` sull'intero codebase —
+> non sono percezioni soggettive: contano realmente le combinazioni di
+> classi Tailwind attualmente in uso.
+
+### UI-1.1 Sintomi rilevati
+
+#### Colore primario "schizofrenico"
+
+- **`bg-red-600`** appare **21×** + 6× con hover (`bg-red-600 hover:bg-red-500`).
+- **`bg-purple-600`** appare **5×** + 5× con hover.
+- **`bg-red-500`** appare **9×** (sotto-stato del red-600).
+- Stessa azione "primaria" cambia colore a seconda della schermata:
+  - `MovieDetail` → CTA primaria **bianca** su nero (Netflix-like), CTA
+    "Resume" **rossa**.
+  - `ProfileSettings` (Save) → **viola**.
+  - `XtreamLogin` (Connect), `ProfileSelection` (Create) → **viola**.
+  - `EmptyState` (azione primaria), `CommandPalette` (chip attivo),
+    `ChannelList` (ring di focus) → **rosso**.
+- L'utente non ha un colore d'azione consistente: "viola = qualcosa di
+  ammin./profilo"? "rosso = riproduzione"? La regola non è esplicita.
+
+#### Border-radius senza scala
+
+Distribuzione attuale: `rounded-full` 76×, `rounded-lg` 53×,
+`rounded-xl` 31×, `rounded-2xl` 25×, `rounded-md` 8×, `rounded-3xl` 8×.
+
+- Bottoni primari: `rounded-lg` (MovieDetail Play), `rounded-xl`
+  (XtreamLogin Connect), `rounded-md` (ChannelList tab), `rounded-full`
+  (chip CommandPalette). Quattro misure diverse per lo stesso ruolo UI.
+- Modali: `rounded-2xl` (MovieDetail poster, AIRecommender card),
+  `rounded-3xl` (XtreamLogin, ProfileSelection create form). Anche qui
+  due taglie senza criterio.
+
+#### Surface (background panel) senza tier
+
+Numeri reali: `bg-white/5` 39×, `bg-white/10` 85×, `bg-black/30..90` in
+8 livelli distinti (30, 40, 50, 60, 70, 80, 90), più hex inline
+`bg-[#0b0b0bcc]`, `bg-[#141414]`. Non c'è una scala definita
+"surface-0 / surface-1 / surface-2 / overlay".
+
+Bordi: `border-white/10` 75×, `border-white/5` 18×, `border-white/30`
+7× (focus ring + alcuni separatori), `border-white/20` 3×, `border-white/15` 1×.
+
+#### Input form ricostruiti da zero in ogni modulo
+
+Cinque varianti di `<input>` con styling differente, **zero componente
+condiviso**:
+
+| Componente        | Sfondo            | Bordo              | Focus                              |
+| ----------------- | ----------------- | ------------------ | ---------------------------------- |
+| `XtreamLogin`     | `bg-black/50`     | `border-white/10`  | `border-purple-500 + ring-1`       |
+| `ProfileSettings` | `bg-gray-800`     | `border-gray-700`  | `border-purple-500`                |
+| `CommandPalette`  | `bg-transparent`  | —                  | nessun ring (icona fa da affordance) |
+| `ChannelList`     | `bg-black/50→90`  | `border-white/30`  | `ring-2 ring-red-500/50`           |
+| `AIRecommender`   | `bg-black/40`     | `border-gray-700`  | `border-purple-500`                |
+
+Inoltre `<select>` ha un solo styling (`bg-gray-800 + border-gray-700`)
+ma è coerente solo con il pattern di `ProfileSettings`.
+
+#### Modali (dialog) con tre pattern diversi
+
+- `MovieDetail`: `bg-[#0b0b0bcc] backdrop-blur-md` (hex inline + alpha).
+- `XtreamLogin`: `bg-black/90 backdrop-blur-md` + glow `shadow-[0_0_100px_rgba(100,0,255,0.1)]` inline.
+- `AIRecommender`: `bg-gray-900/95 backdrop-blur-xl` (panel, non fullscreen).
+- `ProfileSettings` color picker: `bg-gray-900 + shadow-2xl`.
+- `CommandPalette`: `bg-gray-900/90 backdrop-blur-xl border-white/10`.
+
+Tre bg color, due livelli di blur, due tipologie di shadow.
+
+#### Tipografia
+
+- `text-sm` (93×) e `text-xs` (68×) dominano. Sono OK come scale di base.
+- Label uppercase con tracking incoerente: `tracking-widest` (default),
+  `tracking-[0.3em]` inline (MovieDetail), `tracking-wider` (vari).
+- Hero/Title: alcune schermate usano `font-extrabold` (MovieDetail
+  4xl/5xl), altre `font-bold` (ProfileSelection 5xl `font-light`,
+  AIRecommender headers `font-bold`). Manca una scala "display / h1 /
+  h2 / body / caption" dichiarata.
+
+#### Stati error/warning/success
+
+- Errori: `text-red-400` 12×, `text-red-500` 8×, `text-red-300` 8×,
+  `text-red-200` 2×, `text-red-100` 2× — cinque tonalità di rosso per
+  testo, spesso nello stesso file.
+- Warning: `text-amber-300` 4×, `text-amber-200` 4×, `text-amber-400`
+  3×, `text-amber-100` 2× **+** `text-yellow-500` 1× (giallo legacy
+  rimasto in `MovieDetail` per il banner TMDB).
+- Success: `text-green-400` 6×, `text-green-300` 2× + qualche
+  `bg-green-600/90`. AI / info: `text-blue-400` 8×, `text-blue-300` —
+  ma a volte il blu indica "AI" (`Sparkles` AIRecommender), a volte
+  "info" generica.
+
+#### Stati condivisi sotto-utilizzati
+
+`components/shared/EmptyState.tsx`, `LoadingState.tsx`, `ErrorState.tsx`
+**esistono** ma non sono utilizzati ovunque potrebbero esserlo:
+es. `XtreamLogin` ha il proprio spinner inline (cerchio bordo bianco),
+`AIRecommender` ha un altro spinner, `ProfileSettings` Save un altro
+ancora — quattro spinner identici implementati indipendentemente.
+
+#### Iconografia (`lucide-react`)
+
+Coerente nella libreria ma con **size scattering**: nello stesso file
+trovi `w-3`, `w-3.5`, `w-4`, `w-5`, `w-6`, `w-8` per icone semanticamente
+analoghe (badge / inline / azione / hero). Manca una scala
+"`icon-xs / sm / md / lg / xl`".
+
+#### Hex e RGBA hard-coded
+
+Esempi reali presenti:
+- `bg-[#0b0b0bcc]`, `bg-[#141414]`, `bg-[#0b0b0b]` (MovieDetail).
+- `shadow-[0_0_100px_rgba(100,0,255,0.1)]` (XtreamLogin glow).
+- `shadow-[0_0_0_2px_rgba(255,255,255,0.9),0_0_28px_rgba(220,38,38,0.75)]`
+  (`tv-focus` in `index.css` — coerente con `--focus-ring`, ma il colore
+  red-600 è hard-coded).
+- `from-purple-600 to-indigo-600`, `from-purple-600 to-blue-600`
+  (gradient hero su ProfileSelection / XtreamLogin → due gradient
+  diversi per la stessa intent "brand AI").
+
+#### Microinterazioni `tv-focus`
+
+`tv-focus` applica sempre `scale-105 ring-4` (vedi `index.css` riga 73).
+Funziona benissimo su card poster e bottoni grandi; **dentro liste
+dense** (es. `ChannelList` row, `CommandPalette` results) il `scale-105`
+fa traboccare leggermente l'elemento sui vicini. Non rotto, ma
+percettivamente "scattante".
+
+### UI-1.2 Conseguenza utente
+
+- L'app è funzionalmente solida ma trasmette un'idea di **mix-and-match**:
+  ogni schermata sembra prototipata da una persona diversa.
+- Su TV/telecomando, la mancanza di un colore d'azione consistente
+  riduce la scoperta del CTA principale.
+- Su Android, hex hard-coded e `backdrop-blur` non sempre disattivati
+  in low-power producono jank (parzialmente già gestito con la classe
+  `tv-low-power` su body, ma non tutti i blur sono blacklistati).
+
+### UI-1.3 Design System minimale ("StreamAI DS v1")
+
+Obiettivo: introdurre **token CSS + utility Tailwind** che siano la
+sorgente di verità. Ogni componente nuovo o toccato consuma i token,
+quelli legacy vengono migrati gradualmente.
+
+#### UI-1.3.1 Token cromatici (P0, 0.5 g)
+
+`index.css` aggiunge nel blocco `:root`:
+
+```css
+/* Brand */
+--color-brand-primary: #dc2626;        /* red-600  — riproduzione/CTA */
+--color-brand-primary-hover: #ef4444;  /* red-500 */
+--color-brand-accent: #a855f7;         /* purple-500 — AI / smart */
+--color-brand-accent-hover: #c084fc;   /* purple-400 */
+
+/* Surfaces — gerarchia 0..3 + overlay */
+--surface-0: #141414;                  /* body */
+--surface-1: rgba(255,255,255,0.04);   /* panels secondari */
+--surface-2: rgba(255,255,255,0.08);   /* panels primari (input field, card) */
+--surface-3: rgba(255,255,255,0.14);   /* hover / selected */
+--surface-overlay-soft: rgba(0,0,0,0.55);
+--surface-overlay-hard:  rgba(0,0,0,0.85);
+--border-subtle: rgba(255,255,255,0.06);
+--border-default: rgba(255,255,255,0.10);
+--border-strong:  rgba(255,255,255,0.24);
+
+/* Stato — un solo livello per ruolo */
+--state-error:   #f87171;  /* red-400 */
+--state-warning: #fbbf24;  /* amber-400 */
+--state-success: #34d399;  /* emerald-400 */
+--state-info:    #60a5fa;  /* blue-400 */
+
+/* Testo — tre soli ruoli */
+--text-primary:   #f3f4f6;  /* gray-100 */
+--text-secondary: #d1d5db;  /* gray-300 */
+--text-muted:     #9ca3af;  /* gray-400 */
+--text-disabled:  #6b7280;  /* gray-500 */
+```
+
+Variante `.theme-oled` mantiene il pattern attuale ma ridichiara le
+surfaces (`--surface-0: #000`, opacità più alta).
+
+Estensione `tailwind.config.js` (già minimal) per esporre i token come
+utility (`bg-surface-1`, `text-state-error`, ecc.).
+
+#### UI-1.3.2 Scala dimensionale unica (P0, 0.3 g)
+
+```ts
+// tailwind.config.js → theme.extend
+borderRadius: {
+  'control': '0.75rem',  // input, button, chip   ← era xl/lg/md mix
+  'card':    '1rem',     // poster, info panel    ← era 2xl/xl
+  'modal':   '1.5rem',   // dialog, big sheet     ← era 3xl/2xl
+},
+boxShadow: {
+  'elev-1': '0 1px 2px rgba(0,0,0,0.4)',
+  'elev-2': '0 4px 12px rgba(0,0,0,0.5)',
+  'elev-3': '0 12px 32px rgba(0,0,0,0.55)',
+  'glow-brand':  '0 0 28px rgba(220,38,38,0.5)',
+  'glow-accent': '0 0 28px rgba(168,85,247,0.45)',
+}
+```
+
+Regola d'uso esplicita in `AGENTS.md`:
+- Bottoni / input / chip → `rounded-control`.
+- Card poster / panel → `rounded-card`.
+- Modal fullscreen / sheet → `rounded-modal`.
+- Avatar / badge circolari → `rounded-full` (consentito).
+
+#### UI-1.3.3 Componenti shared (P0, 1 g)
+
+Nuovi file in `components/shared/` (alcuni già esistono, vanno
+**estesi/migrati**, non duplicati):
+
+- [ ] `Button.tsx` — `<Button variant="primary|secondary|ghost|danger" size="sm|md|lg">`,
+  fallback su `<a>` o `<button>` via prop `as`. Single source of truth
+  per `bg`, `hover`, `disabled`, `tv-focus`, padding e `rounded-control`.
+- [ ] `IconButton.tsx` — variante quadrata 36/40/44 px con `aria-label`
+  obbligatorio.
+- [ ] `Input.tsx` + `FormField.tsx` — input + label + helper + error
+  inline; usa `bg-surface-2 + border-default focus:border-brand-primary`.
+- [ ] `Select.tsx` — wrapper su `<select>` con stesso look di Input.
+- [ ] `Chip.tsx` — `<Chip selected={…}>` per le palette filter (Tutto /
+  Live / Film / Serie) e gli EPG filter.
+- [ ] `Card.tsx` — surface-2 + `rounded-card` + padding standard.
+- [ ] `Modal.tsx` + `Sheet.tsx` — wrap su overlay + container; chiude
+  la duplicazione `MovieDetail` / `XtreamLogin` / `AIRecommender`.
+- [ ] `Spinner.tsx` — cerchio standard (sm/md/lg) per sostituire i
+  quattro spinner inline trovati.
+- [ ] `Badge.tsx` — HD / Live / Premium / Match% con colore semantico.
+- [ ] Estendere `EmptyState`, `LoadingState`, `ErrorState`, `WatchlistButton`
+  per allinearli ai nuovi token.
+
+#### UI-1.3.4 Migrazione mirata (P1, 3-4 g)
+
+Migrare i componenti **in ordine di visibilità**:
+
+1. [ ] **MovieDetail** + **SeriesDetail** — pulsanti Play / Resume /
+   Watchlist usano `Button`; modale usa `Modal`; rimuove hex inline;
+   adotta `Badge` per "Match 87%", "HD", anno.
+2. [ ] **XtreamLogin** — `Input` + `Button`; rimuove glow purple custom
+   (sostituito da `shadow-glow-accent`); icone Server/User/Key seguono
+   nuova scala (vedi UI-1.3.5).
+3. [ ] **ProfileSettings** — `Input`, `Select`, `Button`; rimuove
+   `bg-gray-800` ad-hoc; allinea il pulsante "Save" al colore brand
+   (decidere se rosso o accent — vedi UI-1.3.6).
+4. [ ] **ProfileSelection** — `Input` + `Button`; usa `Modal` per il
+   form di creazione profilo.
+5. [ ] **CommandPalette** — `Input` ricerca, `Chip` per i filtri,
+   `Modal` per il container; le righe di risultato usano `Card`
+   compatta.
+6. [ ] **AIRecommender** — `Modal` (variante panel), `Input`, `Chip`
+   per i suggerimenti.
+7. [ ] **ChannelList** — barra di ricerca con `Input` (mantenere
+   l'espansione orizzontale come comportamento opt-in via prop), tab
+   con `Button variant="ghost"`.
+8. [ ] **GuideView** — programmi come `Card` compatti, filtri categoria
+   con `Chip`.
+9. [ ] **VideoPlayerNew** — pannello sottotitoli/cast/sleep timer con
+   `Sheet` (variante bottom-anchored).
+10. [ ] **MiniEpgOverlay, AutoNextOverlay, SleepTimerMenu** — usare
+    `Card` overlay + `Button` primario.
+
+Ogni step è un PR separato; il sistema regge in fase intermedia perché
+i token vivono in CSS variables (nessuna rottura).
+
+#### UI-1.3.5 Scala icone (P1, 0.2 g)
+
+Definire alias Tailwind:
+
+```ts
+// tailwind.config.js → theme.extend.spacing (o classi utility)
+'icon-xs': '0.75rem',  /* 12px — badge inline */
+'icon-sm': '1rem',     /* 16px — chip, helper */
+'icon-md': '1.25rem',  /* 20px — control bar */
+'icon-lg': '1.5rem',   /* 24px — primary control */
+'icon-xl': '2rem',     /* 32px — hero */
+```
+
+E utility class `<Icon name="..." size="md" />` (wrapping lucide).
+
+#### UI-1.3.6 Decisione strategica: colore brand
+
+> **Da concordare prima di iniziare la migrazione UI-1.3.4.**
+
+Due opzioni:
+
+A. **Brand = rosso (status quo Netflix-like).** Riconfermiamo il rosso
+   come primario universale: tutte le CTA "azione" (Save, Connect,
+   Create, Play, Resume) diventano rosse. Il viola sopravvive solo
+   come `accent` per feature AI (Sparkles, suggerimenti AI).
+
+B. **Brand = viola/indigo.** Il rosso diventa esclusivo per
+   "play/resume/recording", tutto il resto è viola/indigo (Save,
+   Connect, settings, ecc.).
+
+**Raccomandazione:** A. Più allineato all'identità "streaming player"
+e al focus ring già rosso, riduce il numero di colori brand da 2 a 1.
+Il viola resta a marcare l'integrazione AI (giustificato semanticamente).
+
+### UI-1.4 Accessibilità trasversale
+
+Già listate parzialmente in C.6, qui le ripeto perché si applicano nel
+contesto migrazione DS:
+
+- [ ] `aria-label` obbligatorio sui pulsanti icona-only del DS (forzato
+  via prop type in `IconButton`).
+- [ ] Contrasto WCAG AA (4.5:1) verificato sui token: il problema più
+  serio oggi è `text-gray-500` su `bg-white/5` (≈ 3.7:1 — fallisce AA).
+  Spostare le caption su `text-muted` (gray-400).
+- [ ] `prefers-reduced-motion`: disabilitare `scale-105` di `tv-focus`
+  e `animate-pulse` quando l'utente lo richiede.
+- [ ] Focus ring sempre **outside** il bordo elemento (`outline-offset`)
+  per evitare di mangiare contenuto in liste dense.
+
+### UI-1.5 Test e regressione
+
+- [ ] Aggiungere `tests/ui/tokens.test.ts` che verifica che ogni token
+  CSS dichiarato in `index.css` esista anche come utility Tailwind
+  (parsing della config + DOM check).
+- [ ] Snapshot Vitest + `@testing-library/react` per i componenti shared
+  (`Button`, `Input`, `Chip`, `Modal`) — almeno render minimo + varianti.
+- [ ] Storybook **non** è obbligatorio (overhead Electron). In
+  alternativa: pagina dev-only `/__/ds-preview` (route locale) che
+  renderizza la galleria di tutti i componenti shared, utile per smoke
+  visivo manuale.
+
+### UI-1.6 Stima e roadmap
+
+| Step | Effort | Owner | Deliverable |
+| ---- | ------ | ----- | ----------- |
+| Token CSS + Tailwind config (1.3.1, 1.3.2) | 0.5 g | DS | `index.css` + `tailwind.config.js` aggiornati |
+| Componenti shared (1.3.3) | 1 g | DS | 9 file in `components/shared/` |
+| Migrazione MovieDetail/SeriesDetail | 0.5 g | UI | PR |
+| Migrazione XtreamLogin/ProfileSelection | 0.3 g | UI | PR |
+| Migrazione ProfileSettings | 0.5 g | UI | PR |
+| Migrazione CommandPalette/AIRecommender | 0.5 g | UI | PR |
+| Migrazione ChannelList/GuideView | 0.7 g | UI | PR |
+| Migrazione VideoPlayerNew overlays | 0.5 g | UI | PR |
+| Test + DS preview route | 0.5 g | Test | `tests/ui/` + route dev-only |
+
+**Totale stimato: ~5 g sviluppo + 0.5 g test.** Si inserisce in roadmap
+come **Sprint 0.5** (dopo URG-1, prima di B.5-residuo e poi C/D/E).
+
+### UI-1.7 Criteri di accettazione
+
+- Solo **un colore brand** (rosso) per le CTA primarie applicative.
+- **Tre soli border-radius** (`control / card / modal`) + `rounded-full`
+  per circolari, nient'altro.
+- **Quattro soli livelli di surface** (0/1/2/3) + 2 overlay.
+- **Zero hex / RGBA hard-coded** nei `.tsx` (esclusi i casi documentati
+  come `--focus-ring`).
+- **Tre soli stati semantici** (error/warning/success/info) — un
+  tono ciascuno, nessun mix red-300/400/500 nello stesso file.
+- `grep -nE '(bg|text|border)-(red|purple)-[0-9]{3}' components/` deve
+  scendere sotto **20 occorrenze** (oggi: 70+).
 
 ---
 
