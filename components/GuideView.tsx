@@ -272,7 +272,7 @@ const GuideView: React.FC<GuideViewProps> = ({
         >
           <ArrowLeft className="w-5 h-5" />
         </button>
-        <Calendar className="w-5 h-5 text-red-400 flex-shrink-0" />
+        <Calendar className="w-5 h-5 text-brand-primary flex-shrink-0" />
         <h1 className="text-lg font-bold truncate">Guida TV</h1>
 
         <div className="flex items-center gap-1 ml-2 text-xs">
@@ -297,7 +297,7 @@ const GuideView: React.FC<GuideViewProps> = ({
 
         <button
           onClick={jumpToNow}
-          className="tv-focus touch-target text-xs font-bold px-3 py-1.5 rounded-full bg-red-600 hover:bg-red-500"
+          className="tv-focus touch-target text-xs font-bold px-3 py-1.5 rounded-full bg-brand-primary hover:bg-brand-primary-hover text-white"
         >
           ORA
         </button>
@@ -366,7 +366,7 @@ const GuideView: React.FC<GuideViewProps> = ({
 
       {/* === States ======================================================== */}
       {error && !isLoaded && (
-        <div className="px-4 py-3 bg-red-950/30 border-b border-red-500/30 text-sm text-red-200">
+        <div className="px-4 py-3 bg-state-error/10 border-b border-state-error/30 text-sm text-state-error">
           Impossibile caricare l'EPG: {error}
         </div>
       )}
@@ -457,10 +457,10 @@ const GuideView: React.FC<GuideViewProps> = ({
               ))}
               {nowInsideWindow && (
                 <div
-                  className="absolute top-0 bottom-0 w-px bg-red-500 z-10"
+                  className="absolute top-0 bottom-0 w-px bg-brand-primary z-10"
                   style={{ left: nowOffsetPx }}
                 >
-                  <div className="absolute -top-px left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-red-600 text-white text-[9px] font-bold rounded-b">
+                  <div className="absolute -top-px left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-brand-primary text-white text-[9px] font-bold rounded-b">
                     ORA
                   </div>
                 </div>
@@ -484,7 +484,7 @@ const GuideView: React.FC<GuideViewProps> = ({
               {/* Vertical "now" line */}
               {nowInsideWindow && (
                 <div
-                  className="absolute top-0 bottom-0 w-px bg-red-500/80 pointer-events-none z-[5]"
+                  className="absolute top-0 bottom-0 w-px bg-brand-primary/80 pointer-events-none z-[5]"
                   style={{ left: nowOffsetPx }}
                 />
               )}
@@ -577,8 +577,8 @@ const GuideRow: React.FC<GuideRowProps> = React.memo(
               onClick={e => onProgrammeClick(channel, p, e)}
               className={`tv-focus absolute top-1 bottom-1 rounded-md px-2 py-1 text-left overflow-hidden transition-colors ${
                 isLive
-                  ? 'bg-red-600/30 border border-red-500/60 hover:bg-red-600/40'
-                  : 'bg-white/5 border border-white/5 hover:bg-white/10'
+                  ? 'bg-brand-primary/30 border border-brand-primary/60 hover:bg-brand-primary/40'
+                  : 'bg-surface-1 border border-subtle hover:bg-surface-2'
               }`}
               style={{ left, width }}
               title={`${p.title}\n${new Date(p.start).toLocaleTimeString()} – ${new Date(
@@ -679,7 +679,7 @@ const ProgrammeMenu: React.FC<ProgrammeMenuProps> = ({
       <div className="flex flex-col gap-2">
         <button
           onClick={onWatch}
-          className="tv-focus w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-500 rounded-lg px-3 py-2 text-sm font-bold"
+          className="tv-focus w-full flex items-center justify-center gap-2 bg-brand-primary hover:bg-brand-primary-hover text-white rounded-lg px-3 py-2 text-sm font-bold"
         >
           <Play className="w-4 h-4" /> {isLive ? 'Guarda ora' : 'Vai al canale'}
         </button>

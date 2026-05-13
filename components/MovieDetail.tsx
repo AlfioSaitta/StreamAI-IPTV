@@ -3,9 +3,15 @@ import { Channel, WatchHistoryItem } from '../types.ts';
 import { MetadataService } from '../services/metadata.ts';
 import { useLanguage } from '../contexts/LanguageContext.tsx';
 import { Play, X, ThumbsUp, Sparkles } from 'lucide-react';
-import LoadingState from './shared/LoadingState.tsx';
-import ErrorState from './shared/ErrorState.tsx';
-import WatchlistButton from './shared/WatchlistButton.tsx';
+import {
+  Badge,
+  Button,
+  Card,
+  ErrorState,
+  IconButton,
+  LoadingState,
+  WatchlistButton,
+} from './shared';
 import { useMediaImages } from '../hooks/useMediaImages.ts';
 import { useMediaMetadata } from '../hooks/useMediaMetadata.ts';
 import { getMovieEnrichment, MovieEnrichment, isAiAvailable } from '../services/geminiService.ts';
@@ -151,69 +157,105 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
   }
 
   return (
-    <div ref={modalRef} className="fixed inset-0 z-[90] text-white overflow-y-auto bg-[#0b0b0bcc] backdrop-blur-md safe-area-screen" role="dialog" aria-modal="true" aria-label={`Dettagli ${movie.cleanName || movie.name}`}>
+    <div
+      ref={modalRef}
+      className="fixed inset-0 z-[90] text-content-primary overflow-y-auto bg-surface-overlay-hard backdrop-blur-md safe-area-screen"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Dettagli ${movie.cleanName || movie.name}`}
+    >
       {/* Background */}
       {backdrop && (
         <div className="absolute inset-0 opacity-50">
           <img src={backdrop} alt="backdrop" className="w-full h-full object-cover" />
-          <div className="absolute inset-0 bg-gradient-to-t from-[#0b0b0b] via-[#0b0b0b]/60 to-transparent" />
-          <div className="absolute inset-0 bg-gradient-to-r from-[#0b0b0b] via-[#0b0b0b]/60 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-t from-surface-0 via-surface-0/60 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-r from-surface-0 via-surface-0/60 to-transparent" />
         </div>
       )}
 
       <div className="relative z-10 min-h-screen px-6 md:px-16 pt-14 pb-20">
         <div className="flex justify-end mb-6">
-          <button onClick={onClose} className="tv-focus touch-target w-10 h-10 rounded-full bg-black/50 border border-white/10 flex items-center justify-center hover:bg-white/10" aria-label="Chiudi modale">
-            <X className="w-5 h-5" />
-          </button>
+          <IconButton
+            icon={X}
+            aria-label="Chiudi modale"
+            variant="secondary"
+            size="md"
+            onClick={onClose}
+            className="!rounded-full"
+          />
         </div>
 
         <div className="flex flex-col lg:flex-row gap-10">
           {/* Poster */}
           <div className="w-full lg:w-1/3 max-w-sm mx-auto lg:mx-0">
             {poster ? (
-              <img src={poster} alt={movie.name} className="w-full rounded-2xl shadow-2xl border border-white/10" />
+              <img
+                src={poster}
+                alt={movie.name}
+                className="w-full rounded-card shadow-elev-3 border border-DEFAULT"
+              />
             ) : (
-              <div className="w-full h-[450px] bg-white/5 rounded-2xl border border-white/10" />
+              <div className="w-full h-[450px] bg-surface-1 rounded-card border border-DEFAULT" />
             )}
           </div>
 
           {/* Details */}
           <div className="flex-1 space-y-6">
             <div className="space-y-3">
-              <p className="text-sm uppercase tracking-[0.3em] text-gray-400">{t.movies}</p>
+              <p className="text-xs uppercase tracking-widest text-content-muted font-semibold">{t.movies}</p>
               <h1 className="text-4xl md:text-5xl font-extrabold leading-tight drop-shadow-lg">
                 {movie.cleanName || movie.name || tmdbData?.title}
               </h1>
-              <div className="flex flex-wrap items-center gap-3 text-gray-300 text-sm font-medium">
-                {rating && <span className="bg-green-600/90 text-white px-2 py-1 rounded-full text-xs font-bold">Match {Math.min(100, Math.round(Number(rating) * 10))}%</span>}
-                {year && <span className="text-white/90 font-semibold">{year}</span>}
-                <span className="border border-white/20 px-2 py-0.5 rounded text-[11px]">HD</span>
-                {genre && <span className="text-gray-300">{genre}</span>}
+              <div className="flex flex-wrap items-center gap-2 text-content-secondary text-sm font-medium">
+                {rating && (
+                  <Badge tone="success">
+                    Match {Math.min(100, Math.round(Number(rating) * 10))}%
+                  </Badge>
+                )}
+                {year && <Badge tone="neutral">{year}</Badge>}
+                <Badge tone="neutral">HD</Badge>
+                {genre && <span className="text-content-secondary ml-1">{genre}</span>}
               </div>
               {!MetadataService.isConfigured() && (
-                <div className="rounded-xl border border-yellow-500/30 bg-yellow-950/30 px-4 py-3 text-sm text-yellow-100">
-                  TMDB non configurato: poster, trama e suggerimenti arricchiti possono usare solo i dati del provider IPTV. Imposta <code className="text-yellow-200">VITE_TMDB_API_KEY</code> per abilitarli.
-                </div>
+                <Card
+                  elevation="flat"
+                  padding="sm"
+                  className="!border-state-warning/30 !bg-state-warning/10"
+                >
+                  <p className="text-sm text-state-warning">
+                    TMDB non configurato: poster, trama e suggerimenti arricchiti possono usare solo i dati del provider IPTV. Imposta{' '}
+                    <code className="text-state-warning font-mono">VITE_TMDB_API_KEY</code> per abilitarli.
+                  </p>
+                </Card>
               )}
             </div>
 
             <div className="flex flex-wrap gap-3">
-              <button
-                onClick={() => { onPlay(movie, hasProgress ? { resetProgress: true } : undefined); onClose(); }}
-                className="tv-focus flex items-center gap-3 bg-white text-black px-6 py-3 rounded-lg font-bold text-lg shadow-lg hover:bg-gray-200"
+              <Button
+                onClick={() => {
+                  onPlay(movie, hasProgress ? { resetProgress: true } : undefined);
+                  onClose();
+                }}
+                leftIcon={Play}
+                variant="primary"
+                size="lg"
                 data-initial-focus="true"
               >
-                <Play className="w-5 h-5 fill-black" /> {hasProgress ? t.watchNow : t.play}
-              </button>
+                {hasProgress ? t.watchNow : t.play}
+              </Button>
 
               {hasProgress && (
-                <button
-                  onClick={() => { onPlay(movie); onClose(); }}
-                  className="tv-focus flex items-center gap-3 bg-red-600 text-white px-6 py-3 rounded-lg font-bold text-lg shadow-lg hover:bg-red-500"
+                <Button
+                  onClick={() => {
+                    onPlay(movie);
+                    onClose();
+                  }}
+                  leftIcon={Play}
+                  variant="primary"
+                  size="lg"
                 >
-                  <Play className="w-5 h-5 fill-white" /> {t.resume}
-                </button>
+                  {t.resume}
+                </Button>
               )}
 
               <WatchlistButton
@@ -224,59 +266,90 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
                 variant="movie"
               />
 
-              <button
-                onClick={() => setLiked(prev => !prev)}
-                className={`tv-focus flex items-center gap-2 px-5 py-3 rounded-lg border ${liked ? 'bg-red-600 border-red-500' : 'bg-white/5 border-white/10 hover:bg-white/15'} transition-colors`}
+              <Button
+                onClick={() => setLiked((prev) => !prev)}
+                leftIcon={ThumbsUp}
+                variant={liked ? 'primary' : 'secondary'}
+                size="lg"
+                aria-pressed={liked}
+                aria-label={liked ? 'Rimuovi mi piace' : 'Aggiungi mi piace'}
               >
-                <ThumbsUp className="w-5 h-5" />
-                <span className="text-sm font-semibold">{liked ? '✓' : '👍'}</span>
-              </button>
+                {liked ? '✓' : '👍'}
+              </Button>
             </div>
 
-            <p className="text-lg text-gray-200 leading-relaxed max-w-3xl">{plot}</p>
+            <p className="text-lg text-content-secondary leading-relaxed max-w-3xl">{plot}</p>
 
             {/* AI Fun Fact */}
             {aiData?.funFact ? (
-              <div className="p-4 bg-blue-900/30 border border-blue-500/30 rounded-lg flex items-start gap-3 animate-in fade-in slide-in-from-bottom-2">
-                <Sparkles className="w-5 h-5 text-blue-400 flex-shrink-0 mt-1" />
-                <p className="text-sm text-blue-200"><strong className="text-blue-300">AI Fun Fact:</strong> {aiData.funFact}</p>
-              </div>
+              <Card
+                elevation="flat"
+                padding="sm"
+                className="!border-state-info/30 !bg-state-info/10 animate-fade-in"
+              >
+                <div className="flex items-start gap-3">
+                  <Sparkles
+                    className="w-icon-md h-icon-md text-state-info shrink-0 mt-0.5"
+                    aria-hidden="true"
+                  />
+                  <p className="text-sm text-state-info">
+                    <strong className="text-state-info">AI Fun Fact:</strong> {aiData.funFact}
+                  </p>
+                </div>
+              </Card>
             ) : aiLoading ? (
-              <div className="h-16 bg-white/5 rounded-lg animate-pulse" />
+              <div className="h-16 bg-surface-1 rounded-card animate-pulse" />
             ) : null}
 
             {hasProgress && (
-              <p className="text-sm text-gray-400">{Math.round(progress * 100)}%</p>
+              <p className="text-sm text-content-muted">{Math.round(progress * 100)}%</p>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-300">
-              {cast && <div><span className="text-gray-400">{t.castActors}: </span>{cast}</div>}
-              {director && <div><span className="text-gray-400">{t.director}: </span>{director}</div>}
-              {movie.group && <div><span className="text-gray-400">{t.genre}: </span>{movie.group}</div>}
-              {movie.url && <div className="text-gray-500">Stream ID: {movie.id}</div>}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-content-secondary">
+              {cast && (
+                <div>
+                  <span className="text-content-muted">{t.castActors}: </span>
+                  {cast}
+                </div>
+              )}
+              {director && (
+                <div>
+                  <span className="text-content-muted">{t.director}: </span>
+                  {director}
+                </div>
+              )}
+              {movie.group && (
+                <div>
+                  <span className="text-content-muted">{t.genre}: </span>
+                  {movie.group}
+                </div>
+              )}
+              {movie.url && <div className="text-content-disabled">Stream ID: {movie.id}</div>}
             </div>
           </div>
         </div>
 
         {/* AI Similar Movies */}
         {aiSimilarChannels.length > 0 && (
-          <div className="mt-12 animate-in fade-in slide-in-from-bottom-4">
-            <h3 className="text-2xl font-bold mb-4 flex items-center gap-2"><Sparkles className="w-6 h-6 text-purple-400" /> Consigliati dall'AI</h3>
+          <div className="mt-12 animate-fade-in">
+            <h3 className="text-2xl font-bold mb-4 flex items-center gap-2">
+              <Sparkles className="w-icon-lg h-icon-lg text-brand-accent" aria-hidden="true" /> Consigliati dall'AI
+            </h3>
             <div className="flex gap-4 overflow-x-auto no-scrollbar pb-4">
               {aiSimilarChannels.map(ch => (
                 <button
                   key={ch.id}
                   onClick={() => onShowDetails ? onShowDetails(ch) : onPlay(ch)}
-                  className="tv-focus flex-none w-[180px] md:w-[200px] rounded-lg overflow-hidden bg-white/5 border border-white/10 hover:border-white/30 shadow-lg text-left"
+                  className="tv-focus flex-none w-[180px] md:w-[200px] rounded-card overflow-hidden bg-surface-1 border border-DEFAULT hover:border-strong shadow-elev-2 text-left"
                 >
                   {ch.logo ? (
                     <img src={ch.logo} alt={ch.name} className="w-full h-48 object-cover" />
                   ) : (
-                    <div className="w-full h-48 flex items-center justify-center text-gray-500 text-sm">{ch.cleanName || ch.name}</div>
+                    <div className="w-full h-48 flex items-center justify-center text-content-muted text-sm">{ch.cleanName || ch.name}</div>
                   )}
                   <div className="p-3">
                     <p className="text-sm font-semibold line-clamp-2">{ch.cleanName || ch.name}</p>
-                    {ch.year && <p className="text-xs text-gray-400 mt-1">{ch.year}</p>}
+                    {ch.year && <p className="text-xs text-content-muted mt-1">{ch.year}</p>}
                   </div>
                 </button>
               ))}
@@ -293,18 +366,18 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
                 <button
                   key={sim.id}
                   onClick={() => sim.channel && onShowDetails && onShowDetails(sim.channel)}
-                  className={`tv-focus flex-none w-[180px] md:w-[200px] rounded-lg overflow-hidden bg-white/5 border border-white/10 hover:border-white/30 shadow-lg text-left ${!sim.channel ? 'opacity-60 cursor-not-allowed' : ''}`}
+                  className={`tv-focus flex-none w-[180px] md:w-[200px] rounded-card overflow-hidden bg-surface-1 border border-DEFAULT hover:border-strong shadow-elev-2 text-left ${!sim.channel ? 'opacity-60 cursor-not-allowed' : ''}`}
                   disabled={!sim.channel}
                 >
                   {sim.poster ? (
                     <img src={sim.poster} alt={sim.title} className="w-full h-48 object-cover" />
                   ) : (
-                    <div className="w-full h-48 flex items-center justify-center text-gray-500 text-sm">{sim.title}</div>
+                    <div className="w-full h-48 flex items-center justify-center text-content-muted text-sm">{sim.title}</div>
                   )}
                   <div className="p-3">
                     <p className="text-sm font-semibold line-clamp-2">{sim.title}</p>
-                    {sim.channel?.year && <p className="text-xs text-gray-400 mt-1">{sim.channel.year}</p>}
-                    {sim.overview && <p className="text-xs text-gray-400 mt-1 line-clamp-3">{sim.overview}</p>}
+                    {sim.channel?.year && <p className="text-xs text-content-muted mt-1">{sim.channel.year}</p>}
+                    {sim.overview && <p className="text-xs text-content-muted mt-1 line-clamp-3">{sim.overview}</p>}
                   </div>
                 </button>
               ))}

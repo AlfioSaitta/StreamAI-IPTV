@@ -126,8 +126,8 @@ const ChannelItem = React.memo(({
 
             {progress ? (
                 <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-black/50">
-                    <div 
-                        className="h-full bg-red-600" 
+                    <div
+                        className="h-full bg-brand-primary"
                         style={{ width: `${Math.min(100, Math.max(0, progress * 100))}%` }}
                     />
                 </div>
@@ -565,7 +565,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
                  <span>{currentTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
              </div>
 
-             <div className={`flex items-center gap-2 bg-black/50 border border-white/30 rounded-full px-4 py-2 transition-all duration-300 ${searchTerm ? 'w-72 bg-black/90 ring-2 ring-red-500/50 border-red-500/50' : 'w-48 hover:w-56 hover:bg-black/70'}`}>
+             <div className={`flex items-center gap-2 bg-surface-1 border border-DEFAULT rounded-full px-4 py-2 transition-all duration-300 ${searchTerm ? 'w-72 bg-surface-2 ring-2 ring-brand-primary/50 border-brand-primary/50' : 'w-48 hover:w-56 hover:bg-surface-2'}`}>
                  <Search className="w-5 h-5 text-gray-400 flex-shrink-0" />
                  <input
                     type="text" 
@@ -618,7 +618,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
                         <Settings className="w-4 h-4" /> {t.settings}
                     </button>
 
-                    <button onClick={onLogout} className="tv-focus w-full text-left px-4 py-3 text-sm hover:bg-white/5 flex items-center gap-3 text-red-400 font-medium outline-none focus:bg-white/10" tabIndex={0}>
+                    <button onClick={onLogout} className="tv-focus-dense w-full text-left px-4 py-3 text-sm hover:bg-surface-2 flex items-center gap-3 text-state-error font-medium outline-none focus:bg-surface-3" tabIndex={0}>
                         <LogOut className="w-4 h-4" /> {t.logout}
                     </button>
                  </div>

@@ -2,6 +2,7 @@ import React from 'react';
 import { Moon, Clock, X } from 'lucide-react';
 import type { SleepTimerPreset } from '../../hooks/useSleepTimer';
 import { formatSleepRemaining } from '../../hooks/useSleepTimer';
+import { IconButton } from '../shared';
 
 interface SleepTimerMenuProps {
   isOpen: boolean;
@@ -46,29 +47,28 @@ const SleepTimerMenu: React.FC<SleepTimerMenuProps> = ({
     <div
       role="dialog"
       aria-label="Timer di spegnimento"
-      className="absolute bottom-24 right-6 z-40 w-64 rounded-2xl border border-white/10 bg-black/90 backdrop-blur-xl shadow-2xl p-3 text-white"
+      className="absolute bottom-24 right-6 z-40 w-64 rounded-card border border-DEFAULT bg-surface-overlay-hard backdrop-blur-xl shadow-elev-3 p-3 text-content-primary animate-fade-in"
       onClick={(e) => e.stopPropagation()}
     >
-      <div className="flex items-center justify-between gap-2 px-2 pb-2 border-b border-white/10">
+      <div className="flex items-center justify-between gap-2 px-2 pb-2 border-b border-subtle">
         <div className="flex items-center gap-2">
-          <Moon className="w-4 h-4 text-purple-300" aria-hidden="true" />
+          <Moon className="w-icon-sm h-icon-sm text-state-warning" aria-hidden="true" />
           <h3 className="text-sm font-semibold">Sleep timer</h3>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
+        <IconButton
+          icon={X}
           aria-label="Chiudi menu sleep timer"
-          className="tv-focus rounded-full p-1 hover:bg-white/10"
-        >
-          <X className="w-3.5 h-3.5 text-gray-400" aria-hidden="true" />
-        </button>
+          variant="ghost"
+          size="sm"
+          onClick={onClose}
+        />
       </div>
 
       {current !== 'off' && remainingSeconds > 0 && (
-        <div className="flex items-center gap-2 px-2 py-2 border-b border-white/10 text-xs text-gray-300">
-          <Clock className="w-3 h-3 text-amber-300" aria-hidden="true" />
+        <div className="flex items-center gap-2 px-2 py-2 border-b border-subtle text-xs text-content-secondary">
+          <Clock className="w-icon-xs h-icon-xs text-state-warning" aria-hidden="true" />
           <span>Tempo rimanente</span>
-          <span className="ml-auto font-mono font-semibold text-amber-200">
+          <span className="ml-auto font-mono font-semibold text-state-warning">
             {formatSleepRemaining(remainingSeconds)}
           </span>
         </div>
@@ -83,12 +83,18 @@ const SleepTimerMenu: React.FC<SleepTimerMenuProps> = ({
                 type="button"
                 onClick={() => { onPick(opt.id); if (opt.id === 'off') onClose(); }}
                 aria-pressed={isActive}
-                className={`tv-focus w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
-                  isActive ? 'bg-red-600/30 text-white' : 'text-gray-200 hover:bg-white/10'
+                className={`tv-focus-dense w-full flex items-center justify-between gap-2 px-3 py-2 rounded-control text-sm transition-colors ${
+                  isActive
+                    ? 'bg-brand-primary/25 text-content-primary'
+                    : 'text-content-secondary hover:bg-surface-2'
                 }`}
               >
                 <span>{opt.label}</span>
-                {isActive && <span className="text-[10px] uppercase tracking-widest text-red-300">Attivo</span>}
+                {isActive && (
+                  <span className="text-[10px] uppercase tracking-widest text-brand-primary">
+                    Attivo
+                  </span>
+                )}
               </button>
             </li>
           );
@@ -99,22 +105,24 @@ const SleepTimerMenu: React.FC<SleepTimerMenuProps> = ({
               type="button"
               onClick={() => onPick('endOfProgramme')}
               aria-pressed={current === 'endOfProgramme'}
-              className={`tv-focus w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
+              className={`tv-focus-dense w-full flex items-center justify-between gap-2 px-3 py-2 rounded-control text-sm transition-colors ${
                 current === 'endOfProgramme'
-                  ? 'bg-red-600/30 text-white'
-                  : 'text-gray-200 hover:bg-white/10'
+                  ? 'bg-brand-primary/25 text-content-primary'
+                  : 'text-content-secondary hover:bg-surface-2'
               }`}
             >
               <span>Fine programma {endOfProgrammeLabel ? `(${endOfProgrammeLabel})` : ''}</span>
               {current === 'endOfProgramme' && (
-                <span className="text-[10px] uppercase tracking-widest text-red-300">Attivo</span>
+                <span className="text-[10px] uppercase tracking-widest text-brand-primary">
+                  Attivo
+                </span>
               )}
             </button>
           </li>
         )}
       </ul>
 
-      <p className="px-2 pt-2 text-[10px] text-gray-500 leading-snug">
+      <p className="px-2 pt-2 text-[10px] text-content-disabled leading-snug">
         Il video viene messo in pausa allo scadere del timer, con una breve dissolvenza audio.
       </p>
     </div>
@@ -122,4 +130,3 @@ const SleepTimerMenu: React.FC<SleepTimerMenuProps> = ({
 };
 
 export default SleepTimerMenu;
-

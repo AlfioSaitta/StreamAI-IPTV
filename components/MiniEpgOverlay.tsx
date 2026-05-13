@@ -5,6 +5,7 @@
 import React from 'react';
 import { Calendar, Clock, X, RefreshCw, AlertTriangle } from 'lucide-react';
 import type { EpgProgramme } from '../types';
+import { IconButton, Card } from './shared';
 
 interface MiniEpgOverlayProps {
   open: boolean;
@@ -53,68 +54,73 @@ const MiniEpgOverlay: React.FC<MiniEpgOverlayProps> = ({
 
   return (
     <div
-      className="absolute bottom-24 left-1/2 -translate-x-1/2 z-[75] w-[min(560px,92vw)] bg-black/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-200"
+      className="absolute bottom-24 left-1/2 -translate-x-1/2 z-[75] w-[min(560px,92vw)] bg-surface-overlay-hard backdrop-blur-xl border border-DEFAULT rounded-card shadow-elev-3 animate-fade-in"
       role="dialog"
       aria-label="Guida programmi"
     >
-      <div className="p-4 border-b border-white/10 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-white min-w-0">
-          <Calendar className="w-5 h-5 text-red-400 flex-shrink-0" />
+      <div className="p-4 border-b border-subtle flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-content-primary min-w-0">
+          <Calendar className="w-icon-md h-icon-md text-brand-primary flex-shrink-0" aria-hidden="true" />
           <div className="min-w-0">
             <h3 className="font-semibold truncate">Guida TV</h3>
-            <p className="text-xs text-gray-400 truncate">{channelName}</p>
+            <p className="text-xs text-content-muted truncate">{channelName}</p>
           </div>
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
-          <button
-            onClick={onRefresh}
-            disabled={isLoading}
+          <IconButton
+            icon={RefreshCw}
             aria-label="Aggiorna EPG"
             title="Aggiorna EPG"
-            className="tv-focus touch-target p-2 rounded-full hover:bg-white/10 text-gray-300 disabled:opacity-50"
-          >
-            <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
-          </button>
-          <button
-            onClick={onClose}
+            variant="ghost"
+            size="sm"
+            onClick={onRefresh}
+            disabled={isLoading}
+            className={isLoading ? '[&_svg]:animate-spin' : ''}
+          />
+          <IconButton
+            icon={X}
             aria-label="Chiudi guida TV"
-            className="tv-focus touch-target p-2 rounded-full hover:bg-white/10 text-gray-300"
-          >
-            <X className="w-4 h-4" />
-          </button>
+            variant="ghost"
+            size="sm"
+            onClick={onClose}
+          />
         </div>
       </div>
 
       <div className="p-4 space-y-4 max-h-[60vh] overflow-y-auto">
         {error && !current && (
-          <div className="flex items-start gap-3 bg-red-950/30 border border-red-500/30 rounded-xl p-3 text-sm text-red-100">
-            <AlertTriangle className="w-4 h-4 mt-0.5 text-red-400 flex-shrink-0" />
+          <Card
+            elevation="flat"
+            padding="sm"
+            className="!border-state-error/30 !bg-state-error/10 flex items-start gap-3 text-sm text-state-error"
+          >
+            <AlertTriangle className="w-icon-sm h-icon-sm mt-0.5 flex-shrink-0" aria-hidden="true" />
             <div>
               <div className="font-medium">Impossibile caricare l'EPG</div>
-              <div className="text-xs text-red-300 mt-0.5 break-all">{error}</div>
+              <div className="text-xs opacity-80 mt-0.5 break-all">{error}</div>
             </div>
-          </div>
+          </Card>
         )}
 
         {!current && !error && !isLoading && (
-          <div className="text-center text-gray-400 py-6 text-sm">
+          <div className="text-center text-content-muted py-6 text-sm">
             Nessun programma EPG per questo canale.
           </div>
         )}
 
         {current && (
-          <div className="bg-gradient-to-br from-red-900/30 to-red-950/20 border border-red-500/30 rounded-xl p-4">
-            <div className="flex items-center gap-2 text-[10px] font-bold tracking-widest uppercase text-red-300 mb-2">
-              <span className="inline-block w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+          <div className="bg-brand-primary/10 border border-brand-primary/30 rounded-card p-4">
+            <div className="flex items-center gap-2 text-[10px] font-bold tracking-widest uppercase text-brand-primary mb-2">
+              <span className="inline-block w-2 h-2 rounded-full bg-brand-primary animate-pulse" />
               In onda · {formatTimeRange(current)}
             </div>
-            <h4 className="text-white font-semibold text-base leading-snug">{current.title}</h4>
+            <h4 className="text-content-primary font-semibold text-base leading-snug">{current.title}</h4>
             {current.category && (
-              <p className="text-xs text-red-200/80 mt-1">{current.category}</p>
+              <p className="text-xs text-brand-primary/80 mt-1">{current.category}</p>
             )}
-            <div className="mt-3 h-1.5 rounded-full bg-white/10 overflow-hidden">
+            <div className="mt-3 h-1.5 rounded-full bg-surface-3 overflow-hidden">
               <div
-                className="h-full bg-red-500 transition-[width] duration-500"
+                className="h-full bg-brand-primary transition-[width] duration-500"
                 style={{ width: `${(progress * 100).toFixed(1)}%` }}
                 role="progressbar"
                 aria-valuenow={Math.round(progress * 100)}
@@ -124,29 +130,29 @@ const MiniEpgOverlay: React.FC<MiniEpgOverlayProps> = ({
               />
             </div>
             {current.description && (
-              <p className="text-xs text-gray-300 mt-3 line-clamp-3">{current.description}</p>
+              <p className="text-xs text-content-secondary mt-3 line-clamp-3">{current.description}</p>
             )}
           </div>
         )}
 
         {upcoming.length > 0 && (
           <div className="space-y-2">
-            <div className="text-[10px] font-bold tracking-widest uppercase text-gray-400 px-1">
+            <div className="text-[10px] font-bold tracking-widest uppercase text-content-muted px-1">
               Prossimi programmi
             </div>
             {upcoming.map((p, idx) => (
               <div
                 key={`${p.channelId}-${p.start}-${idx}`}
-                className="bg-white/5 border border-white/5 rounded-xl p-3 flex items-start gap-3"
+                className="bg-surface-1 border border-subtle rounded-control p-3 flex items-start gap-3"
               >
-                <Clock className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
+                <Clock className="w-icon-sm h-icon-sm text-content-muted mt-0.5 flex-shrink-0" aria-hidden="true" />
                 <div className="min-w-0 flex-1">
-                  <div className="text-[10px] uppercase tracking-wide text-gray-500">
+                  <div className="text-[10px] uppercase tracking-wide text-content-disabled">
                     {formatDay(p.start)} · {formatTimeRange(p)}
                   </div>
-                  <div className="text-sm text-white font-medium leading-snug mt-0.5">{p.title}</div>
+                  <div className="text-sm text-content-primary font-medium leading-snug mt-0.5">{p.title}</div>
                   {p.category && (
-                    <div className="text-[10px] text-gray-400 mt-0.5">{p.category}</div>
+                    <div className="text-[10px] text-content-muted mt-0.5">{p.category}</div>
                   )}
                 </div>
               </div>
@@ -155,8 +161,10 @@ const MiniEpgOverlay: React.FC<MiniEpgOverlayProps> = ({
         )}
       </div>
 
-      <div className="px-4 py-2 border-t border-white/10 text-[10px] text-gray-500 text-center">
-        Premi <kbd className="px-1.5 py-0.5 bg-white/10 rounded text-gray-300">G</kbd> per aprire/chiudere la guida
+      <div className="px-4 py-2 border-t border-subtle text-[10px] text-content-disabled text-center">
+        Premi{' '}
+        <kbd className="px-1.5 py-0.5 bg-surface-2 rounded text-content-secondary">G</kbd>{' '}
+        per aprire/chiudere la guida
       </div>
     </div>
   );

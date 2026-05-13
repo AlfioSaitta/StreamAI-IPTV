@@ -2,6 +2,7 @@ import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useSt
 import { Search, X, Clock, Tv, Film, Library, Sparkles, type LucideIcon } from 'lucide-react';
 import type { Channel, StreamType } from '../types.ts';
 import { indexChannels, searchIndexedChannels, type IndexedChannel } from '../services/catalogIndex.ts';
+import { Chip, IconButton } from './shared';
 
 const RECENT_SEARCHES_KEY_PREFIX = 'streamai.cmdk.recent';
 const MAX_RECENT = 6;
@@ -96,7 +97,7 @@ const Highlight: React.FC<{ text: string; query: string }> = ({ text, query }) =
   merged.forEach(([s, e], i) => {
     if (cursor < s) out.push(<span key={`p${i}`}>{text.slice(cursor, s)}</span>);
     out.push(
-      <mark key={`m${i}`} className="bg-amber-400/30 text-amber-100 rounded px-0.5">
+      <mark key={`m${i}`} className="bg-state-warning/30 text-state-warning rounded px-0.5">
         {text.slice(s, e)}
       </mark>
     );
@@ -106,7 +107,7 @@ const Highlight: React.FC<{ text: string; query: string }> = ({ text, query }) =
   return <>{out}</>;
 };
 
-const TypeIcon: React.FC<{ type?: StreamType; className?: string }> = ({ type, className = 'w-4 h-4' }) => {
+const TypeIcon: React.FC<{ type?: StreamType; className?: string }> = ({ type, className = 'w-icon-sm h-icon-sm' }) => {
   if (type === 'live') return <Tv className={className} aria-hidden="true" />;
   if (type === 'movie') return <Film className={className} aria-hidden="true" />;
   if (type === 'series') return <Library className={className} aria-hidden="true" />;
@@ -247,17 +248,17 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose, channe
       role="dialog"
       aria-modal="true"
       aria-labelledby="cmdk-title"
-      className="fixed inset-0 z-[320] flex items-start justify-center bg-black/70 backdrop-blur-sm p-4 pt-[12vh]"
+      className="fixed inset-0 z-[320] flex items-start justify-center bg-surface-overlay-hard backdrop-blur-md p-4 pt-[12vh] animate-fade-in"
       onClick={onClose}
       onKeyDown={onKeyDown}
     >
       <div
-        className="relative w-full max-w-2xl max-h-[76vh] flex flex-col rounded-3xl border border-white/10 bg-[var(--bg-primary)] shadow-2xl overflow-hidden"
+        className="relative w-full max-w-2xl max-h-[76vh] flex flex-col rounded-modal border border-DEFAULT bg-surface-1 backdrop-blur-xl shadow-elev-3 overflow-hidden animate-slide-up"
         onClick={e => e.stopPropagation()}
       >
         {/* Search input */}
-        <div className="flex items-center gap-3 px-5 py-4 border-b border-white/10">
-          <Search className="w-5 h-5 text-gray-400" aria-hidden="true" />
+        <div className="flex items-center gap-3 px-5 py-4 border-b border-subtle bg-surface-2">
+          <Search className="w-icon-md h-icon-md text-content-muted" aria-hidden="true" />
           <input
             ref={inputRef}
             type="text"
@@ -266,43 +267,34 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose, channe
             placeholder="Cerca canali, film, serie..."
             aria-label="Ricerca globale"
             id="cmdk-title"
-            className="flex-1 bg-transparent outline-none text-base md:text-lg text-white placeholder:text-gray-500"
+            className="flex-1 bg-transparent outline-none text-base md:text-lg text-content-primary placeholder:text-content-muted"
             autoComplete="off"
             spellCheck={false}
           />
-          <button
-            type="button"
-            onClick={onClose}
+          <IconButton
+            icon={X}
             aria-label="Chiudi ricerca"
-            className="tv-focus rounded-full p-2 hover:bg-white/10"
-          >
-            <X className="w-4 h-4 text-gray-400" aria-hidden="true" />
-          </button>
+            variant="ghost"
+            size="sm"
+            onClick={onClose}
+          />
         </div>
 
         {/* Filter chips */}
-        <div className="flex items-center gap-2 px-5 py-3 border-b border-white/5 overflow-x-auto no-scrollbar">
-          {FILTER_CONFIG.map(({ id, label, Icon }) => {
-            const isActive = filter === id;
-            return (
-              <button
-                key={id}
-                type="button"
-                onClick={() => changeFilter(id)}
-                aria-pressed={isActive}
-                className={`tv-focus flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors whitespace-nowrap ${
-                  isActive
-                    ? 'bg-red-600 text-white'
-                    : 'bg-white/5 text-gray-300 hover:bg-white/10'
-                }`}
-              >
-                <Icon className="w-3.5 h-3.5" aria-hidden={true} />
-                {label}
-              </button>
-            );
-          })}
+        <div className="flex items-center gap-2 px-5 py-3 border-b border-subtle overflow-x-auto no-scrollbar">
+          {FILTER_CONFIG.map(({ id, label, Icon }) => (
+            <Chip
+              key={id}
+              selected={filter === id}
+              icon={Icon}
+              size="sm"
+              onClick={() => changeFilter(id)}
+            >
+              {label}
+            </Chip>
+          ))}
           <div className="flex-1" />
-          <span className="hidden md:inline text-[10px] tracking-widest uppercase text-gray-500">
+          <span className="hidden md:inline text-[10px] tracking-widest uppercase text-content-disabled">
             ↑↓ naviga · Enter apri · Esc chiudi
           </span>
         </div>
@@ -311,30 +303,29 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose, channe
         {showRecent && (
           <div className="px-5 pt-3">
             <div className="flex items-center justify-between mb-2">
-              <h3 className="text-[10px] font-bold uppercase tracking-widest text-gray-500 flex items-center gap-1.5">
-                <Clock className="w-3 h-3" aria-hidden="true" /> Ricerche recenti
+              <h3 className="text-[10px] font-bold uppercase tracking-widest text-content-disabled flex items-center gap-1.5">
+                <Clock className="w-icon-xs h-icon-xs" aria-hidden="true" /> Ricerche recenti
               </h3>
               <button
                 type="button"
                 onClick={clearRecent}
-                className="tv-focus text-[10px] text-gray-500 hover:text-gray-300 uppercase tracking-widest"
+                className="tv-focus-dense text-[10px] text-content-disabled hover:text-content-secondary uppercase tracking-widest rounded-control px-1.5 py-0.5"
               >
                 Pulisci
               </button>
             </div>
             <div className="flex flex-wrap gap-2">
               {recent.map(term => (
-                <button
+                <Chip
                   key={term}
-                  type="button"
+                  size="sm"
                   onClick={() => {
                     setQuery(term);
                     inputRef.current?.focus();
                   }}
-                  className="tv-focus px-3 py-1 rounded-full bg-white/5 hover:bg-white/10 text-xs text-gray-200"
                 >
                   {term}
-                </button>
+                </Chip>
               ))}
             </div>
           </div>
@@ -343,8 +334,8 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose, channe
         {/* Results */}
         <div className="flex-1 overflow-y-auto px-2 py-2">
           {results.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-center text-gray-500">
-              <Search className="w-8 h-8 mb-3 text-gray-600" aria-hidden="true" />
+            <div className="flex flex-col items-center justify-center py-16 text-center text-content-muted">
+              <Search className="w-icon-xl h-icon-xl mb-3 text-content-disabled" aria-hidden="true" />
               <p className="text-sm">
                 {query.trim().length < 2
                   ? 'Inizia a digitare per cercare canali, film o serie.'
@@ -369,11 +360,11 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose, channe
                       aria-selected={isActive}
                       onMouseEnter={() => setActiveIndex(idx)}
                       onClick={() => commit(channel)}
-                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-colors ${
-                        isActive ? 'bg-white/10' : 'hover:bg-white/5'
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-control text-left transition-colors ${
+                        isActive ? 'bg-surface-3' : 'hover:bg-surface-2'
                       }`}
                     >
-                      <div className="flex-shrink-0 w-10 h-10 rounded-md bg-black/40 flex items-center justify-center overflow-hidden border border-white/5">
+                      <div className="flex-shrink-0 w-10 h-10 rounded-control bg-surface-2 flex items-center justify-center overflow-hidden border border-subtle">
                         {channel.logo ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
@@ -386,16 +377,16 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose, channe
                             }}
                           />
                         ) : (
-                          <TypeIcon type={channel.type} className="w-4 h-4 text-gray-400" />
+                          <TypeIcon type={channel.type} className="w-icon-sm h-icon-sm text-content-muted" />
                         )}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium text-white truncate">
+                        <div className="text-sm font-medium text-content-primary truncate">
                           <Highlight text={channel.cleanName || channel.name} query={deferredQuery} />
                         </div>
-                        <div className="text-xs text-gray-500 truncate flex items-center gap-2">
+                        <div className="text-xs text-content-muted truncate flex items-center gap-2">
                           <span className="inline-flex items-center gap-1">
-                            <TypeIcon type={channel.type} className="w-3 h-3" />
+                            <TypeIcon type={channel.type} className="w-icon-xs h-icon-xs" />
                             {channel.type ? TYPE_LABEL[channel.type] : '—'}
                           </span>
                           {channel.group && (
@@ -425,6 +416,3 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose, channe
 };
 
 export default CommandPalette;
-
-
-

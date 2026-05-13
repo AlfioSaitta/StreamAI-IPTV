@@ -1,14 +1,19 @@
-
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Channel, XtreamCredentials, WatchHistoryItem } from '../types.ts';
 import { getSeriesInfo } from '../services/xtream.ts';
 import { MetadataService } from '../services/metadata.ts';
 import { useLanguage } from '../contexts/LanguageContext.tsx';
 import { ArrowLeft, Film } from 'lucide-react';
-import LoadingState from './shared/LoadingState.tsx';
-import ErrorState from './shared/ErrorState.tsx';
-import WatchlistButton from './shared/WatchlistButton.tsx';
-import EmptyState from './shared/EmptyState.tsx';
+import {
+  Badge,
+  Button,
+  Card,
+  Chip,
+  EmptyState,
+  ErrorState,
+  LoadingState,
+  WatchlistButton,
+} from './shared';
 import { useMediaImages } from '../hooks/useMediaImages.ts';
 import { useMediaMetadata } from '../hooks/useMediaMetadata.ts';
 import { useFocusTrap } from '../hooks/useTvFocus.ts';
@@ -153,34 +158,44 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
   }
 
   return (
-    <div ref={containerRef} className="fixed inset-0 bg-[var(--bg-primary)] text-white overflow-y-auto z-40 outline-none safe-area-screen" tabIndex={-1} role="dialog" aria-modal="true" aria-label={`Dettagli ${seriesName}`}>
+    <div
+      ref={containerRef}
+      className="fixed inset-0 bg-surface-0 text-content-primary overflow-y-auto z-40 outline-none safe-area-screen"
+      tabIndex={-1}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Dettagli ${seriesName}`}
+    >
 
       {/* Background */}
       <div className="absolute inset-0 z-0 h-[80vh]">
           <img src={backdrop || ''} alt="" className="w-full h-full object-cover opacity-40" />
-          <div className="absolute inset-0 bg-gradient-to-t from-[var(--bg-primary)] via-[var(--bg-primary)]/60 to-transparent" />
-          <div className="absolute inset-0 bg-gradient-to-r from-[var(--bg-primary)] via-[var(--bg-primary)]/80 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-t from-surface-0 via-surface-0/60 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-r from-surface-0 via-surface-0/80 to-transparent" />
       </div>
 
       <div className="relative z-10 flex flex-col md:flex-row min-h-screen pt-20 px-8 md:px-16 gap-12">
           {/* Left Panel */}
           <div className="w-full md:w-1/3 flex flex-col pb-10">
-              <button 
-                  onClick={onBack} 
-                  className="tv-focus self-start flex items-center gap-2 text-gray-300 hover:text-white mb-8 px-3 py-1.5 rounded transition-colors text-sm font-semibold uppercase tracking-wider border border-white/20 hover:bg-white/10"
+              <Button
+                  onClick={onBack}
+                  variant="secondary"
+                  size="sm"
+                  leftIcon={ArrowLeft}
+                  className="self-start mb-8 uppercase tracking-wider"
                   data-initial-focus="true"
               >
-                  <ArrowLeft className="w-4 h-4" /> {t.back}
-              </button>
-              
-              <img src={poster || ''} className="w-2/3 md:w-3/4 rounded-md shadow-2xl mb-8 self-center md:self-start" alt="Cover" />
+                  {t.back}
+              </Button>
 
-              <h1 className="text-4xl md:text-5xl font-bold text-white mb-4 leading-tight">{seriesName}</h1>
+              <img src={poster || ''} className="w-2/3 md:w-3/4 rounded-card shadow-elev-3 mb-8 self-center md:self-start border border-DEFAULT" alt="Cover" />
 
-              <div className="flex flex-wrap items-center gap-4 text-base text-gray-300 mb-6 font-medium">
-                {rating && <span className="text-green-400 font-bold">Match {Number(rating) * 10}%</span>}
-                {series.year && <span>{series.year}</span>}
-                <span className="border border-gray-600 px-1 text-xs">HD</span>
+              <h1 className="text-4xl md:text-5xl font-bold text-content-primary mb-4 leading-tight">{seriesName}</h1>
+
+              <div className="flex flex-wrap items-center gap-2 mb-6">
+                {rating && <Badge tone="success">Match {Number(rating) * 10}%</Badge>}
+                {series.year && <Badge tone="neutral">{series.year}</Badge>}
+                <Badge tone="neutral">HD</Badge>
               </div>
 
               <div className="flex items-center gap-3 mb-8">
@@ -193,31 +208,37 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
                   />
               </div>
 
-              <p className="text-lg text-gray-300 leading-relaxed font-light mb-8">{plot}</p>
+              <p className="text-lg text-content-secondary leading-relaxed font-light mb-8">{plot}</p>
 
               {!MetadataService.isConfigured() && (
-                <div className="rounded-xl border border-yellow-500/30 bg-yellow-950/30 px-4 py-3 text-sm text-yellow-100">
-                  TMDB non configurato: metadata e immagini arricchite possono essere limitati ai dati del provider IPTV.
-                </div>
+                <Card
+                  elevation="flat"
+                  padding="sm"
+                  className="!border-state-warning/30 !bg-state-warning/10"
+                >
+                  <p className="text-sm text-state-warning">
+                    TMDB non configurato: metadata e immagini arricchite possono essere limitati ai dati del provider IPTV.
+                  </p>
+                </Card>
               )}
           </div>
 
           {/* Right Panel */}
           <div className="flex-1 pb-20">
-              <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-2xl font-bold text-white">{t.episodes}</h3>
+              <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+                  <h3 className="text-2xl font-bold text-content-primary">{t.episodes}</h3>
 
                   {/* Seasons */}
                   <div className="flex gap-2 overflow-x-auto pb-2 max-w-full no-scrollbar">
                     {seasons.map(season => (
-                      <button
+                      <Chip
                         key={season}
+                        selected={activeSeason === season}
                         onClick={() => setActiveSeason(season)}
                         onFocus={handleElementFocus}
-                        className={`tv-focus px-4 py-2 text-lg font-bold transition-all border-b-4 whitespace-nowrap ${activeSeason === season ? 'border-red-600 text-white' : 'border-transparent text-gray-500 hover:text-gray-300'}`}
                       >
                         Season {season}
-                      </button>
+                      </Chip>
                     ))}
                   </div>
               </div>
@@ -235,35 +256,37 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
                 ) : currentEpisodes.map((ep, idx) => {
                   const historyItem = history.find(h => h.channelId === ep.id);
                   const progress = historyItem?.progress || 0;
-                  
+
                   return (
                     <button
                         key={ep.id}
                         onClick={() => handlePlay({...ep, season: Number(activeSeason)})}
                         onFocus={handleElementFocus}
-                        className="tv-focus group flex items-center gap-6 p-4 rounded hover:bg-[#333] transition-colors text-left border-b border-gray-800 hover:border-transparent relative overflow-hidden"
+                        className="tv-focus-dense group flex items-center gap-6 p-4 rounded-control hover:bg-surface-2 transition-colors text-left border-b border-subtle hover:border-transparent relative overflow-hidden"
                     >
-                        <span className="text-2xl font-light text-gray-500 w-8 text-center">{idx + 1}</span>
-                        <div className="relative w-32 aspect-video bg-gray-800 rounded overflow-hidden shrink-0">
+                        <span className="text-2xl font-light text-content-muted w-8 text-center">{idx + 1}</span>
+                        <div className="relative w-32 aspect-video bg-surface-2 rounded-control overflow-hidden shrink-0">
                             {ep.info?.movie_image ? (
                                 <img src={ep.info.movie_image} className="w-full h-full object-cover" alt="" />
                             ) : (
-                                <div className="w-full h-full flex items-center justify-center text-gray-700"><Film className="w-8 h-8" /></div>
+                                <div className="w-full h-full flex items-center justify-center text-content-disabled">
+                                    <Film className="w-icon-xl h-icon-xl" />
+                                </div>
                             )}
-                            
+
                             {/* Progress Bar */}
                             {progress > 0 && (
-                                <div className="absolute bottom-0 left-0 right-0 h-1 bg-gray-700/50">
-                                    <div 
-                                        className="h-full bg-red-600 shadow-[0_0_4px_rgba(220,38,38,0.8)]" 
-                                        style={{ width: `${Math.min(progress * 100, 100)}%` }} 
+                                <div className="absolute bottom-0 left-0 right-0 h-1 bg-surface-3">
+                                    <div
+                                        className="h-full bg-brand-primary shadow-glow-brand"
+                                        style={{ width: `${Math.min(progress * 100, 100)}%` }}
                                     />
                                 </div>
                             )}
                         </div>
                         <div className="flex-1 min-w-0">
-                            <h4 className="font-bold text-white text-base truncate pr-4">{ep.title}</h4>
-                            <p className="text-xs text-gray-400 line-clamp-2">{ep.info?.plot}</p>
+                            <h4 className="font-bold text-content-primary text-base truncate pr-4">{ep.title}</h4>
+                            <p className="text-xs text-content-muted line-clamp-2">{ep.info?.plot}</p>
                         </div>
                     </button>
                   );

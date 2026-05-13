@@ -1,6 +1,7 @@
 import React from 'react';
 import { SkipForward, X } from 'lucide-react';
 import type { Channel } from '../../types.ts';
+import { Button, IconButton } from '../shared';
 
 interface AutoNextOverlayProps {
   isVisible: boolean;
@@ -37,18 +38,18 @@ const AutoNextOverlay: React.FC<AutoNextOverlayProps> = ({
     <div
       role="dialog"
       aria-label="Prossimo episodio"
-      className="absolute bottom-24 right-6 z-40 w-80 max-w-[90vw] rounded-2xl border border-white/10 bg-black/85 backdrop-blur-xl shadow-2xl p-4 text-white animate-fade-in"
+      className="absolute bottom-24 right-6 z-40 w-80 max-w-[90vw] rounded-card border border-DEFAULT bg-surface-overlay-hard backdrop-blur-xl shadow-elev-3 p-4 text-content-primary animate-fade-in"
     >
       <div className="flex items-start gap-3">
         {/* Countdown ring */}
         <div className="relative flex-shrink-0 w-12 h-12">
           <svg viewBox="0 0 50 50" className="w-12 h-12 -rotate-90">
-            <circle cx="25" cy="25" r={RADIUS} stroke="rgba(255,255,255,0.15)" strokeWidth="3" fill="none" />
+            <circle cx="25" cy="25" r={RADIUS} stroke="var(--surface-3)" strokeWidth="3" fill="none" />
             <circle
               cx="25"
               cy="25"
               r={RADIUS}
-              stroke="#dc2626"
+              stroke="var(--color-brand-primary)"
               strokeWidth="3"
               fill="none"
               strokeLinecap="round"
@@ -63,48 +64,43 @@ const AutoNextOverlay: React.FC<AutoNextOverlayProps> = ({
         </div>
 
         <div className="min-w-0 flex-1">
-          <div className="text-[10px] font-bold uppercase tracking-widest text-red-400">Prossimo episodio</div>
+          <div className="text-[10px] font-bold uppercase tracking-widest text-brand-primary">
+            Prossimo episodio
+          </div>
           <div className="text-sm font-semibold truncate" title={nextChannel?.name}>
             {nextChannel?.cleanName || nextChannel?.name || 'Episodio successivo'}
           </div>
-          <div className="text-xs text-gray-400 mt-0.5">
+          <div className="text-xs text-content-muted mt-0.5">
             Riproduzione tra {secondsLeft}s
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={onCancel}
+        <IconButton
+          icon={X}
           aria-label="Annulla riproduzione automatica"
-          className="tv-focus rounded-full p-1.5 hover:bg-white/10 flex-shrink-0"
-        >
-          <X className="w-4 h-4 text-gray-300" aria-hidden="true" />
-        </button>
+          variant="ghost"
+          size="sm"
+          onClick={onCancel}
+        />
       </div>
 
       <div className="flex items-center gap-2 mt-3">
-        <button
-          type="button"
+        <Button
+          variant="primary"
+          size="sm"
+          fullWidth
+          leftIcon={SkipForward}
           onClick={onPlayNow}
           autoFocus
-          aria-label="Riproduci ora"
-          className="tv-focus flex-1 flex items-center justify-center gap-2 bg-red-600 hover:bg-red-500 text-white font-bold rounded-lg px-4 py-2 text-sm"
         >
-          <SkipForward className="w-4 h-4" aria-hidden="true" />
           Riproduci ora
-        </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          aria-label="Annulla"
-          className="tv-focus rounded-lg px-3 py-2 text-sm text-gray-200 hover:bg-white/10"
-        >
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onCancel}>
           Annulla
-        </button>
+        </Button>
       </div>
     </div>
   );
 };
 
 export default AutoNextOverlay;
-

@@ -19,6 +19,21 @@ const MovieDetail = lazy(() => import('./components/MovieDetail.tsx'));
 const ProfileSettings = lazy(() => import('./components/ProfileSettings.tsx'));
 const GuideView = lazy(() => import('./components/GuideView.tsx'));
 
+// UI-1.5 — Galleria DS dev-only. Si attiva con `?ds-preview` in URL, oppure
+// impostando `window.__SHOW_DS_PREVIEW = true` da DevTools. Non viene caricata
+// nel chunk principale.
+const DesignSystemPreview = lazy(() => import('./components/DesignSystemPreview.tsx'));
+
+const shouldShowDsPreview = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  if ((window as unknown as { __SHOW_DS_PREVIEW?: boolean }).__SHOW_DS_PREVIEW) return true;
+  try {
+    return new URLSearchParams(window.location.search).has('ds-preview');
+  } catch {
+    return false;
+  }
+};
+
 const PlayerLoadingFallback = () => (
   <div className="fixed inset-0 z-[100] bg-black flex items-center justify-center">
     <div className="flex flex-col items-center gap-3">
@@ -117,6 +132,7 @@ const AiUnavailableHint = ({ hasKey, isSuspended, onOpenSettings }: { hasKey: bo
 
 
 function App() {
+
   const [activeProfile, setActiveProfile] = useState<Profile | null>(null);
   const lastProfileIdRef = useRef<string | null>(null);
 
@@ -877,4 +893,18 @@ function App() {
   );
 }
 
-export default App;
+// UI-1.5 — Wrapper che decide se renderizzare l'app reale oppure la galleria
+// del Design System (utile per smoke test visivo). La scelta è valutata una
+// sola volta al mount per evitare problemi con le regole degli hook.
+function Root() {
+  if (shouldShowDsPreview()) {
+    return (
+      <Suspense fallback={<PlayerLoadingFallback />}>
+        <DesignSystemPreview />
+      </Suspense>
+    );
+  }
+  return <App />;
+}
+
+export default Root;

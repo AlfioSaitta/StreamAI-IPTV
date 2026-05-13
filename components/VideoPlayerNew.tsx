@@ -868,15 +868,15 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         <h2 className="text-2xl font-bold text-white mb-2">Riproduzione in corso...</h2>
         <p className="text-gray-400 mb-8 max-w-md">Il video è in riproduzione nel player nativo.</p>
         {playbackError && (
-          <div className="max-w-xl bg-red-950/60 border border-red-500/40 rounded-2xl p-5 text-left mb-6">
-            <div className="flex items-center gap-3 mb-2 text-red-200">
+          <div className="max-w-xl bg-state-error/15 border border-state-error/40 rounded-2xl p-5 text-left mb-6">
+            <div className="flex items-center gap-3 mb-2 text-state-error">
               <AlertTriangle className="w-5 h-5" />
               <span className="font-semibold">{playbackError.title}</span>
             </div>
-            <p className="text-sm text-red-100 mb-4">{playbackError.message}</p>
+            <p className="text-sm text-state-error mb-4">{playbackError.message}</p>
             <div className="flex flex-wrap gap-3">
               {playbackError.canRetry && (
-                <button onClick={retryPlaybackNow} className="tv-focus touch-target px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white font-medium">
+                <button onClick={retryPlaybackNow} className="tv-focus touch-target px-4 py-2 rounded-lg bg-brand-primary hover:bg-brand-primary-hover text-white font-medium">
                   Riprova ({playbackError.retryCount}/{MAX_PLAYBACK_RETRIES})
                 </button>
               )}
@@ -919,7 +919,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         <div className={`absolute ${isBuffering ? 'inset-0 bg-black/50' : 'top-20 right-6'} flex flex-col items-center justify-center z-20 gap-4 transition-all`}>
           {isBuffering && <Loader2 className="w-16 h-16 text-white animate-spin" />}
           <div className="bg-black/40 backdrop-blur-md px-4 py-1.5 rounded-full border border-white/10 text-white text-xs font-mono shadow-xl flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${networkSpeed > 5 ? 'bg-green-500' : networkSpeed > 2 ? 'bg-yellow-500' : 'bg-red-500'} animate-pulse`} />
+            <div className={`w-2 h-2 rounded-full ${networkSpeed > 5 ? 'bg-state-success' : networkSpeed > 2 ? 'bg-state-warning' : 'bg-state-error'} animate-pulse`} />
             {networkSpeed.toFixed(2)} Mbps
           </div>
         </div>
@@ -927,11 +927,11 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       
       {error && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/90">
-          <div className="bg-red-950/70 backdrop-blur border border-red-500/50 px-8 py-6 rounded-2xl flex flex-col items-center gap-4 text-center max-w-2xl mx-4 shadow-2xl">
-            <AlertTriangle className="w-12 h-12 text-red-400" />
+          <div className="bg-state-error/15 backdrop-blur border border-state-error/40 px-8 py-6 rounded-2xl flex flex-col items-center gap-4 text-center max-w-2xl mx-4 shadow-2xl">
+            <AlertTriangle className="w-12 h-12 text-state-error" />
             <div>
               <h3 className="text-2xl font-bold text-white mb-2">{playbackError?.title || 'Errore di riproduzione'}</h3>
-              <p className="text-base text-red-100">{error}</p>
+              <p className="text-base text-state-error">{error}</p>
             </div>
 
             {playbackError && (
@@ -951,7 +951,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
 
             <div className="flex flex-wrap items-center justify-center gap-3">
               {playbackError?.canRetry && (
-                <button onClick={retryPlaybackNow} className="tv-focus px-6 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg font-semibold flex items-center gap-2">
+                <button onClick={retryPlaybackNow} className="tv-focus px-6 py-2 bg-brand-primary hover:bg-brand-primary-hover text-white rounded-lg font-semibold flex items-center gap-2">
                   <RotateCcw className="w-4 h-4" /> Riprova
                 </button>
               )}
@@ -991,7 +991,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
                     <button 
                       key={c.id}
                       onClick={() => onChannelSelect && onChannelSelect(c)}
-                      className={`tv-focus w-full text-left p-3 rounded-lg flex items-center gap-3 transition-colors ${c.id === channel.id ? 'bg-red-600 text-white' : 'hover:bg-white/10 text-gray-300'}`}
+                      className={`tv-focus w-full text-left p-3 rounded-lg flex items-center gap-3 transition-colors ${c.id === channel.id ? 'bg-brand-primary text-white' : 'hover:bg-white/10 text-gray-300'}`}
                     >
                         {c.logo && <img src={c.logo} alt={c.name} className="w-8 h-8 object-contain bg-black rounded" loading="lazy" />}
                         <span className="truncate text-sm font-medium">{c.cleanName || c.name}</span>
@@ -1015,7 +1015,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
                 onClick={() => handleAudioTrackChange(track.id)}
                 className={`tv-focus w-full text-left p-3 rounded-xl flex items-center justify-between transition-all ${
                   track.enabled 
-                    ? 'bg-red-600/20 text-red-500 border border-red-500/30' 
+                    ? 'bg-brand-primary/20 text-brand-primary border border-brand-primary/30' 
                     : 'hover:bg-white/10 text-gray-300 border border-transparent'
                 }`}
               >
@@ -1023,7 +1023,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
                   <span className="text-sm font-bold capitalize">{track.label || `Traccia ${track.id}`}</span>
                   {track.language && <span className="text-[10px] opacity-60 uppercase tracking-widest">{track.language}</span>}
                 </div>
-                {track.enabled && <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />}
+                {track.enabled && <div className="w-2 h-2 rounded-full bg-brand-primary animate-pulse" />}
               </button>
             ))}
           </div>
@@ -1042,7 +1042,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
             <button
               onClick={removeSubtitle}
               className={`tv-focus w-full text-left p-3 rounded-xl flex items-center justify-between transition-all ${
-                !activeSubtitle ? 'bg-red-600/20 text-red-500 border border-red-500/30' : 'hover:bg-white/10 text-gray-300 border border-transparent'
+                !activeSubtitle ? 'bg-brand-primary/20 text-brand-primary border border-brand-primary/30' : 'hover:bg-white/10 text-gray-300 border border-transparent'
               }`}
             >
               <span className="text-sm font-bold">Disattivati</span>
@@ -1054,7 +1054,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
               <button
                 onClick={() => setSubtitleEnabled(prev => !prev)}
                 className={`tv-focus w-full text-left p-3 rounded-xl flex items-center justify-between transition-all ${
-                  subtitleEnabled ? 'bg-red-600/20 text-red-500 border border-red-500/30' : 'hover:bg-white/10 text-gray-300 border border-transparent'
+                  subtitleEnabled ? 'bg-brand-primary/20 text-brand-primary border border-brand-primary/30' : 'hover:bg-white/10 text-gray-300 border border-transparent'
                 }`}
               >
                 <div className="flex flex-col min-w-0">
@@ -1154,7 +1154,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
                 
                 {/* Played Bar — tracks displayTime so the playhead follows the
                     user's finger during scrubbing instead of lagging behind. */}
-                <div className="absolute h-full bg-red-600 rounded-full" style={{ width: `${(displayTime / duration) * 100}%` }} />
+                <div className="absolute h-full bg-brand-primary rounded-full" style={{ width: `${(displayTime / duration) * 100}%` }} />
 
                 {/* Hover Ghost Bar */}
                 {hoverTime !== null && (
@@ -1163,7 +1163,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
 
                 {/* Thumb — always visible during scrubbing, otherwise on hover */}
                 <div
-                  className={`absolute top-1/2 w-4 h-4 bg-red-600 rounded-full shadow-lg transition-transform duration-200 ${isScrubbing ? 'scale-125' : 'scale-0 group-hover/timeline:scale-100'}`}
+                  className={`absolute top-1/2 w-4 h-4 bg-brand-primary rounded-full shadow-lg transition-transform duration-200 ${isScrubbing ? 'scale-125' : 'scale-0 group-hover/timeline:scale-100'}`}
                   style={{ left: `${(displayTime / duration) * 100}%`, transform: 'translate(-50%, -50%)' }}
                 />
 
@@ -1221,7 +1221,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
                   onClick={() => setShowMiniEpg(prev => !prev)}
                   aria-label="Guida TV"
                   aria-pressed={showMiniEpg}
-                  className={`tv-focus touch-target p-2 hover:bg-white/10 rounded-full transition-colors ${showMiniEpg ? 'text-red-500 bg-white/10' : 'text-white'}`}
+                  className={`tv-focus touch-target p-2 hover:bg-white/10 rounded-full transition-colors ${showMiniEpg ? 'text-brand-primary bg-white/10' : 'text-white'}`}
                   title="Guida TV (G)"
                 >
                   <Calendar className="w-6 h-6" />
@@ -1237,7 +1237,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
                   onClick={() => setShowAudioMenu(!showAudioMenu)} 
                   aria-label="Tracce audio"
                   aria-pressed={showAudioMenu}
-                  className={`tv-focus touch-target p-2 hover:bg-white/10 rounded-full transition-colors ${showAudioMenu ? 'text-red-500 bg-white/10' : 'text-white'}`}
+                  className={`tv-focus touch-target p-2 hover:bg-white/10 rounded-full transition-colors ${showAudioMenu ? 'text-brand-primary bg-white/10' : 'text-white'}`}
                   title="Lingue Audio"
                 >
                   <Headphones className="w-6 h-6" />
@@ -1250,7 +1250,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
                   aria-label="Sottotitoli"
                   aria-pressed={showSubtitleMenu || (activeSubtitle !== null && subtitleEnabled)}
                   className={`tv-focus touch-target p-2 hover:bg-white/10 rounded-full transition-colors ${
-                    activeSubtitle && subtitleEnabled ? 'text-red-500 bg-white/10' : showSubtitleMenu ? 'text-white bg-white/10' : 'text-white'
+                    activeSubtitle && subtitleEnabled ? 'text-brand-primary bg-white/10' : showSubtitleMenu ? 'text-white bg-white/10' : 'text-white'
                   }`}
                   title="Sottotitoli (S)"
                 >
@@ -1289,7 +1289,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
                 {isCastLoading ? <Loader2 className="w-6 h-6 animate-spin" /> : <Cast className="w-6 h-6" />}
               </button>
               {document.pictureInPictureEnabled && (
-                <button onClick={togglePiP} aria-label="Picture-in-Picture" aria-pressed={isPiP} className={`tv-focus touch-target p-2 hover:bg-white/10 rounded-full ${isPiP ? 'text-purple-400' : 'text-white'}`} title="Picture-in-Picture (P)">
+                <button onClick={togglePiP} aria-label="Picture-in-Picture" aria-pressed={isPiP} className={`tv-focus touch-target p-2 hover:bg-white/10 rounded-full ${isPiP ? 'text-brand-accent' : 'text-white'}`} title="Picture-in-Picture (P)">
                   <PictureInPicture2 className="w-6 h-6" />
                 </button>
               )}

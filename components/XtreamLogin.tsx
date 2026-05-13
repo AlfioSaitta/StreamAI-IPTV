@@ -1,6 +1,7 @@
 import React, { useRef, useState, useActionState } from 'react';
 import { XtreamCredentials } from '../types.ts';
 import { Server, User, Key, AlertCircle, X } from 'lucide-react';
+import { Button, Card, FormField, IconButton, Input } from './shared';
 import { useFocusTrap } from '../hooks/useTvFocus.ts';
 
 interface XtreamLoginProps {
@@ -59,12 +60,15 @@ const XtreamLogin: React.FC<XtreamLoginProps> = ({ onLogin, onClose }) => {
         return { error: getFriendlyError(err), url, username, password };
       }
     },
-    INITIAL_STATE
+    INITIAL_STATE,
   );
 
   // FocusTrap still wired to the modal; Esc is suppressed while a submit
   // is in-flight so the user doesn't accidentally cancel a pending request.
-  useFocusTrap(true, modalRef, { onEscape: () => !isPending && onClose(), initialSelector: '[data-initial-focus="true"]' });
+  useFocusTrap(true, modalRef, {
+    onEscape: () => !isPending && onClose(),
+    initialSelector: '[data-initial-focus="true"]',
+  });
 
   // Per-field local state only for controlled UX (placeholder fade etc.).
   // The actual submitted values come from `FormData` inside the action.
@@ -82,63 +86,110 @@ const XtreamLogin: React.FC<XtreamLoginProps> = ({ onLogin, onClose }) => {
   }, [state]);
 
   const fields = [
-    { icon: Server, val: urlInput, set: setUrlInput, name: 'url', pl: 'http://host:port', type: 'url', label: 'Host URL' },
-    { icon: User, val: usernameInput, set: setUsernameInput, name: 'username', pl: 'Username', type: 'text', label: 'Username' },
-    { icon: Key, val: passwordInput, set: setPasswordInput, name: 'password', pl: 'Password', type: 'password', label: 'Password' },
+    {
+      icon: Server,
+      val: urlInput,
+      set: setUrlInput,
+      name: 'url',
+      pl: 'http://host:port',
+      type: 'url',
+      label: 'Host URL',
+      autoComplete: 'url',
+    },
+    {
+      icon: User,
+      val: usernameInput,
+      set: setUsernameInput,
+      name: 'username',
+      pl: 'Username',
+      type: 'text',
+      label: 'Username',
+      autoComplete: 'username',
+    },
+    {
+      icon: Key,
+      val: passwordInput,
+      set: setPasswordInput,
+      name: 'password',
+      pl: 'Password',
+      type: 'password',
+      label: 'Password',
+      autoComplete: 'current-password',
+    },
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-6 animate-fade-in safe-area-screen">
-      <div ref={modalRef} className="bg-gray-900/80 backdrop-blur-xl border border-white/10 w-full max-w-md p-8 rounded-3xl shadow-[0_0_100px_rgba(100,0,255,0.1)] relative animate-slide-up" role="dialog" aria-modal="true" aria-label="Connessione server Xtream">
-        <button onClick={onClose} disabled={isPending} className="tv-focus touch-target absolute top-6 right-6 text-gray-500 hover:text-white transition-colors rounded-full disabled:opacity-50" aria-label="Chiudi login server">
-            <X className="w-6 h-6" />
-        </button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-surface-overlay-hard backdrop-blur-md p-6 animate-fade-in safe-area-screen">
+      <div
+        ref={modalRef}
+        className="relative w-full max-w-md p-8 rounded-modal bg-surface-1 backdrop-blur-xl border border-DEFAULT shadow-elev-3 animate-slide-up"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Connessione server Xtream"
+      >
+        <div className="absolute top-5 right-5">
+          <IconButton
+            icon={X}
+            aria-label="Chiudi login server"
+            variant="ghost"
+            size="sm"
+            onClick={onClose}
+            disabled={isPending}
+          />
+        </div>
 
         <div className="text-center mb-10">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-600 mb-4 shadow-lg">
-                <Server className="w-8 h-8 text-white" />
-            </div>
-            <h2 className="text-3xl font-bold text-white tracking-tight">Connect Server</h2>
-            <p className="text-gray-400 text-sm mt-2">Xtream Codes API</p>
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-card bg-brand-primary mb-4 shadow-elev-2">
+            <Server className="w-icon-xl h-icon-xl text-white" aria-hidden="true" />
+          </div>
+          <h2 className="text-3xl font-bold text-content-primary tracking-tight">Connect Server</h2>
+          <p className="text-content-muted text-sm mt-2">Xtream Codes API</p>
         </div>
 
         <form action={formAction} className="space-y-5">
-            {fields.map((f, i) => (
-                <div key={f.name} className="group">
-                    <label className="block text-xs font-semibold text-gray-500 mb-1.5 ml-1 uppercase tracking-wider" htmlFor={`xtream-${f.name}`}>{f.label}</label>
-                    <div className="relative">
-                        <f.icon className="absolute left-4 top-3.5 w-5 h-5 text-gray-500 group-focus-within:text-purple-400 transition-colors" />
-                        <input
-                            id={`xtream-${f.name}`}
-                            name={f.name}
-                            type={f.type}
-                            placeholder={f.pl}
-                            disabled={isPending}
-                            className="tv-focus w-full bg-black/50 text-white rounded-xl py-3 pl-12 pr-4 border border-white/10 focus:border-purple-500 focus:bg-black/80 focus:ring-1 focus:ring-purple-500 outline-none transition-all placeholder:text-gray-700 disabled:opacity-60"
-                            value={f.val}
-                            onChange={(e) => f.set(e.target.value)}
-                            data-initial-focus={i === 0 ? 'true' : undefined}
-                            autoComplete={f.name === 'password' ? 'current-password' : f.name === 'username' ? 'username' : 'url'}
-                        />
-                    </div>
-                </div>
-            ))}
-
-            {state.error && (
-                <div className="bg-red-500/10 border border-red-500/20 text-red-200 p-4 rounded-xl text-sm flex gap-3 items-center" role="alert">
-                    <AlertCircle className="w-5 h-5 shrink-0" />
-                    <span>{state.error}</span>
-                </div>
-            )}
-
-            <button
-                type="submit"
+          {fields.map((f, i) => (
+            <FormField key={f.name} label={f.label} htmlFor={`xtream-${f.name}`}>
+              <Input
+                id={`xtream-${f.name}`}
+                name={f.name}
+                type={f.type}
+                placeholder={f.pl}
                 disabled={isPending}
-                className="tv-focus w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-4 rounded-xl shadow-lg shadow-purple-900/30 transition-all disabled:opacity-50 flex items-center justify-center gap-2 mt-4 text-lg"
-                aria-busy={isPending}
+                value={f.val}
+                onChange={(e) => f.set(e.target.value)}
+                leftIcon={f.icon}
+                autoComplete={f.autoComplete}
+                data-initial-focus={i === 0 ? 'true' : undefined}
+              />
+            </FormField>
+          ))}
+
+          {state.error && (
+            <Card
+              elevation="flat"
+              padding="sm"
+              className="!border-state-error/30 !bg-state-error/10"
+              role="alert"
             >
-                {isPending ? <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : 'Connect'}
-            </button>
+              <div className="flex items-start gap-3 text-state-error">
+                <AlertCircle className="w-icon-md h-icon-md shrink-0 mt-0.5" aria-hidden="true" />
+                <span className="text-sm">{state.error}</span>
+              </div>
+            </Card>
+          )}
+
+          <Button
+            type="submit"
+            disabled={isPending}
+            loading={isPending}
+            variant="primary"
+            size="lg"
+            fullWidth
+            aria-busy={isPending}
+            className="mt-4"
+          >
+            {isPending ? 'Connessione…' : 'Connect'}
+          </Button>
         </form>
       </div>
     </div>

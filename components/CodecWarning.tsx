@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { AlertTriangle, X, Info, CheckCircle, XCircle, Cpu } from 'lucide-react';
 import { checkCodecSupport, CodecCheckResult } from '../services/codecChecker';
+import { Button, IconButton } from './shared';
 
 interface CodecWarningProps {
   onDismiss?: () => void;
@@ -48,24 +49,25 @@ const CodecWarning: React.FC<CodecWarningProps> = ({ onDismiss }) => {
 
   return (
     <div className="fixed bottom-4 right-4 z-[200] max-w-md animate-slide-up">
-      <div className="bg-gradient-to-br from-amber-900/95 to-orange-900/95 backdrop-blur-xl rounded-2xl border border-amber-500/30 shadow-2xl overflow-hidden">
+      <div className="bg-surface-overlay-hard backdrop-blur-xl rounded-card border border-state-warning/30 shadow-elev-3 overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-amber-500/20">
+        <div className="flex items-center justify-between p-4 border-b border-state-warning/20">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-amber-500/20 rounded-lg">
-              <AlertTriangle className="w-5 h-5 text-amber-400" />
+            <div className="p-2 bg-state-warning/15 rounded-control">
+              <AlertTriangle className="w-icon-md h-icon-md text-state-warning" />
             </div>
             <div>
-              <h3 className="font-bold text-white text-sm">Codec HEVC Non Disponibile</h3>
-              <p className="text-xs text-amber-200/70">Alcuni contenuti 4K potrebbero non funzionare</p>
+              <h3 className="font-bold text-content-primary text-sm">Codec HEVC Non Disponibile</h3>
+              <p className="text-xs text-content-muted">Alcuni contenuti 4K potrebbero non funzionare</p>
             </div>
           </div>
-          <button
+          <IconButton
+            icon={X}
+            aria-label="Chiudi avviso codec"
+            variant="ghost"
+            size="sm"
             onClick={() => handleDismiss(false)}
-            className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
-          >
-            <X className="w-4 h-4 text-white/70" />
-          </button>
+          />
         </div>
 
         {/* Codec Status Grid */}
@@ -78,8 +80,8 @@ const CodecWarning: React.FC<CodecWarningProps> = ({ onDismiss }) => {
 
         {/* Hardware Acceleration Status */}
         <div className="px-4 pb-3">
-          <div className={`flex items-center gap-2 text-xs ${hardwareAcceleration ? 'text-green-400' : 'text-amber-400'}`}>
-            <Cpu className="w-3.5 h-3.5" />
+          <div className={`flex items-center gap-2 text-xs ${hardwareAcceleration ? 'text-state-success' : 'text-state-warning'}`}>
+            <Cpu className="w-icon-xs h-icon-xs" />
             <span>Accelerazione Hardware: {hardwareAcceleration ? 'Attiva' : 'Non rilevata'}</span>
           </div>
         </div>
@@ -88,20 +90,21 @@ const CodecWarning: React.FC<CodecWarningProps> = ({ onDismiss }) => {
         {recommendations.length > 0 && (
           <>
             <button
+              type="button"
               onClick={() => setShowDetails(!showDetails)}
-              className="w-full px-4 py-2 flex items-center justify-between text-xs text-amber-200 hover:bg-white/5 transition-colors border-t border-amber-500/20"
+              className="tv-focus-dense w-full px-4 py-2 flex items-center justify-between text-xs text-content-secondary hover:bg-surface-2 transition-colors border-t border-state-warning/20"
             >
               <span className="flex items-center gap-2">
-                <Info className="w-3.5 h-3.5" />
+                <Info className="w-icon-xs h-icon-xs" />
                 Come risolvere
               </span>
               <span className={`transform transition-transform ${showDetails ? 'rotate-180' : ''}`}>▼</span>
             </button>
 
             {showDetails && (
-              <div className="px-4 pb-4 text-xs text-amber-100/80 space-y-2 animate-fade-in">
+              <div className="px-4 pb-4 text-xs text-content-secondary space-y-2 animate-fade-in">
                 {recommendations.map((rec, i) => (
-                  <p key={i} className={rec.startsWith('•') ? 'pl-3 font-mono text-amber-200/60' : 'font-medium'}>
+                  <p key={i} className={rec.startsWith('•') ? 'pl-3 font-mono text-content-muted' : 'font-medium'}>
                     {rec}
                   </p>
                 ))}
@@ -111,19 +114,13 @@ const CodecWarning: React.FC<CodecWarningProps> = ({ onDismiss }) => {
         )}
 
         {/* Actions */}
-        <div className="p-3 bg-black/20 flex items-center justify-between gap-2 text-xs">
-          <button
-            onClick={() => handleDismiss(true)}
-            className="px-3 py-1.5 text-amber-200/70 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
-          >
+        <div className="p-3 bg-surface-2 flex items-center justify-between gap-2 text-xs">
+          <Button variant="ghost" size="sm" onClick={() => handleDismiss(true)}>
             Non mostrare più
-          </button>
-          <button
-            onClick={() => handleDismiss(false)}
-            className="px-4 py-1.5 bg-amber-500 hover:bg-amber-400 text-black font-medium rounded-lg transition-colors"
-          >
+          </Button>
+          <Button variant="primary" size="sm" onClick={() => handleDismiss(false)}>
             Ho capito
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -137,16 +134,16 @@ const CodecBadge: React.FC<{ name: string; supported: boolean; highlight?: boole
   highlight
 }) => (
   <div className={`
-    flex flex-col items-center gap-1 p-2 rounded-lg text-center
-    ${highlight && !supported ? 'bg-red-500/20 ring-1 ring-red-500/50' : 'bg-white/5'}
+    flex flex-col items-center gap-1 p-2 rounded-control text-center
+    ${highlight && !supported ? 'bg-state-error/15 ring-1 ring-state-error/40' : 'bg-surface-2'}
   `}>
     {supported ? (
-      <CheckCircle className="w-4 h-4 text-green-400" />
+      <CheckCircle className="w-icon-sm h-icon-sm text-state-success" />
     ) : (
-      <XCircle className={`w-4 h-4 ${highlight ? 'text-red-400' : 'text-gray-500'}`} />
+      <XCircle className={`w-icon-sm h-icon-sm ${highlight ? 'text-state-error' : 'text-content-disabled'}`} />
     )}
     <span className={`text-xs font-medium ${
-      supported ? 'text-green-300' : highlight ? 'text-red-300' : 'text-gray-400'
+      supported ? 'text-state-success' : highlight ? 'text-state-error' : 'text-content-muted'
     }`}>
       {name}
     </span>
