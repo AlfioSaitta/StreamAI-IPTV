@@ -79,7 +79,7 @@ const ChannelItem = React.memo(({
             }}
             className={`
                 tv-focus flex-none relative rounded-md overflow-hidden bg-[#202020] shadow-lg transition-transform duration-300 group/card outline-none
-                ${isPoster ? 'w-[150px] md:w-[180px] aspect-[2/3]' : 'w-[240px] md:w-[300px] aspect-[16/9]'}
+                ${isPoster ? 'w-[150px] md:w-[180px] aspect-[2/3]' : 'w-[140px] md:w-[160px] aspect-square'}
             `}
             tabIndex={0}
         >
@@ -110,10 +110,14 @@ const ChannelItem = React.memo(({
             )}
 
             {channel.logo ? (
-                <CachedImage 
-                    src={channel.logo} 
-                    alt={channel.name} 
-                    className="w-full h-full object-cover transition-transform duration-500 group-hover/card:scale-110" 
+                <CachedImage
+                    src={channel.logo}
+                    alt={channel.name}
+                    className={`w-full h-full transition-transform duration-500 group-hover/card:scale-110 ${
+                        // Live: logo quasi sempre quadrato con bg trasparente → contain + padding;
+                        // Movies/Series: poster portrait pieno → cover.
+                        isPoster ? 'object-cover' : 'object-contain p-3 bg-surface-1'
+                    }`}
                 />
             ) : (
                 <div className="w-full h-full flex items-center justify-center text-gray-600 font-bold p-2 text-center text-sm">
@@ -172,7 +176,7 @@ const ContentRow = React.memo(({ title, channels, onSelect, isPoster, progressMa
 
     const pagedChannels = channels.slice(0, itemLimit);
     const hasMoreItems = itemLimit < channels.length;
-    const itemExtent = isPoster ? 196 : 316;
+    const itemExtent = isPoster ? 196 : 176;
     const shouldVirtualize = pagedChannels.length > HORIZONTAL_VIRTUALIZATION_THRESHOLD;
     const startIndex = shouldVirtualize ? Math.max(0, Math.floor(scrollState.scrollLeft / itemExtent) - HORIZONTAL_OVERSCAN) : 0;
     const endIndex = shouldVirtualize
@@ -217,7 +221,7 @@ const ContentRow = React.memo(({ title, channels, onSelect, isPoster, progressMa
                     {hasMoreItems && (
                         <button
                             onClick={() => setItemLimit(prev => Math.min(prev + ROW_ITEM_INCREMENT, channels.length))}
-                            className={`tv-focus touch-target flex-none rounded-md border border-white/10 bg-white/5 px-6 text-left text-gray-200 hover:bg-white/10 ${isPoster ? 'w-[150px] md:w-[180px] aspect-[2/3]' : 'w-[240px] md:w-[300px] aspect-[16/9]'}`}
+                            className={`tv-focus touch-target flex-none rounded-md border border-white/10 bg-white/5 px-6 text-left text-gray-200 hover:bg-white/10 ${isPoster ? 'w-[150px] md:w-[180px] aspect-[2/3]' : 'w-[140px] md:w-[160px] aspect-square'}`}
                         >
                             <span className="block text-lg font-bold">Mostra altri</span>
                             <span className="mt-2 block text-sm text-gray-400">{Math.min(ROW_ITEM_INCREMENT, channels.length - itemLimit)} contenuti</span>
@@ -723,7 +727,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
                   title={t.myList}
                   channels={watchlistChannels}
                   onSelect={onSelectChannel}
-                  isPoster={activeTab === 'movie' || (activeTab === 'home' && watchlistChannels.some(ch => ch.type === 'movie'))}
+                  isPoster={activeTab === 'movie' || activeTab === 'series' || (activeTab === 'home' && watchlistChannels.some(ch => ch.type !== 'live'))}
                   progressMap={progressMap}
                   watchlistSet={watchlistSet}
                   onToggleWatchlist={(c) => onToggleWatchlist(c.id)}
@@ -736,7 +740,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
                   title={t.continueWatching}
                   channels={continueWatching}
                   onSelect={onSelectChannel}
-                  isPoster={activeTab === 'movie' || (activeTab === 'home' && continueWatching.some(ch => ch.type === 'movie'))}
+                  isPoster={activeTab === 'movie' || activeTab === 'series' || (activeTab === 'home' && continueWatching.some(ch => ch.type !== 'live'))}
                   progressMap={progressMap}
                   watchlistSet={watchlistSet}
                   onToggleWatchlist={(c) => onToggleWatchlist(c.id)}
@@ -746,15 +750,17 @@ const ChannelList: React.FC<ChannelListProps> = ({
 
           {displayedCategories.length > 0 ? (
               displayedCategories.map((cat) => {
-                  // Verifica se la categoria contiene film (per usare poster style)
-                  const hasMovies = cat.channels.some(ch => ch.type === 'movie');
+                  // Decide la forma della cover per la riga:
+                  //  - "portrait" (2:3) se la categoria contiene movies o series;
+                  //  - "square" (1:1) per i canali LIVE (logo quasi sempre quadrato/rettangolare).
+                  const hasPortraitContent = cat.channels.some(ch => ch.type === 'movie' || ch.type === 'series');
                   return (
                       <ContentRow
                         key={cat.name}
                         title={cat.name}
                         channels={cat.channels}
                         onSelect={onSelectChannel}
-                        isPoster={activeTab === 'movie' || (activeTab === 'home' && hasMovies)}
+                        isPoster={activeTab === 'movie' || activeTab === 'series' || (activeTab === 'home' && hasPortraitContent)}
                         progressMap={progressMap}
                         watchlistSet={watchlistSet}
                         onToggleWatchlist={(c) => onToggleWatchlist(c.id)}
