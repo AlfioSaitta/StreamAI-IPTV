@@ -5,19 +5,19 @@
 > Questo V2 raccoglie nuove proposte emerse da un'analisi statica del codice attuale
 > (14.104 LOC, focus su file > 700 righe) e dalla revisione delle feature di mercato.
 >
-> **Ultimo aggiornamento:** 2026-05-13
+> **Ultimo aggiornamento:** 2026-05-14
 > **Baseline reale (da package.json):** React **19.2** (aggiornato da 18.2 in
 > B.5, 2026-05-13), Vite 5, Electron 37, Capacitor 7, Video.js 8.23,
 > hls.js 1.5, mpegts.js 1.7, `@google/genai` 1.34.
 
 ---
 
-## 📊 Stato di completamento globale (2026-05-13)
+## 📊 Stato di completamento globale (2026-05-14)
 
 | Macro-area | Stato | Note |
 | ---------- | ----- | ---- |
 | 🚨 URG-1 Seek VOD bloccante | ✅ 3/4 livelli | L4 Range proxy opzionale |
-| 🎨 UI-1 Design System v1 | ✅ ~95% | Token + shared ok, 9/10 migrazioni file completate, **0 occorrenze red/purple** |
+| 🎨 UI-1 Design System v1 | ✅ 100% | DS v1 + migrazione + UI-1.4 accessibilità completati, **0 occorrenze red/purple** |
 | B.1 Refactor VideoPlayerNew | ✅ | 1542 → 973 righe |
 | B.2 Decomposizione streamInfoService | ✅ | 2018 → 1313 righe |
 | B.3 i18n lazy | ✅ | 11 chunk per-lingua |
@@ -755,18 +755,32 @@ B. **Brand = viola/indigo.** ❌ Scartata.
 
 ### UI-1.4 Accessibilità trasversale
 
-Già listate parzialmente in C.6, qui le ripeto perché si applicano nel
-contesto migrazione DS:
+> **Stato 2026-05-14:** completata. I quattro punti aperti dell'audit di
+> accessibilità sono stati chiusi insieme al lock-in via test contract
+> (`tests/ui/tokens.test.ts` ora 53 test, `tests/ui/shared.test.tsx` 19).
 
-- [ ] `aria-label` obbligatorio sui pulsanti icona-only del DS (forzato
-  via prop type in `IconButton`).
-- [ ] Contrasto WCAG AA (4.5:1) verificato sui token: il problema più
-  serio oggi è `text-gray-500` su `bg-white/5` (≈ 3.7:1 — fallisce AA).
-  Spostare le caption su `text-muted` (gray-400).
-- [ ] `prefers-reduced-motion`: disabilitare `scale-105` di `tv-focus`
-  e `animate-pulse` quando l'utente lo richiede.
-- [ ] Focus ring sempre **outside** il bordo elemento (`outline-offset`)
-  per evitare di mangiare contenuto in liste dense.
+- [x] `aria-label` obbligatorio sui pulsanti icona-only del DS (forzato
+  via prop type in `IconButton` con `Omit + redichiarazione required`) +
+  warning runtime in dev se la prop è vuota o whitespace-only. Test
+  dedicato in `tests/ui/shared.test.tsx`.
+- [x] Contrasto WCAG AA verificato sui token testo: `--text-primary`,
+  `--text-secondary`, `--text-muted` e `--text-disabled` (bumpato da
+  `#6b7280` gray-500 → `#94a3b8` slate-400) ora superano 4.5:1 su
+  `surface-0` (#141414). Verifica automatica nel test contract via
+  calcolo `relativeLuminance` / `contrastRatio`. Caption e descrizioni
+  devono usare sempre `text-content-muted`; `text-content-disabled`
+  resta riservato ai controlli effettivamente in stato `:disabled`.
+- [x] `prefers-reduced-motion`: blocco `@media (prefers-reduced-motion:
+  reduce)` esteso per disabilitare `scale-105` di `tv-focus`, tutte le
+  animazioni applicative (`animate-fade-in`, `animate-slide-up`,
+  `animate-pulse`, `animate-ping`, `.skeleton`) e azzerare
+  `transition-duration`/`animation-duration` globali via reset
+  `*, *::before, *::after`. Test contract presente.
+- [x] Focus ring sempre **outside** il bordo elemento: sia `.tv-focus`
+  sia `.tv-focus-dense` ora usano `outline: 2px solid
+  var(--color-brand-primary)` + `outline-offset: 3px / 2px` invece del
+  `ring-4 ring-red-500` precedente (che si sovrapponeva al contenuto
+  delle liste dense). Il glow brand resta come `box-shadow` decorativo.
 
 ### UI-1.5 Test e regressione
 

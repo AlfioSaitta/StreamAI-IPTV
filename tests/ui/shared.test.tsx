@@ -59,6 +59,14 @@ describe('IconButton', () => {
     render(<IconButton icon={Play} aria-label="Play stream" />);
     expect(screen.getByRole('button', { name: 'Play stream' })).toBeTruthy();
   });
+
+  it('warns in dev when aria-label is empty (UI-1.4)', () => {
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    // Whitespace-only label passes the type system but trips the runtime guard.
+    render(<IconButton icon={Play} aria-label="   " />);
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
 });
 
 describe('Input', () => {

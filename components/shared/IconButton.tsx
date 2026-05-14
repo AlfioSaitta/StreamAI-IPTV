@@ -56,6 +56,20 @@ const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconB
   const sz = SIZE_CLASSES[size];
   const focusClass = focusVariant === 'dense' ? 'tv-focus-dense' : 'tv-focus';
 
+  // UI-1.4 — accessibilità: avviso in development se l'aria-label è vuoto
+  // o composto solo da whitespace. Il tipo statico già richiede la prop,
+  // ma con `aria-label=""` un consumatore potrebbe aggirare la regola.
+  if (
+    process.env.NODE_ENV !== 'production' &&
+    (!rest['aria-label'] || !String(rest['aria-label']).trim())
+  ) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      '[IconButton] aria-label è obbligatorio e non può essere vuoto: ',
+      Icon?.displayName ?? 'icon',
+    );
+  }
+
   return (
     <button
       ref={ref}

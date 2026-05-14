@@ -74,11 +74,16 @@
   --state-success: #34d399;   /* emerald-400 */
   --state-info: #60a5fa;      /* blue-400 */
 
-  /* Testo — ruoli espliciti */
-  --text-primary: #f3f4f6;     /* gray-100 */
-  --text-secondary: #d1d5db;   /* gray-300 */
-  --text-muted: #9ca3af;       /* gray-400 */
-  --text-disabled: #6b7280;    /* gray-500 */
+  /* Testo — ruoli espliciti.
+     UI-1.4 accessibilità: i tre toni "leggibili" (primary/secondary/muted)
+     superano WCAG AA (4.5:1) anche su `surface-2` (white 8% su #141414).
+     `--text-disabled` è riservato a controlli in stato `disabled` (WCAG
+     esclude i controlli inattivi dal requisito di contrasto). Per
+     caption/descrizioni usare SEMPRE `text-content-muted`. */
+  --text-primary: #f3f4f6;     /* gray-100 — body text */
+  --text-secondary: #d1d5db;   /* gray-300 — sotto-titoli */
+  --text-muted: #9ca3af;       /* gray-400 — captions, helper text */
+  --text-disabled: #94a3b8;    /* slate-400 — controlli :disabled (cool gray, passa AA su surface-2) */
 
   /* Focus ring (riferito dalla classe .tv-focus) */
   --focus-ring: 0 0 0 2px rgba(255, 255, 255, 0.9),
@@ -111,7 +116,11 @@ body {
 }
 
 @layer utilities {
-  /* TV Focus: High visibility ring and scale */
+  /* TV Focus: high-visibility ring + scale.
+     UI-1.4: il focus ring è realizzato con `outline` + `outline-offset`
+     in modo che resti SEMPRE all'esterno del bordo elemento, senza
+     mangiare contenuto nelle liste dense. La box-shadow `--focus-ring`
+     aggiunge il glow morbido coerente con il brand. */
   .tv-focus {
     @apply transition-all duration-300 outline-none cursor-pointer min-h-[44px];
     -webkit-tap-highlight-color: transparent;
@@ -120,28 +129,52 @@ body {
   /* Only apply heavy focus styles when element is actually focused */
   .tv-focus:focus-visible,
   .tv-focus:focus {
-    @apply scale-105 ring-4 ring-red-500 z-20;
+    @apply scale-105 z-20;
+    outline: 2px solid var(--color-brand-primary);
+    outline-offset: 3px;
     box-shadow: var(--focus-ring);
   }
 
-  /* Variante "dense": niente scale, solo ring — per liste fitte (channels,
-     command palette, EPG rows) dove lo scale-105 fa traboccare gli item. */
+  /* Variante "dense": niente scale, solo outline — per liste fitte
+     (channels, command palette, EPG rows) dove lo scale-105 fa traboccare
+     gli item. UI-1.4: stesso pattern outline-offset per coerenza. */
   .tv-focus-dense {
     @apply transition-colors duration-200 outline-none cursor-pointer min-h-[44px];
     -webkit-tap-highlight-color: transparent;
   }
   .tv-focus-dense:focus-visible,
   .tv-focus-dense:focus {
-    @apply ring-2 ring-red-500 z-10;
+    @apply z-10;
     outline: 2px solid var(--color-brand-primary);
     outline-offset: 2px;
   }
 
-  /* Rispetto preferenze utente: niente scale né animazioni pesanti. */
+  /* Rispetto preferenze utente (UI-1.4): niente scale né animazioni
+     pesanti quando l'utente ha attivato `prefers-reduced-motion: reduce`. */
   @media (prefers-reduced-motion: reduce) {
+    .tv-focus,
+    .tv-focus-dense {
+      transition: none;
+    }
     .tv-focus:focus-visible,
     .tv-focus:focus {
       @apply scale-100;
+    }
+    .animate-fade-in,
+    .animate-slide-up,
+    .animate-pulse,
+    .animate-ping,
+    .skeleton {
+      animation: none !important;
+    }
+    /* Annulla anche le animazioni inline `transition-all` / `transition-*`. */
+    *,
+    *::before,
+    *::after {
+      transition-duration: 0.001ms !important;
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      scroll-behavior: auto !important;
     }
   }
 
