@@ -42,6 +42,20 @@ export interface XtreamCredentials {
   password: string;
 }
 
+/**
+ * Server Xtream salvato dentro un profilo. Estende le credenziali con un
+ * id stabile e un nome amichevole, così l'utente può gestirne più di uno
+ * per profilo (es. "Provider primario", "Backup"). Introdotto 2026-05-14.
+ */
+export interface XtreamServer extends XtreamCredentials {
+  /** UUID stabile. */
+  id: string;
+  /** Nome scelto dall'utente (fallback all'host dell'url). */
+  name: string;
+  /** Timestamp di creazione. */
+  createdAt?: number;
+}
+
 export interface XtreamContent {
   live: Category[];
   vod: Category[];
@@ -136,7 +150,20 @@ export interface Profile {
    * quel caso il render fa fallback a `DEFAULT_AVATAR_ID`.
    */
   avatar?: string;
+  /**
+   * Credenziali del server attivo. Mantenute per retro-compatibilità con
+   * le installazioni single-server pre-2026-05-14. Quando l'utente apre
+   * il gestore server e ne ha già almeno uno in `servers`, questo campo
+   * specchia sempre le credenziali del server attivo.
+   */
   xtreamCreds: XtreamCredentials | null;
+  /**
+   * Elenco dei server Xtream associati al profilo (multi-server, 2026-05-14).
+   * Vuoto/undefined per profili nuovi senza connessione configurata.
+   */
+  servers?: XtreamServer[];
+  /** ID del server attivo (deve esistere in `servers`). */
+  activeServerId?: string;
   history: WatchHistoryItem[];
   watchlist: string[];
   preferences?: ProfilePreferences;

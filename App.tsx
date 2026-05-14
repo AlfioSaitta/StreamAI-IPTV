@@ -14,6 +14,10 @@ import CommandPalette from './components/CommandPalette.tsx';
 const VideoPlayer = lazy(() => import('./components/VideoPlayerNew.tsx'));
 const AIRecommender = lazy(() => import('./components/AIRecommender.tsx'));
 const XtreamLogin = lazy(() => import('./components/XtreamLogin.tsx'));
+const ServerManager = lazy(() => import('./components/ServerManager.tsx'));
+// XtreamLogin resta importato lazy come fallback per workflow legacy/tests:
+// l'attuale UI passa sempre da ServerManager.
+void XtreamLogin;
 const SeriesDetail = lazy(() => import('./components/SeriesDetail.tsx'));
 const MovieDetail = lazy(() => import('./components/MovieDetail.tsx'));
 const ProfileSettings = lazy(() => import('./components/ProfileSettings.tsx'));
@@ -824,11 +828,14 @@ function App() {
             />
         )}
 
-        {showXtreamModal && (
+        {showXtreamModal && activeProfile && (
           <Suspense fallback={null}>
-            <XtreamLogin
-                onLogin={(creds) => handleXtreamLogin(creds, true)}
-                onClose={() => setShowXtreamModal(false)}
+            <ServerManager
+              profile={activeProfile}
+              open={showXtreamModal}
+              onClose={() => setShowXtreamModal(false)}
+              onConnect={(creds) => handleXtreamLogin(creds, true)}
+              onProfileChange={(p) => setActiveProfile(p)}
             />
           </Suspense>
         )}
