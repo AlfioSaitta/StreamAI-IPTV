@@ -304,6 +304,12 @@ const ChannelList: React.FC<ChannelListProps> = ({
       // Per la Home usa tutti i canali, altrimenti usa solo quelli della categoria corrente
       const channelsToUse = activeTab === 'home' ? indexedAllChannels : indexedBaseCategories.flatMap(c => c.channels);
       const channelById = new Map(channelsToUse.map(channel => [channel.id, channel]));
+      // Indice ausiliario sulle SERIE: per i record `type: 'series'` la history
+      // memorizza l'ID del singolo episodio, ma in "Continua a guardare" vogliamo
+      // mostrare la SERIE (così cliccandola si torna alla pagina della serie).
+      const seriesById = new Map(
+          indexedSeriesCategories.flatMap(c => c.channels).map(s => [s.id, s])
+      );
       const seen = new Set<string>();
 
       return history
@@ -315,6 +321,14 @@ const ChannelList: React.FC<ChannelListProps> = ({
               return h.type === activeTab;
           })
           .map(h => {
+              // Episodio di serie: prova prima a risolvere il wrapper serie
+              // tramite `parentSeriesId` (impostato da App.handleEpisodePlay).
+              if (h.type === 'series' && h.parentSeriesId) {
+                  const series = seriesById.get(h.parentSeriesId);
+                  if (series) {
+                      return { channel: series, timestamp: h.timestamp, progress: h.progress };
+                  }
+              }
               const channel = channelById.get(h.channelId);
               if (channel) {
                   return { channel, timestamp: h.timestamp, progress: h.progress };
@@ -329,7 +343,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
           })
           .sort((a, b) => b.timestamp - a.timestamp)
           .map(item => item.channel);
-  }, [indexedBaseCategories, history, activeTab, indexedAllChannels, continueWatchingCompletedThreshold]);
+  }, [indexedBaseCategories, history, activeTab, indexedAllChannels, indexedSeriesCategories, continueWatchingCompletedThreshold]);
 
   const watchlistSet = useMemo(() => new Set(watchlistIds), [watchlistIds]);
 
@@ -569,7 +583,16 @@ const ChannelList: React.FC<ChannelListProps> = ({
                  {(['home', 'live', 'movie', 'series'] as StreamType[]).map(tab => (
                      <button
                         key={tab}
-                        onClick={() => { setActiveTab(tab); window.scrollTo({top:0, behavior:'smooth'}); setVisibleRows(INITIAL_VISIBLE_ROWS); }}
+                        onClick={() => {
+                            setActiveTab(tab);
+                            // Reset campo ricerca: altrimenti un termine digitato in un
+                            // tab si "porta dietro" e nasconde tutti i contenuti del tab
+                            // successivo (es. cercando "rai" su Live e poi cliccando
+                            // FILM la pagina sembra vuota).
+                            setSearchTerm('');
+                            window.scrollTo({top:0, behavior:'smooth'});
+                            setVisibleRows(INITIAL_VISIBLE_ROWS);
+                        }}
                         className={`tv-focus-dense px-3 py-1.5 rounded-control transition-colors outline-none ${activeTab === tab ? 'bg-surface-2 text-content-primary font-semibold' : 'hover:text-content-primary hover:bg-surface-1'}`}
                         tabIndex={0}
                      >

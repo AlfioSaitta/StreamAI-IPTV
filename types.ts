@@ -113,6 +113,14 @@ export interface WatchHistoryItem {
   type: StreamType;
   progress?: number; // 0.0 to 1.0 representing percentage watched
   duration?: number; // Saved duration in seconds
+  /**
+   * Per gli episodi di una serie TV, ID del "wrapper" serie corrispondente
+   * (formato `series-{series_id}`) presente in `seriesCategories`. Permette
+   * a "Continua a guardare" di tornare alla pagina della serie invece di
+   * cercare lo stream del singolo episodio (che non è indicizzato nelle
+   * liste `seriesCategories`).
+   */
+  parentSeriesId?: string;
 }
 
 export interface ProfilePreferences {

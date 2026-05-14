@@ -548,7 +548,12 @@ function App() {
           ProfileService.addToHistory(activeProfile.id, {
                channelId: episodeChannel.id,
                name: `${selectedSeries?.name || ''} - ${episodeChannel.name}`,
-               type: 'series'
+               type: 'series',
+               // `selectedSeries.id` ha il formato `series-{series_id}` ed è
+               // l'ID che esiste nelle liste `seriesCategories` indicizzate da
+               // ChannelList; serve a "Continua a guardare" per riassociare
+               // l'episodio alla sua serie e mostrarla nella riga.
+               parentSeriesId: selectedSeries?.id,
            });
            setActiveProfile(prev => prev ? ({...prev, history: ProfileService.getHistory(prev.id)}) : null);
       }
