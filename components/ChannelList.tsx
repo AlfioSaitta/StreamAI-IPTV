@@ -436,24 +436,31 @@ const ChannelList: React.FC<ChannelListProps> = ({
       ? [...indexedVodCategories.flatMap(c => c.channels), ...indexedSeriesCategories.flatMap(c => c.channels)]
       : indexedBaseCategories.flatMap(c => c.channels);
 
-    if (sourceChannels.length > 0) {
-      // Filtra per contenuti con immagine e preferibilmente con descrizione/rating
-      const qualityItems = sourceChannels.filter(c =>
-        c.logo && (c.description || c.rating)
-      );
+    if (sourceChannels.length === 0) {
+      // Reset esplicito: evita di mostrare un hero "fantasma" del tab
+      // precedente quando la sezione corrente non ha ancora contenuti.
+      setFeaturedItem(null);
+      return;
+    }
 
-      // Ordina per rating (decrescente) e prendi i migliori
-      const topItems = qualityItems.length > 0
-        ? [...qualityItems].sort((a, b) => (Number(b.rating) || 0) - (Number(a.rating) || 0)).slice(0, 10)
-        : sourceChannels.filter(c => c.logo).slice(0, 10);
+    // Filtra per contenuti con immagine e preferibilmente con descrizione/rating
+    const qualityItems = sourceChannels.filter(c =>
+      c.logo && (c.description || c.rating)
+    );
 
-      if (topItems.length > 0) {
-        // Seleziona random tra i top 10
-        const random = topItems[Math.floor(Math.random() * topItems.length)];
-        setFeaturedItem(random);
-      } else if (sourceChannels[0]) {
-        setFeaturedItem(sourceChannels[0]);
-      }
+    // Ordina per rating (decrescente) e prendi i migliori
+    const topItems = qualityItems.length > 0
+      ? [...qualityItems].sort((a, b) => (Number(b.rating) || 0) - (Number(a.rating) || 0)).slice(0, 10)
+      : sourceChannels.filter(c => c.logo).slice(0, 10);
+
+    if (topItems.length > 0) {
+      // Seleziona random tra i top 10
+      const random = topItems[Math.floor(Math.random() * topItems.length)];
+      setFeaturedItem(random);
+    } else if (sourceChannels[0]) {
+      setFeaturedItem(sourceChannels[0]);
+    } else {
+      setFeaturedItem(null);
     }
   }, [indexedBaseCategories, activeTab, indexedVodCategories, indexedSeriesCategories]);
 
@@ -726,12 +733,14 @@ const ChannelList: React.FC<ChannelListProps> = ({
 
       {/* --- CONTENT ROWS (VIRTUALIZED) --- */}
       <div className={`relative z-20 px-4 md:px-12 space-y-10 ${!searchTerm && featuredItem ? '-mt-32' : 'mt-28'}`}>
-          {!searchTerm && watchlistChannels.length > 0 && (
-              <ContentRow 
-                  title={t.myList}
-                  channels={watchlistChannels}
+          {/* 1. Continua a guardare — sempre per primo: l'utente vede subito
+                cosa stava guardando e può riprendere con un solo click. */}
+          {!searchTerm && continueWatching.length > 0 && (
+              <ContentRow
+                  title={t.continueWatching}
+                  channels={continueWatching}
                   onSelect={onSelectChannel}
-                  isPoster={activeTab === 'movie' || activeTab === 'series' || (activeTab === 'home' && watchlistChannels.some(ch => ch.type !== 'live'))}
+                  isPoster={activeTab === 'movie' || activeTab === 'series' || (activeTab === 'home' && continueWatching.some(ch => ch.type !== 'live'))}
                   progressMap={progressMap}
                   watchlistSet={watchlistSet}
                   onToggleWatchlist={(c) => onToggleWatchlist(c.id)}
@@ -739,12 +748,14 @@ const ChannelList: React.FC<ChannelListProps> = ({
               />
           )}
 
-          {!searchTerm && continueWatching.length > 0 && (
-              <ContentRow 
-                  title={t.continueWatching}
-                  channels={continueWatching}
+          {/* 2. Preferiti — subito sotto "Continua a guardare", in modo che
+                l'utente trovi a colpo d'occhio i prossimi titoli messi in lista. */}
+          {!searchTerm && watchlistChannels.length > 0 && (
+              <ContentRow
+                  title={t.myList}
+                  channels={watchlistChannels}
                   onSelect={onSelectChannel}
-                  isPoster={activeTab === 'movie' || activeTab === 'series' || (activeTab === 'home' && continueWatching.some(ch => ch.type !== 'live'))}
+                  isPoster={activeTab === 'movie' || activeTab === 'series' || (activeTab === 'home' && watchlistChannels.some(ch => ch.type !== 'live'))}
                   progressMap={progressMap}
                   watchlistSet={watchlistSet}
                   onToggleWatchlist={(c) => onToggleWatchlist(c.id)}
