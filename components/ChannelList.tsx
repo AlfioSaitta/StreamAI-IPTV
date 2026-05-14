@@ -5,6 +5,7 @@ import { Search, Play, Info, ChevronRight, LogOut, Clock, RefreshCw, BookmarkPlu
 import CachedImage from './CachedImage.tsx';
 import { useLanguage } from '../contexts/LanguageContext.tsx';
 import EmptyState from './shared/EmptyState.tsx';
+import { Button } from './shared';
 import { useInitialTvFocus, useTvSpatialNavigation } from '../hooks/useTvFocus.ts';
 import { DownloadManager } from '../services/downloadManager.ts';
 import { IndexedChannel, indexCategories, indexChannels, searchIndexedChannels } from '../services/catalogIndex.ts';
@@ -542,14 +543,19 @@ const ChannelList: React.FC<ChannelListProps> = ({
       {/* --- NAVBAR --- */}
       <nav className={`fixed top-0 w-full z-50 transition-all duration-500 px-4 md:px-12 py-3 flex items-center justify-between ${scrolled ? 'bg-[var(--bg-primary)] shadow-xl' : 'bg-gradient-to-b from-black/90 via-black/50 to-transparent'}`}>
          <div className="flex items-center gap-8">
-             <h1 className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-red-600 to-red-500 tracking-tighter cursor-pointer drop-shadow-sm" onClick={() => {window.scrollTo({top:0, behavior:'smooth'})}}>STREAMAI</h1>
-             
-             <div className="hidden md:flex gap-4 text-sm font-medium text-gray-300">
+             <h1
+                className="text-2xl md:text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-brand-primary to-brand-primary-hover tracking-tight cursor-pointer drop-shadow-sm select-none"
+                onClick={() => { window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+              >
+                Stream<span className="text-content-primary">AI</span>
+              </h1>
+
+             <div className="hidden md:flex gap-1 text-sm font-medium text-content-secondary">
                  {(['home', 'live', 'movie', 'series'] as StreamType[]).map(tab => (
                      <button
                         key={tab}
                         onClick={() => { setActiveTab(tab); window.scrollTo({top:0, behavior:'smooth'}); setVisibleRows(INITIAL_VISIBLE_ROWS); }}
-                        className={`tv-focus touch-target px-4 py-2 rounded-md transition-all outline-none ${activeTab === tab ? 'bg-white/10 text-white font-bold' : 'hover:text-white hover:bg-white/5'}`}
+                        className={`tv-focus-dense px-3 py-1.5 rounded-control transition-colors outline-none ${activeTab === tab ? 'bg-surface-2 text-content-primary font-semibold' : 'hover:text-content-primary hover:bg-surface-1'}`}
                         tabIndex={0}
                      >
                          {tab === 'home' ? t.home : tab === 'live' ? t.live : tab === 'movie' ? t.movies : t.series}
@@ -565,38 +571,53 @@ const ChannelList: React.FC<ChannelListProps> = ({
                  <span>{currentTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
              </div>
 
-             <div className={`flex items-center gap-2 bg-surface-1 border border-DEFAULT rounded-full px-4 py-2 transition-all duration-300 ${searchTerm ? 'w-72 bg-surface-2 ring-2 ring-brand-primary/50 border-brand-primary/50' : 'w-48 hover:w-56 hover:bg-surface-2'}`}>
-                 <Search className="w-5 h-5 text-gray-400 flex-shrink-0" />
+             <div
+                className={`flex items-center gap-2 bg-surface-1 border border-DEFAULT rounded-full px-4 py-2 transition-[width,background-color] duration-300 ${
+                  searchTerm ? 'w-72 bg-surface-2' : 'w-48 hover:w-56 hover:bg-surface-2'
+                }`}
+              >
+                 <Search className="w-icon-sm h-icon-sm text-content-muted flex-shrink-0" aria-hidden="true" />
                  <input
-                    type="text" 
+                    type="text"
                     placeholder={t.search + '...'}
-                    className="tv-focus bg-transparent text-sm text-white placeholder-gray-400 outline-none w-full"
+                    className="bg-transparent text-sm text-content-primary placeholder-content-muted outline-none focus:outline-none focus:ring-0 border-0 w-full caret-brand-primary"
                     value={searchTerm}
                     onChange={e => setSearchTerm(e.target.value)}
                     tabIndex={0}
+                    aria-label={t.search}
                  />
                  {searchTerm && (
                     <button
                       onClick={() => setSearchTerm('')}
-                       className="tv-focus touch-target text-gray-400 hover:text-white transition-colors rounded-full"
+                      className="text-content-muted hover:text-content-primary transition-colors rounded-full p-1 outline-none focus-visible:text-content-primary"
+                      aria-label="Pulisci ricerca"
                     >
-                      <X className="w-4 h-4" />
+                      <X className="w-icon-sm h-icon-sm" aria-hidden="true" />
                     </button>
                  )}
              </div>
              
-              <button onClick={onOpenServer} className="hidden md:block tv-focus touch-target text-xs font-bold border border-white/30 px-3 py-1.5 rounded hover:bg-white/10 tracking-wide uppercase outline-none" tabIndex={0}>SERVER</button>
+              <Button
+                onClick={onOpenServer}
+                variant="secondary"
+                size="sm"
+                leftIcon={Server}
+                className="hidden md:inline-flex !text-xs uppercase tracking-wider"
+              >
+                Server
+              </Button>
 
               {activeTab === 'live' && onOpenGuide && (
-                <button
+                <Button
                   onClick={onOpenGuide}
+                  variant="secondary"
+                  size="sm"
+                  leftIcon={Calendar}
                   title="Apri Guida TV (G)"
-                  aria-label="Apri Guida TV"
-                  className="tv-focus touch-target inline-flex items-center gap-1.5 text-xs font-bold border border-white/30 px-3 py-1.5 rounded hover:bg-white/10 tracking-wide uppercase outline-none"
-                  tabIndex={0}
+                  className="!text-xs uppercase tracking-wider"
                 >
-                  <Calendar className="w-3.5 h-3.5" /> EPG
-                </button>
+                  EPG
+                </Button>
               )}
 
              <div className="group relative flex items-center gap-2 cursor-pointer z-50">
@@ -654,17 +675,17 @@ const ChannelList: React.FC<ChannelListProps> = ({
                       {featuredItem.description || "Contenuto in evidenza scelti per te."}
                   </p>
                   
-                  <div className="flex items-center gap-4">
-                      <button 
+                  <div className="flex items-center gap-3">
+                      <button
                         onClick={() => onSelectChannel(featuredItem)}
-                        className="tv-focus flex items-center gap-3 bg-white text-black px-8 py-3.5 rounded font-bold text-xl hover:bg-gray-200 transition-colors shadow-[0_0_20px_rgba(255,255,255,0.2)] outline-none focus:ring-4 focus:ring-red-600"
+                        className="tv-focus inline-flex items-center gap-2 bg-white text-black px-5 py-2.5 rounded-control font-semibold text-sm md:text-base hover:bg-gray-200 transition-colors shadow-elev-2 outline-none"
                         tabIndex={0}
                         data-initial-focus="true"
                       >
-                          <Play className="w-6 h-6 fill-black" /> Riproduci
+                          <Play className="w-icon-sm h-icon-sm fill-black" /> Riproduci
                       </button>
-                      <button 
-                        className="tv-focus flex items-center gap-3 bg-gray-600/60 text-white px-8 py-3.5 rounded font-bold text-xl hover:bg-gray-600/80 backdrop-blur border border-white/10 transition-colors outline-none focus:ring-4 focus:ring-white" 
+                      <button
+                        className="tv-focus inline-flex items-center gap-2 bg-surface-2 text-content-primary px-5 py-2.5 rounded-control font-semibold text-sm md:text-base hover:bg-surface-3 backdrop-blur border border-DEFAULT transition-colors outline-none"
                         tabIndex={0}
                         onClick={() => {
                             if (featuredItem.type === 'movie') {
@@ -674,7 +695,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
                             }
                         }}
                       >
-                          <Info className="w-6 h-6" /> Altre Info
+                          <Info className="w-icon-sm h-icon-sm" /> Altre Info
                       </button>
                   </div>
               </div>
