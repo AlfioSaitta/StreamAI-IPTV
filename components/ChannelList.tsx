@@ -338,12 +338,16 @@ const ChannelList: React.FC<ChannelListProps> = ({
       return watchlistIds
         .map(id => indexedAllChannels.find(c => c.id === id))
         .filter((c): c is IndexedChannel => Boolean(c))
+        // Nelle tab dedicate (live/movie/series) la lista "Preferiti" deve
+        // mostrare SOLO i contenuti di quel tipo. Nella Home si mostrano
+        // tutti i preferiti in mix.
+        .filter(channel => activeTab === 'home' || channel.type === activeTab)
         .filter(channel => {
             if (seen.has(channel.id)) return false;
             seen.add(channel.id);
             return true;
         });
-  }, [watchlistIds, indexedAllChannels]);
+  }, [watchlistIds, indexedAllChannels, activeTab]);
 
   // Home page categories - mix di contenuti ottimizzato
   const homeCategories = useMemo(() => {
