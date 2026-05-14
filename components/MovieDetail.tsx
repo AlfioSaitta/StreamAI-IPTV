@@ -180,8 +180,8 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
             aria-label="Chiudi modale"
             variant="secondary"
             size="md"
+            shape="circle"
             onClick={onClose}
-            className="!rounded-full"
           />
         </div>
 

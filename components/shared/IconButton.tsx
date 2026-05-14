@@ -10,6 +10,7 @@ import { LucideIcon } from 'lucide-react';
 
 export type IconButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'accent';
 export type IconButtonSize = 'sm' | 'md' | 'lg';
+export type IconButtonShape = 'square' | 'circle';
 
 export interface IconButtonProps
   extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'aria-label'> {
@@ -18,6 +19,8 @@ export interface IconButtonProps
   'aria-label': string;
   variant?: IconButtonVariant;
   size?: IconButtonSize;
+  /** Forma: quadrato (default, `rounded-control`) o cerchio (`rounded-full`). */
+  shape?: IconButtonShape;
   focusVariant?: 'normal' | 'dense';
 }
 
@@ -34,9 +37,11 @@ const VARIANT_CLASSES: Record<IconButtonVariant, string> = {
     'bg-brand-accent hover:bg-brand-accent-hover text-white shadow-elev-2',
 };
 
+// Box e icone scelte per dare lo stesso "peso visivo" del cerchio: l'icona
+// occupa ~55% del riquadro così non sembra mai persa al centro. UI-1.4 ⤴.
 const SIZE_CLASSES: Record<IconButtonSize, { box: string; icon: string }> = {
   sm: { box: 'w-9 h-9', icon: 'w-icon-sm h-icon-sm' },
-  md: { box: 'w-11 h-11', icon: 'w-icon-md h-icon-md' },
+  md: { box: 'w-10 h-10', icon: 'w-icon-md h-icon-md' },
   lg: { box: 'w-12 h-12', icon: 'w-icon-lg h-icon-lg' },
 };
 
@@ -45,6 +50,7 @@ const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconB
     icon: Icon,
     variant = 'ghost',
     size = 'md',
+    shape = 'square',
     focusVariant = 'normal',
     className = '',
     disabled,
@@ -55,6 +61,7 @@ const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconB
 ) {
   const sz = SIZE_CLASSES[size];
   const focusClass = focusVariant === 'dense' ? 'tv-focus-dense' : 'tv-focus';
+  const shapeClass = shape === 'circle' ? 'rounded-full' : 'rounded-control';
 
   // UI-1.4 — accessibilità: avviso in development se l'aria-label è vuoto
   // o composto solo da whitespace. Il tipo statico già richiede la prop,
@@ -76,7 +83,8 @@ const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconB
       type={type}
       disabled={disabled}
       className={[
-        'inline-flex items-center justify-center rounded-control',
+        'inline-flex items-center justify-center leading-none',
+        shapeClass,
         'transition-colors duration-150',
         'disabled:opacity-50 disabled:cursor-not-allowed',
         sz.box,
@@ -88,7 +96,7 @@ const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconB
         .join(' ')}
       {...rest}
     >
-      <Icon className={sz.icon} aria-hidden="true" />
+      <Icon className={`${sz.icon} block`} aria-hidden="true" />
     </button>
   );
 });
