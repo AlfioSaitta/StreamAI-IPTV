@@ -49,5 +49,8 @@ export type { SelectProps, SelectSize } from './Select';
 export { default as Spinner } from './Spinner';
 export type { SpinnerProps, SpinnerSize, SpinnerTone } from './Spinner';
 
+export { default as ToggleSwitch } from './ToggleSwitch';
+export type { ToggleSwitchProps, ToggleSwitchSize, ToggleSwitchTone } from './ToggleSwitch';
+
 export { default as WatchlistButton } from './WatchlistButton';
 

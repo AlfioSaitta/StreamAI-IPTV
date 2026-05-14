@@ -26,7 +26,7 @@ import {
   History,
 } from 'lucide-react';
 import { useEscapeKey, useInitialTvFocus, useTvSpatialNavigation } from '../hooks/useTvFocus.ts';
-import { Avatar, AvatarPicker, Button, Card, FormField, Input, Select } from './shared';
+import { Avatar, AvatarPicker, Button, Card, FormField, Input, Select, ToggleSwitch } from './shared';
 import { DEFAULT_AVATAR_ID } from '../services/avatars';
 
 interface ProfileSettingsProps {
@@ -112,27 +112,7 @@ const SectionCard: React.FC<{
   );
 };
 
-const ToggleSwitch: React.FC<{
-  enabled: boolean;
-  onChange: (v: boolean) => void;
-  ariaLabel?: string;
-}> = ({ enabled, onChange, ariaLabel }) => (
-  <button
-    onClick={() => onChange(!enabled)}
-    role="switch"
-    aria-checked={enabled}
-    aria-label={ariaLabel}
-    className={`tv-focus touch-target relative w-14 h-8 rounded-full transition-colors duration-200 ${
-      enabled ? 'bg-brand-primary' : 'bg-surface-3'
-    }`}
-  >
-    <span
-      className={`absolute top-1 w-6 h-6 rounded-full bg-white shadow-md transition-transform duration-200 ${
-        enabled ? 'translate-x-7' : 'translate-x-1'
-      }`}
-    />
-  </button>
-);
+
 
 const Divider: React.FC = () => <div className="border-t border-subtle my-6" />;
 
@@ -452,7 +432,7 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
               </div>
             </div>
             <ToggleSwitch
-              enabled={preferences.aiCaching}
+              checked={preferences.aiCaching}
               onChange={(v) => handlePreferenceChange('aiCaching', v)}
               ariaLabel={t.aiCaching}
             />
@@ -525,7 +505,7 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
               </div>
             </div>
             <ToggleSwitch
-              enabled={preferences.debugOverlay}
+              checked={preferences.debugOverlay}
               onChange={(v) => handlePreferenceChange('debugOverlay', v)}
               ariaLabel={t.debugOverlay}
             />
@@ -544,7 +524,7 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
               </div>
             </div>
             <ToggleSwitch
-              enabled={preferences.autoNextEpisodeEnabled ?? (DEFAULT_PREFERENCES.autoNextEpisodeEnabled ?? true)}
+              checked={preferences.autoNextEpisodeEnabled ?? (DEFAULT_PREFERENCES.autoNextEpisodeEnabled ?? true)}
               onChange={(v) => handlePreferenceChange('autoNextEpisodeEnabled', v)}
               ariaLabel="Episodio successivo automatico"
             />
@@ -657,7 +637,7 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
                 </div>
               </div>
               <ToggleSwitch
-                enabled={Boolean(preferences.contentAutoRefreshEnabled)}
+                checked={Boolean(preferences.contentAutoRefreshEnabled)}
                 onChange={(v) => handlePreferenceChange('contentAutoRefreshEnabled', v)}
                 ariaLabel="Aggiornamento in background"
               />
