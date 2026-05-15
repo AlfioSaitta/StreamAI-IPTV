@@ -48,7 +48,13 @@ const CodecWarning: React.FC<CodecWarningProps> = ({ onDismiss }) => {
   const { supported, hardwareAcceleration, recommendations } = codecResult;
 
   return (
-    <div className="fixed bottom-4 right-4 z-[200] max-w-md animate-slide-up">
+    <div
+      className="fixed z-[200] max-w-md w-[calc(100vw-2rem)] animate-slide-up"
+      style={{
+        bottom: 'max(1rem, calc(var(--safe-bottom) + 0.5rem))',
+        right: 'max(1rem, calc(var(--safe-right) + 0.5rem))',
+      }}
+    >
       <div className="bg-surface-overlay-hard backdrop-blur-xl rounded-card border border-state-warning/30 shadow-elev-3 overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-state-warning/20">

@@ -185,6 +185,35 @@ body {
     padding-left: var(--safe-left);
   }
 
+  /*
+   * Cutout-aware horizontal padding (2026-05-15).
+   *
+   * Da usare sulle barre orizzontali fisse (navbar, content rows) che
+   * altrimenti finirebbero "sotto" il notch in landscape. Garantisce un
+   * minimo di 1rem di padding ma lo aumenta a env(safe-area-inset-*) se
+   * il device ha un cutout più largo.
+   *
+   * `.px-safe`     → mobile (default)
+   * `.md\:px-safe` → tablet/desktop, padding orizzontale più ampio
+   */
+  .px-safe {
+    padding-left: max(1rem, var(--safe-left));
+    padding-right: max(1rem, var(--safe-right));
+  }
+  @media (min-width: 768px) {
+    .md\:px-safe {
+      padding-left: max(3rem, var(--safe-left));
+      padding-right: max(3rem, var(--safe-right));
+    }
+  }
+
+  /* Left/right alone, per overlay/elementi assoluti che vogliono
+     allinearsi rispettando il cutout senza forzare anche l'altro lato. */
+  .pl-safe { padding-left: max(1rem, var(--safe-left)); }
+  .pr-safe { padding-right: max(1rem, var(--safe-right)); }
+  .pt-safe { padding-top: max(0.5rem, var(--safe-top)); }
+  .pb-safe { padding-bottom: max(0.5rem, var(--safe-bottom)); }
+
   .touch-target {
     @apply min-h-[48px] min-w-[48px];
   }

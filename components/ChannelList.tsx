@@ -601,16 +601,16 @@ const ChannelList: React.FC<ChannelListProps> = ({
     <div ref={screenRef} className="min-h-screen bg-[var(--bg-primary)] font-sans pb-20 safe-area-screen">
 
       {/* --- NAVBAR --- */}
-      <nav className={`fixed top-0 w-full z-50 transition-all duration-500 px-4 md:px-12 py-3 flex items-center justify-between ${scrolled ? 'bg-[var(--bg-primary)] shadow-xl' : 'bg-gradient-to-b from-black/90 via-black/50 to-transparent'}`}>
-         <div className="flex items-center gap-8">
+      <nav className={`fixed top-0 w-full z-50 transition-all duration-500 px-safe md:px-safe py-3 flex items-center justify-between gap-3 ${scrolled ? 'bg-[var(--bg-primary)] shadow-xl' : 'bg-gradient-to-b from-black/90 via-black/50 to-transparent'}`}>
+         <div className="flex items-center gap-4 md:gap-8 min-w-0">
              <h1
-                className="text-2xl md:text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-brand-primary to-brand-primary-hover tracking-tight cursor-pointer drop-shadow-sm select-none"
+                className="text-xl sm:text-2xl md:text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-brand-primary to-brand-primary-hover tracking-tight cursor-pointer drop-shadow-sm select-none flex-shrink-0"
                 onClick={() => { window.scrollTo({ top: 0, behavior: 'smooth' }); }}
               >
                 Stream<span className="text-content-primary">AI</span>
               </h1>
 
-             <div className="hidden md:flex gap-1 text-sm font-medium text-content-secondary">
+             <div className="flex gap-1 text-xs sm:text-sm font-medium text-content-secondary overflow-x-auto no-scrollbar -mx-1 px-1">
                  {(['home', 'live', 'movie', 'series'] as StreamType[]).map(tab => (
                      <button
                         key={tab}
@@ -624,7 +624,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
                             window.scrollTo({top:0, behavior:'smooth'});
                             setVisibleRows(INITIAL_VISIBLE_ROWS);
                         }}
-                        className={`tv-focus-dense px-3 py-1.5 rounded-control transition-colors outline-none ${activeTab === tab ? 'bg-surface-2 text-content-primary font-semibold' : 'hover:text-content-primary hover:bg-surface-1'}`}
+                        className={`tv-focus-dense flex-shrink-0 px-2.5 sm:px-3 py-1.5 rounded-control transition-colors outline-none whitespace-nowrap ${activeTab === tab ? 'bg-surface-2 text-content-primary font-semibold' : 'hover:text-content-primary hover:bg-surface-1'}`}
                         tabIndex={0}
                      >
                          {tab === 'home' ? t.home : tab === 'live' ? t.live : tab === 'movie' ? t.movies : t.series}
@@ -633,7 +633,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
              </div>
          </div>
 
-         <div className="flex items-center gap-6 text-white">
+         <div className="flex items-center gap-2 sm:gap-3 md:gap-6 text-white flex-shrink-0">
              {/* Clock */}
              <div className="hidden lg:flex items-center gap-2 text-gray-300 font-mono text-sm bg-black/30 px-3 py-1 rounded-full border border-white/5">
                  <Clock className="w-3 h-3" />
@@ -641,15 +641,15 @@ const ChannelList: React.FC<ChannelListProps> = ({
              </div>
 
              <div
-                className={`flex items-center gap-2 bg-surface-1 border border-DEFAULT rounded-full px-4 py-2 transition-[width,background-color] duration-300 ${
-                  searchTerm ? 'w-72 bg-surface-2' : 'w-48 hover:w-56 hover:bg-surface-2'
+                className={`flex items-center gap-2 bg-surface-1 border border-DEFAULT rounded-full px-3 sm:px-4 py-2 transition-[width,background-color] duration-300 ${
+                  searchTerm ? 'w-48 sm:w-60 md:w-72 bg-surface-2' : 'w-32 sm:w-40 md:w-48 hover:w-56 hover:bg-surface-2'
                 }`}
               >
                  <Search className="w-icon-sm h-icon-sm text-content-muted flex-shrink-0" aria-hidden="true" />
                  <input
                     type="text"
                     placeholder={t.search + '...'}
-                    className="bg-transparent text-sm text-content-primary placeholder-content-muted outline-none focus:outline-none focus:ring-0 border-0 w-full caret-brand-primary"
+                    className="bg-transparent text-sm text-content-primary placeholder-content-muted outline-none focus:outline-none focus:ring-0 border-0 w-full min-w-0 caret-brand-primary"
                     value={searchTerm}
                     onChange={e => setSearchTerm(e.target.value)}
                     tabIndex={0}
@@ -658,7 +658,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
                  {searchTerm && (
                     <button
                       onClick={() => setSearchTerm('')}
-                      className="text-content-muted hover:text-content-primary transition-colors rounded-full p-1 outline-none focus-visible:text-content-primary"
+                      className="text-content-muted hover:text-content-primary transition-colors rounded-full p-1 outline-none focus-visible:text-content-primary flex-shrink-0"
                       aria-label="Pulisci ricerca"
                     >
                       <X className="w-icon-sm h-icon-sm" aria-hidden="true" />
@@ -718,7 +718,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
 
       {/* --- HERO SECTION --- */}
        {!searchTerm && featuredItem ? (
-          <div className="relative h-[85vh] w-full group">
+          <div className="relative h-[60vh] sm:h-[70vh] md:h-[85vh] min-h-[280px] w-full group">
               <div className="absolute inset-0">
                   <CachedImage 
                     src={featuredItem.logo || ''} 
@@ -729,32 +729,32 @@ const ChannelList: React.FC<ChannelListProps> = ({
                   <div className="absolute inset-0 bg-gradient-to-t from-[var(--bg-primary)] via-transparent to-transparent" />
               </div>
 
-              <div className="absolute bottom-[20%] left-4 md:left-12 max-w-2xl z-10 animate-slide-up">
+              <div className="absolute bottom-[15%] sm:bottom-[20%] px-safe md:px-safe max-w-2xl z-10 animate-slide-up">
                   {featuredItem.rating && (
-                      <div className="flex items-center gap-3 mb-4">
+                      <div className="flex items-center gap-3 mb-3 md:mb-4">
                            <span className="bg-green-600/90 text-white px-2 py-0.5 rounded text-xs font-bold shadow-md">Match {Number(featuredItem.rating) * 10}%</span>
                            <span className="text-gray-300 text-sm font-medium">{featuredItem.year}</span>
                            <span className="border border-gray-500/50 px-1.5 text-[10px] text-gray-400 rounded">HD</span>
                       </div>
                   )}
-                  <h1 className="text-5xl md:text-7xl font-bold text-white mb-6 text-shadow-lg leading-none tracking-tight">
+                  <h1 className="text-3xl sm:text-5xl md:text-7xl font-bold text-white mb-3 md:mb-6 text-shadow-lg leading-none tracking-tight">
                       {featuredItem.cleanName || featuredItem.name}
                   </h1>
-                  <p className="text-lg text-gray-300 mb-8 line-clamp-3 text-shadow max-w-xl font-light leading-relaxed">
+                  <p className="hidden sm:block text-base md:text-lg text-gray-300 mb-6 md:mb-8 line-clamp-2 md:line-clamp-3 text-shadow max-w-xl font-light leading-relaxed">
                       {featuredItem.description || "Contenuto in evidenza scelti per te."}
                   </p>
                   
                   <div className="flex items-center gap-3">
                       <button
                         onClick={() => onSelectChannel(featuredItem)}
-                        className="tv-focus inline-flex items-center gap-2 bg-white text-black px-5 py-2.5 rounded-control font-semibold text-sm md:text-base hover:bg-gray-200 transition-colors shadow-elev-2 outline-none"
+                        className="tv-focus inline-flex items-center gap-2 bg-white text-black px-4 sm:px-5 py-2 sm:py-2.5 rounded-control font-semibold text-sm md:text-base hover:bg-gray-200 transition-colors shadow-elev-2 outline-none"
                         tabIndex={0}
                         data-initial-focus="true"
                       >
                           <Play className="w-icon-sm h-icon-sm fill-black" /> Riproduci
                       </button>
                       <button
-                        className="tv-focus inline-flex items-center gap-2 bg-surface-2 text-content-primary px-5 py-2.5 rounded-control font-semibold text-sm md:text-base hover:bg-surface-3 backdrop-blur border border-DEFAULT transition-colors outline-none"
+                        className="tv-focus inline-flex items-center gap-2 bg-surface-2 text-content-primary px-4 sm:px-5 py-2 sm:py-2.5 rounded-control font-semibold text-sm md:text-base hover:bg-surface-3 backdrop-blur border border-DEFAULT transition-colors outline-none"
                         tabIndex={0}
                         onClick={() => {
                             if (featuredItem.type === 'movie') {
@@ -771,7 +771,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
           </div>
        ) : !searchTerm && activeCategories.length > 0 ? (
           /* Hero Skeleton */
-          <div className="relative h-[85vh] w-full bg-[#1a1a1a] flex items-end p-12">
+          <div className="relative h-[60vh] sm:h-[70vh] md:h-[85vh] min-h-[280px] w-full bg-[#1a1a1a] flex items-end px-safe md:px-safe py-6 md:py-12">
                <div className="w-full max-w-2xl space-y-4">
                    <div className="h-4 w-24 rounded skeleton mb-4"></div>
                    <div className="h-16 w-3/4 rounded-lg skeleton"></div>
@@ -786,7 +786,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
       ) : null}
 
       {/* --- CONTENT ROWS (VIRTUALIZED) --- */}
-      <div className={`relative z-20 px-4 md:px-12 space-y-10 ${!searchTerm && featuredItem ? '-mt-32' : 'mt-28'}`}>
+      <div className={`relative z-20 px-safe md:px-safe space-y-8 md:space-y-10 ${!searchTerm && featuredItem ? '-mt-24 md:-mt-32' : 'mt-24 md:mt-28'}`}>
           {/* BUG-1 §2.3 Step 4: banner soft quando un blocco è in `error` /
               `stale` ma altri funzionano (es. Live OK, VOD non scaricato).
               In Home l'utente non vedrebbe la sezione interamente vuota:

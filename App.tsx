@@ -149,7 +149,11 @@ const AiUnavailableHint = ({
     <div
       role="status"
       aria-live="polite"
-      className="fixed bottom-6 right-6 z-40 max-w-sm rounded-modal border border-DEFAULT bg-surface-1/95 p-4 text-content-secondary shadow-elev-3 backdrop-blur-xl animate-fade-in"
+      className="fixed z-40 w-[calc(100vw-2rem)] max-w-sm rounded-modal border border-DEFAULT bg-surface-1/95 p-4 text-content-secondary shadow-elev-3 backdrop-blur-xl animate-fade-in"
+      style={{
+        bottom: 'max(1.5rem, calc(var(--safe-bottom) + 0.5rem))',
+        right: 'max(1rem, calc(var(--safe-right) + 0.5rem))',
+      }}
     >
       <div className="flex items-start gap-3">
         <div className="rounded-full bg-brand-accent/20 p-2 shrink-0">
@@ -1049,7 +1053,13 @@ function App() {
 
         {/* Toast promemoria EPG */}
         {reminderToast && (
-          <div className="fixed top-6 right-6 z-[210] w-80 rounded-2xl border border-amber-500/30 bg-amber-950/90 backdrop-blur-xl shadow-2xl p-4 animate-in fade-in slide-in-from-top-2">
+          <div
+            className="fixed z-[210] w-[calc(100vw-2rem)] max-w-xs sm:w-80 rounded-2xl border border-amber-500/30 bg-amber-950/90 backdrop-blur-xl shadow-2xl p-4 animate-in fade-in slide-in-from-top-2"
+            style={{
+              top: 'max(1.5rem, calc(var(--safe-top) + 0.5rem))',
+              right: 'max(1.5rem, calc(var(--safe-right) + 0.5rem))',
+            }}
+          >
             <div className="flex items-start gap-3">
               <div className="rounded-full bg-amber-500/20 p-2 flex-shrink-0">
                 <Sparkles className="w-5 h-5 text-amber-300" />
