@@ -92,7 +92,16 @@ export const ProfileService = {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(profiles));
   },
 
-  create: (name: string, options: { color?: string; avatar?: string } = {}): Profile => {
+  create: (
+    name: string,
+    options: {
+      color?: string;
+      avatar?: string;
+      preferences?: Partial<ProfilePreferences>;
+      playlistUrl?: string;
+      xtreamCreds?: XtreamCredentials | null;
+    } = {},
+  ): Profile => {
     const profiles = ProfileService.getAll();
     const colors = ['#8b5cf6', '#ec4899', '#3b82f6', '#10b981', '#f59e0b', '#ef4444'];
     const newProfile: Profile = {
@@ -100,14 +109,44 @@ export const ProfileService = {
       name,
       color: options.color ?? colors[profiles.length % colors.length],
       avatar: options.avatar ?? pickDefaultAvatarFor(profiles.length),
-      xtreamCreds: null,
+      xtreamCreds: options.xtreamCreds ?? null,
+      playlistUrl: options.playlistUrl?.trim() || undefined,
       history: [],
       watchlist: [],
-      preferences: { ...DEFAULT_PREFERENCES }
+      preferences: { ...DEFAULT_PREFERENCES, ...(options.preferences ?? {}) },
     };
+    // Se l'utente ha già fornito credenziali Xtream nell'onboarding (C.2),
+    // sintetizziamo subito il server attivo per coerenza con il flusso
+    // multi-server (no migrazione lazy a runtime).
+    if (newProfile.xtreamCreds) {
+      const seeded: XtreamServer = {
+        id: crypto.randomUUID(),
+        name: deriveServerName(newProfile.xtreamCreds.url, 'Server'),
+        url: newProfile.xtreamCreds.url,
+        username: newProfile.xtreamCreds.username,
+        password: newProfile.xtreamCreds.password,
+        createdAt: Date.now(),
+      };
+      newProfile.servers = [seeded];
+      newProfile.activeServerId = seeded.id;
+    }
     profiles.push(newProfile);
     ProfileService.saveAll(profiles);
     return newProfile;
+  },
+
+  /**
+   * Aggiorna l'URL della playlist M3U remota (C.2). Passando `null` o
+   * stringa vuota la rimuove. Non tocca `xtreamCreds` né i server.
+   */
+  updatePlaylistUrl: (profileId: string, url: string | null): Profile | null => {
+    const profiles = ProfileService.getAll();
+    const index = profiles.findIndex((p) => p.id === profileId);
+    if (index === -1) return null;
+    const trimmed = (url ?? '').trim();
+    profiles[index].playlistUrl = trimmed || undefined;
+    ProfileService.saveAll(profiles);
+    return profiles[index];
   },
 
   delete: (id: string) => {

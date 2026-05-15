@@ -4,20 +4,8 @@ import { ProfileService } from '../services/profileService.ts';
 import { Plus, Trash2, Tv } from 'lucide-react';
 import { i18n } from '../services/i18n.ts';
 import { useInitialTvFocus, useTvSpatialNavigation } from '../hooks/useTvFocus.ts';
-import { pickDefaultAvatarFor } from '../services/avatars.ts';
-import { Avatar, AvatarPicker, Button, FormField, Input, Modal } from './shared';
-
-// Palette colori coerente con i token DS (brand + accenti pop).
-const NEW_PROFILE_COLORS = [
-  '#dc2626', // brand-primary (rosso)
-  '#a855f7', // brand-accent (viola)
-  '#ec4899', // pink-500
-  '#3b82f6', // blue-500
-  '#10b981', // emerald-500
-  '#f59e0b', // amber-500
-  '#06b6d4', // cyan-500
-  '#f97316', // orange-500
-];
+import { Avatar } from './shared';
+import OnboardingWizard from './OnboardingWizard.tsx';
 
 interface ProfileSelectionProps {
   onSelectProfile: (profile: Profile) => void;
@@ -25,10 +13,7 @@ interface ProfileSelectionProps {
 
 const ProfileSelection: React.FC<ProfileSelectionProps> = ({ onSelectProfile }) => {
   const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [isCreating, setIsCreating] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [newAvatar, setNewAvatar] = useState<string>(pickDefaultAvatarFor(0));
-  const [newColor, setNewColor] = useState<string>(NEW_PROFILE_COLORS[0]);
+  const [showWizard, setShowWizard] = useState(false);
   const screenRef = useRef<HTMLDivElement>(null);
 
   useInitialTvFocus(true, screenRef, '[data-initial-focus="true"], .tv-focus');
@@ -38,23 +23,13 @@ const ProfileSelection: React.FC<ProfileSelectionProps> = ({ onSelectProfile }) 
     setProfiles(ProfileService.getAll());
   }, []);
 
-  // Quando si apre il form di creazione, suggerisce un avatar/colore
-  // deterministico in base al numero di profili esistenti.
-  const openCreateForm = () => {
-    const idx = profiles.length;
-    setNewAvatar(pickDefaultAvatarFor(idx));
-    setNewColor(NEW_PROFILE_COLORS[idx % NEW_PROFILE_COLORS.length]);
-    setNewName('');
-    setIsCreating(true);
-  };
-
-  const handleCreate = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newName.trim()) return;
-    ProfileService.create(newName.trim(), { color: newColor, avatar: newAvatar });
+  // C.2: Onboarding wizard 3-step (identità → fonte → preferenze).
+  // Sostituisce il vecchio modale "Nuovo profilo" inline.
+  const handleWizardComplete = (profile: Profile) => {
     setProfiles(ProfileService.getAll());
-    setIsCreating(false);
-    setNewName('');
+    setShowWizard(false);
+    // Selezione automatica del profilo appena creato per saltare in app.
+    onSelectProfile(profile);
   };
 
   const handleDelete = (e: React.MouseEvent, id: string) => {
@@ -118,7 +93,7 @@ const ProfileSelection: React.FC<ProfileSelectionProps> = ({ onSelectProfile }) 
         {/* Add Profile */}
         <div className="flex flex-col items-center gap-4">
           <button
-            onClick={openCreateForm}
+            onClick={() => setShowWizard(true)}
             className="tv-focus w-32 h-32 md:w-40 md:h-40 rounded-card border-2 border-dashed border-DEFAULT flex items-center justify-center bg-surface-1 hover:bg-surface-2 hover:border-strong transition-all duration-300"
             data-initial-focus={profiles.length === 0 ? 'true' : undefined}
             aria-label={t.addProfile}
@@ -129,86 +104,11 @@ const ProfileSelection: React.FC<ProfileSelectionProps> = ({ onSelectProfile }) 
         </div>
       </div>
 
-      <Modal
-        open={isCreating}
-        onClose={() => setIsCreating(false)}
-        title={t.newProfile}
-        size="md"
-        ariaLabel={t.newProfile}
-      >
-        <form onSubmit={handleCreate} className="flex flex-col gap-6">
-          {/* Live preview */}
-          <div className="flex items-center gap-4">
-            <Avatar avatarId={newAvatar} color={newColor} size="xl" shape="card" />
-            <div className="flex-1">
-              <p className="text-xs uppercase tracking-widest text-content-muted mb-1">
-                Anteprima
-              </p>
-              <p className="text-lg font-semibold text-content-primary truncate">
-                {newName.trim() || t.profileName}
-              </p>
-            </div>
-          </div>
-
-          <FormField label={t.profileName} htmlFor="profile-name-input">
-            <Input
-              id="profile-name-input"
-              autoFocus
-              type="text"
-              placeholder={t.profileName}
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              data-initial-focus="true"
-              inputSize="lg"
-            />
-          </FormField>
-
-          {/* Color picker — palette ridotta, stile uniforme */}
-          <FormField label="Colore" htmlFor="profile-color-grid">
-            <div id="profile-color-grid" role="radiogroup" aria-label="Colore profilo" className="flex flex-wrap gap-2">
-              {NEW_PROFILE_COLORS.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  role="radio"
-                  aria-checked={newColor === c}
-                  onClick={() => setNewColor(c)}
-                  className={`tv-focus-dense w-9 h-9 rounded-full transition-transform hover:scale-110 ${
-                    newColor === c ? 'ring-2 ring-content-primary ring-offset-2 ring-offset-surface-0' : ''
-                  }`}
-                  style={{ backgroundColor: c }}
-                  aria-label={`Colore ${c}`}
-                />
-              ))}
-            </div>
-          </FormField>
-
-          <FormField label="Avatar">
-            <AvatarPicker value={newAvatar} color={newColor} onChange={setNewAvatar} />
-          </FormField>
-
-          <div className="flex gap-3">
-            <Button
-              type="button"
-              variant="secondary"
-              size="lg"
-              fullWidth
-              onClick={() => setIsCreating(false)}
-            >
-              {t.cancel}
-            </Button>
-            <Button
-              type="submit"
-              variant="primary"
-              size="lg"
-              fullWidth
-              disabled={!newName.trim()}
-            >
-              {t.create}
-            </Button>
-          </div>
-        </form>
-      </Modal>
+      <OnboardingWizard
+        open={showWizard}
+        onClose={() => setShowWizard(false)}
+        onComplete={handleWizardComplete}
+      />
     </div>
   );
 };
