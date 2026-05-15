@@ -52,7 +52,7 @@ Si distingue per l'integrazione con **Google Gemini AI**, che offre raccomandazi
 - **Focus TV centralizzato**: schermate principali, modali, dettagli film/serie, impostazioni, login Xtream e menu cast hanno focus iniziale e navigazione con frecce.
 - **Focus trap nei modali**: `Esc` chiude overlay/menu coerentemente e il focus torna all'elemento precedente quando possibile.
 - **Stati vuoti/errore espliciti**: catalogo vuoto, nessun risultato, server Xtream non raggiungibile, credenziali errate/scadute, TMDB/Gemini non configurati e nessun device cast trovato hanno messaggi e azioni visibili.
-- **Android/TV box**: safe-area/notch, target touch più grandi, shell dedicata per player nativo e profilo low-power che riduce blur/animazioni su device meno potenti.
+- **Android/TV box**: **modalità landscape immersiva forzata** (lock `sensorLandscape`, status/navigation bar nascoste con swipe-to-reveal transient, contenuto edge-to-edge sotto il notch via `windowLayoutInDisplayCutoutMode=shortEdges`), safe-area/notch, target touch più grandi, shell dedicata per player nativo e profilo low-power che riduce blur/animazioni su device meno potenti.
 
 ---
 

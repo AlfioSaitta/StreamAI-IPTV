@@ -547,6 +547,17 @@ Tutti i componenti chiave migrati a DS v1:
 
 - [x] Controlli touch grandi, safe area/notch, overlay minimali su native,
   classi `platform-native`/`tv-low-power` per blur disabilitati.
+- [x] **Modalità landscape immersiva forzata (2026-05-15):**
+  `AndroidManifest.xml` con `screenOrientation="sensorLandscape"` (lock
+  landscape, flip 180° permesso per tablet/TV). `MainActivity.java` chiama
+  `enableImmersiveMode()` (AndroidX `WindowCompat.setDecorFitsSystemWindows(false)`
+  + `WindowInsetsControllerCompat.hide(systemBars())` con behavior
+  `BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE`) in `onCreate`, `onWindowFocusChanged`
+  e all'uscita da PiP. `styles.xml` configura il tema con
+  `windowFullscreen=true`, `windowLayoutInDisplayCutoutMode=shortEdges`
+  (contenuto sotto il notch sui lati corti) e status/navigation bar
+  trasparenti. Il launch theme (splash) eredita gli stessi flag per
+  evitare salti visivi alla transizione post-splash.
 - [ ] **Da verificare:** matrice device reali (modello, API, telecomando).
 
 ### P5 — AI, metadata e catalogo
