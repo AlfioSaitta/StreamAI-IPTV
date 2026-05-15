@@ -25,6 +25,11 @@ import CastDevicePicker from './CastDevicePicker';
 import MiniEpgOverlay from './MiniEpgOverlay';
 import AutoNextOverlay from './player/AutoNextOverlay';
 import SleepTimerMenu from './player/SleepTimerMenu';
+import StreamDiagnostics, {
+  type BufferStats,
+  type RecentPlaybackError,
+} from './player/StreamDiagnostics';
+import type { StreamCodecInfo } from '../services/streamInfoService';
 import {
   MAX_PLAYBACK_RETRIES,
   type PlayerEngine,
@@ -118,7 +123,10 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   const [networkSpeed, setNetworkSpeed] = useState<number | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
   const [showInfoPanel, setShowInfoPanel] = useState(false);
-  const [streamInfoLines, setStreamInfoLines] = useState<string[]>([]);
+  const [streamInfoData, setStreamInfoData] = useState<StreamCodecInfo | null>(null);
+  const [bufferStats, setBufferStats] = useState<BufferStats | null>(null);
+  const [recentErrors, setRecentErrors] = useState<RecentPlaybackError[]>([]);
+  const [infoLoading, setInfoLoading] = useState(false);
   const [streamSourceInfo, setStreamSourceInfo] = useState<StreamSourceInfo | null>(null);
   const [nativePiPSupported, setNativePiPSupported] = useState(false);
   const [showMiniEpg, setShowMiniEpg] = useState(false);
@@ -310,31 +318,81 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     setRetryNonce(n => n + 1);
   }, [showOsd]);
 
+  const computeBufferStats = useCallback((video: HTMLVideoElement | null): BufferStats | null => {
+    if (!video) return null;
+    try {
+      const buf = video.buffered;
+      const ranges = buf ? buf.length : 0;
+      let total = 0;
+      let ahead = 0;
+      let behind = 0;
+      const ct = video.currentTime || 0;
+      for (let i = 0; i < ranges; i++) {
+        const start = buf.start(i);
+        const end = buf.end(i);
+        total += end - start;
+        if (ct >= start && ct <= end) {
+          ahead = Math.max(ahead, end - ct);
+          behind = Math.max(behind, ct - start);
+        } else if (start > ct) {
+          // Future buffered range — still counts as ahead from gap edge.
+          ahead = Math.max(ahead, end - start);
+        }
+      }
+      return { ranges, ahead, behind, total, currentTime: ct };
+    } catch {
+      return null;
+    }
+  }, []);
+
   const updateStreamInfo = useCallback(async () => {
     if (!channel) return;
     const videoElement = playerRef.current?.el()?.querySelector('video') as HTMLVideoElement | null;
+    setInfoLoading(true);
     try {
       const info = await streamInfoService.collectInfoAsync(videoElement, hlsRef.current, mpegtsRef.current, channel.url);
-      setStreamInfoLines([
-        ...streamInfoService.formatInfoForDisplay(info),
-        '',
-        '🔒 URL',
-        `   ${sanitizeStreamUrl(channel.url)}`,
-        '',
-        '🧩 PLAYER',
-        `   Motore: ${playerEngineRef.current}`,
-        streamSourceInfo ? `   Rilevamento URL: ${streamSourceInfo.label}` : '   Rilevamento URL: N/D',
-      ]);
+      setStreamInfoData(info);
+      setBufferStats(computeBufferStats(videoElement));
       setShowInfoPanel(true);
     } catch (e) {
-      setStreamInfoLines([
-        'Errore durante la raccolta informazioni stream.',
-        String(e),
-        `URL: ${sanitizeStreamUrl(channel.url)}`,
-      ]);
+      console.warn('[Player] Stream diagnostics failed', e);
+      setStreamInfoData(null);
+      setBufferStats(computeBufferStats(videoElement));
       setShowInfoPanel(true);
+    } finally {
+      setInfoLoading(false);
     }
-  }, [channel, streamSourceInfo]);
+  }, [channel, computeBufferStats]);
+
+  // P8.2 — Track recent playback errors (ring buffer, max 10) for the
+  // diagnostics screen. We snapshot whenever `playbackError` transitions
+  // from null → non-null.
+  const lastErrorRef = useRef<PlaybackErrorState | null>(null);
+  useEffect(() => {
+    if (playbackError && playbackError !== lastErrorRef.current) {
+      lastErrorRef.current = playbackError;
+      setRecentErrors(prev => [
+        {
+          ts: Date.now(),
+          title: playbackError.title,
+          message: playbackError.message,
+          category: playbackError.category,
+        },
+        ...prev,
+      ].slice(0, 10));
+    }
+    if (!playbackError) lastErrorRef.current = null;
+  }, [playbackError]);
+
+  // Refresh buffer stats periodically while the diagnostics panel is open.
+  useEffect(() => {
+    if (!showInfoPanel) return;
+    const id = window.setInterval(() => {
+      const videoElement = playerRef.current?.el()?.querySelector('video') as HTMLVideoElement | null;
+      setBufferStats(computeBufferStats(videoElement));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [showInfoPanel, computeBufferStats]);
 
   // --- CONTROLS LOGIC ---
 
@@ -634,7 +692,9 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     setShowAudioMenu(false);
     setShowInfoPanel(false);
     setShowMiniEpg(false);
-    setStreamInfoLines([]);
+    setStreamInfoData(null);
+    setBufferStats(null);
+    setRecentErrors([]);
     setAudioTracks([]);
     setNativePiPSupported(false);
     setVodProbe(null);
@@ -964,19 +1024,20 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         </div>
       )}
 
-      {showInfoPanel && (
-        <div className="absolute inset-y-0 right-0 z-[80] w-full max-w-xl bg-black/95 backdrop-blur-xl border-l border-white/10 shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
-          <div className="p-4 border-b border-white/10 flex items-center justify-between">
-            <div>
-              <h3 className="text-white font-bold flex items-center gap-2"><Info className="w-5 h-5" /> Info stream</h3>
-              <p className="text-xs text-gray-400 truncate max-w-md">{channel.cleanName || channel.name}</p>
-            </div>
-            <button onClick={() => setShowInfoPanel(false)} aria-label="Chiudi info stream" className="tv-focus p-2 rounded-full hover:bg-white/10"><X className="w-5 h-5 text-gray-300" /></button>
-          </div>
-          <pre className="flex-1 overflow-auto p-4 text-xs leading-relaxed text-gray-200 whitespace-pre-wrap font-mono">
-            {streamInfoLines.length > 0 ? streamInfoLines.join('\n') : 'Nessuna informazione disponibile.'}
-          </pre>
-        </div>
+      {showInfoPanel && channel && (
+        <StreamDiagnostics
+          open={showInfoPanel}
+          onClose={() => setShowInfoPanel(false)}
+          channelName={channel.cleanName || channel.name}
+          sanitizedUrl={sanitizeStreamUrl(channel.url)}
+          engine={playerEngineRef.current}
+          sourceInfo={streamSourceInfo}
+          info={streamInfoData}
+          bufferStats={bufferStats}
+          recentErrors={recentErrors}
+          loading={infoLoading}
+          onRefresh={updateStreamInfo}
+        />
       )}
 
       {/* PLAYLIST OVERLAY */}
