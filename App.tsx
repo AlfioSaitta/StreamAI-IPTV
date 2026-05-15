@@ -57,7 +57,7 @@ import { loginXtream } from './services/xtream.ts';
 import { ProfileService, DEFAULT_PREFERENCES } from './services/profileService.ts';
 import { CacheService } from './services/cacheService.ts';
 import { i18n } from './services/i18n.ts';
-import { Category, Channel, XtreamCredentials, StreamType, Profile, XtreamContent } from './types.ts';
+import { Category, Channel, XtreamCredentials, StreamType, Profile, XtreamContent, ProfilePreferences } from './types.ts';
 import { Server, Wifi, Sparkles, X } from 'lucide-react';
 import { platformService } from './services/platformService.ts';
 import { hasAiApiKey, isAiAvailable, isAiTemporarilySuspended } from './services/geminiService.ts';
@@ -272,6 +272,25 @@ function App() {
     } else {
       document.body.classList.remove('theme-oled');
     }
+  }, [activeProfile]);
+
+  // C.6 (2026-05-15) — Accessibilità: applica la scala del font del profilo
+  // attivo a `<html>`. Tutte le dimensioni Tailwind sono in `rem`, quindi
+  // l'intera UI si adatta in proporzione (testi, padding, icone wrapper).
+  // Reset a 16 px quando non c'è un profilo attivo o la preferenza manca.
+  useEffect(() => {
+    const FONT_SCALE_PX: Record<NonNullable<ProfilePreferences['fontScale']>, string> = {
+      sm: '14px',
+      md: '16px',
+      lg: '18px',
+      xl: '20px',
+    };
+    const scale = activeProfile?.preferences?.fontScale ?? 'md';
+    document.documentElement.style.fontSize = FONT_SCALE_PX[scale];
+    return () => {
+      // Cleanup difensivo: se l'app smonta, ripristina il default browser.
+      document.documentElement.style.fontSize = '';
+    };
   }, [activeProfile]);
 
   // Global "?" / "Shift+/" → open keyboard shortcuts cheatsheet.

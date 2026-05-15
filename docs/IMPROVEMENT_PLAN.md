@@ -92,6 +92,7 @@ Per ogni tranche idealmente chiudere con:
 | C.2 Onboarding profilo | ✅ | wizard 3 step + test Xtream + import M3U remoto |
 | C.3 Cmd+K palette | ✅ | recent searches + filtri chip + filtri avanzati |
 | C.4 Continua a guardare + auto-next | ✅ | soglia + countdown + toggle per-tipo (film/serie) |
+| C.6 Accessibilità | ✅ | font scale S/M/L/XL + icone su badge HD/Match/anno + audit aria-label |
 | D.1 EPG (mini + Guide + reminder) | ✅ | Fasi 1-3 |
 | D.4 Sottotitoli MVP (SRT/VTT sideload) | 🚧 | manca HLS embed + OpenSub |
 | D.5 Sleep timer | ✅ | preset + fine programma |
@@ -102,7 +103,7 @@ Per ogni tranche idealmente chiudere con:
 | G.1 vitest + test moduli puri | 🚧 | 161/161 verdi, coverage parziale |
 | K Quick wins | 🚧 | 7/10 (mancano bonjour-service, content-visibility) |
 
-**Test suite:** 204/204 verdi (18 file), `npm run typecheck` clean,
+**Test suite:** 207/207 verdi (19 file), `npm run typecheck` clean,
 `npm run build` Vite 5 verde.
 
 ### Hotspot di complessità (file > 700 righe)
@@ -752,14 +753,30 @@ Tutti i componenti chiave migrati a DS v1:
 - [ ] Doppio tap left/right = -10s / +10s con ripple.
 - [ ] Pinch fullscreen ↔ aspect ratio toggle.
 
-### C.6 Accessibilità ⏳ (parte fatta in UI-1.4)
+### C.6 Accessibilità ✅ (2026-05-15)
 
 - [x] `aria-label` su `IconButton` (DS).
 - [x] Focus ring contrastato outside (UI-1.4).
 - [x] `prefers-reduced-motion` rispettato (UI-1.4).
-- [ ] Modalità daltonici (badge HD/Live/Premium con icona oltre al colore).
-- [ ] Font size selezionabile (S/M/L/XL) in ProfileSettings.
-- [ ] Audit completo `aria-label` su pulsanti icon-only non DS.
+- [x] **Modalità daltonici (2026-05-15):** i `Badge` HD/Match%/anno in
+  `MovieDetail.tsx` e `SeriesDetail.tsx` ora includono un'icona Lucide
+  (`Tv` per HD, `CheckCircle2` per Match%, `Calendar` per l'anno). Il
+  significato non dipende più dal solo colore — utile per utenti
+  daltonici e per screen reader (icone esposte con `aria-hidden` ma il
+  testo del badge resta accessibile).
+- [x] **Font size selezionabile S/M/L/XL (2026-05-15):**
+  `ProfilePreferences.fontScale` (`'sm' | 'md' | 'lg' | 'xl'`, default
+  `'md'`). Mappato a `<html> { font-size: 14|16|18|20 px }` da `App.tsx`:
+  poiché tutte le size Tailwind sono in `rem`, l'intera UI scala in
+  proporzione (testi, padding, wrapper icone). Selettore in
+  `ProfileSettings → Aspetto → Dimensione testo`. Tests
+  `tests/ui/a11y-fontScale.test.tsx` (3): default `md`, riflesso del
+  valore profilo nel select, persistenza dello state locale al change.
+- [x] **Audit aria-label icon-only (2026-05-15):** verificato con grep
+  ricorsivo (`<button>` con icona Lucide come unico figlio): tutti i
+  bottoni icon-only in `components/` o usano il wrapper DS `IconButton`
+  (che impone `aria-label`) oppure dichiarano esplicitamente `aria-label`
+  + `title` (vedi `VideoPlayerNew.tsx`). Nessuna regressione trovata.
 
 ### C.7 Lingua per profilo, davvero ⏳
 

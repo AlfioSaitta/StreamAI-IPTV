@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Channel, WatchHistoryItem } from '../types.ts';
 import { MetadataService } from '../services/metadata.ts';
 import { useLanguage } from '../contexts/LanguageContext.tsx';
-import { Play, X, ThumbsUp, Sparkles } from 'lucide-react';
+import { Play, X, ThumbsUp, Sparkles, CheckCircle2, Calendar, Tv } from 'lucide-react';
 import {
   Badge,
   Button,
@@ -208,12 +208,12 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
               </h1>
               <div className="flex flex-wrap items-center gap-2 text-content-secondary text-sm font-medium">
                 {rating && (
-                  <Badge tone="success">
+                  <Badge tone="success" icon={CheckCircle2}>
                     Match {Math.min(100, Math.round(Number(rating) * 10))}%
                   </Badge>
                 )}
-                {year && <Badge tone="neutral">{year}</Badge>}
-                <Badge tone="neutral">HD</Badge>
+                {year && <Badge tone="neutral" icon={Calendar}>{year}</Badge>}
+                <Badge tone="neutral" icon={Tv}>HD</Badge>
                 {genre && <span className="text-content-secondary ml-1">{genre}</span>}
               </div>
               {!MetadataService.isConfigured() && (

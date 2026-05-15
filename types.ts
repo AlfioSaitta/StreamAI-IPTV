@@ -199,6 +199,13 @@ export interface ProfilePreferences {
    * Default `true`.
    */
   autoNextEpisodeEnabled?: boolean;
+  /**
+   * C.6 (2026-05-15) — Accessibilità: scala del font dell'applicazione.
+   * Mappata a `html { font-size: 14|16|18|20 px }`; tutte le size Tailwind
+   * sono in `rem`, quindi l'intera UI scala in proporzione. Default `'md'`
+   * (16 px). Persiste per profilo, applicata da `App.tsx` all'attivazione.
+   */
+  fontScale?: 'sm' | 'md' | 'lg' | 'xl';
 }
 
 export interface Profile {

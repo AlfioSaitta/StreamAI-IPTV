@@ -25,6 +25,7 @@ import {
   SkipForward,
   History,
   Keyboard,
+  Type,
 } from 'lucide-react';
 import { useEscapeKey, useInitialTvFocus, useTvSpatialNavigation } from '../hooks/useTvFocus.ts';
 import { Avatar, AvatarPicker, Button, Card, FormField, Input, Select, ToggleSwitch } from './shared';
@@ -60,6 +61,16 @@ const LANGUAGES = [
 const THEME_OPTIONS = [
   { value: 'dark', label: 'Dark Mode' },
   { value: 'oled', label: 'OLED (Pure Black)' },
+];
+
+// C.6 (2026-05-15) — Accessibilità: scala font selezionabile. I valori in px
+// vengono applicati a `<html>` da App.tsx; Tailwind usa `rem`, quindi la UI
+// scala in proporzione.
+const FONT_SCALE_OPTIONS = [
+  { value: 'sm', label: 'Piccolo (14 px)' },
+  { value: 'md', label: 'Medio (16 px) — default' },
+  { value: 'lg', label: 'Grande (18 px)' },
+  { value: 'xl', label: 'Molto grande (20 px)' },
 ];
 
 const CONTENT_REFRESH_INTERVAL_OPTIONS = [
@@ -420,6 +431,31 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
               aria-label={t.themeInterface}
             >
               {THEME_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </Select>
+          </div>
+
+          <Divider />
+
+          {/* C.6 (2026-05-15) — Accessibilità: dimensione testo. */}
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <Type className="w-icon-md h-icon-md text-content-muted" aria-hidden="true" />
+              <div>
+                <h3 className="font-medium text-content-primary">Dimensione testo</h3>
+                <p className="text-sm text-content-muted mt-1">
+                  Scala globale dell'interfaccia. Utile per TV lontane dal divano o per chi ha bisogno di un testo più grande.
+                </p>
+              </div>
+            </div>
+            <Select
+              value={preferences.fontScale ?? 'md'}
+              onChange={(e) => handlePreferenceChange('fontScale', e.target.value as 'sm' | 'md' | 'lg' | 'xl')}
+              className="min-w-[200px]"
+              aria-label="Dimensione testo"
+            >
+              {FONT_SCALE_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </Select>

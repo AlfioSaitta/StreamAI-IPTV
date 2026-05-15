@@ -19,7 +19,8 @@ export const DEFAULT_PREFERENCES: ProfilePreferences = {
   continueWatchingSeriesEnabled: true,
   hideAiUnavailableHint: false,
   hasSeenShortcutsCheatsheet: false,
-  autoNextEpisodeEnabled: true
+  autoNextEpisodeEnabled: true,
+  fontScale: 'md'
 };
 
 /**

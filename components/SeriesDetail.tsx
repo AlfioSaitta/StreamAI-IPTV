@@ -3,7 +3,7 @@ import { Channel, XtreamCredentials, WatchHistoryItem } from '../types.ts';
 import { getSeriesInfo } from '../services/xtream.ts';
 import { MetadataService } from '../services/metadata.ts';
 import { useLanguage } from '../contexts/LanguageContext.tsx';
-import { ArrowLeft, Film } from 'lucide-react';
+import { ArrowLeft, Film, CheckCircle2, Calendar, Tv } from 'lucide-react';
 import {
   Badge,
   Button,
@@ -193,9 +193,9 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
               <h1 className="text-4xl md:text-5xl font-bold text-content-primary mb-4 leading-tight">{seriesName}</h1>
 
               <div className="flex flex-wrap items-center gap-2 mb-6">
-                {rating && <Badge tone="success">Match {Number(rating) * 10}%</Badge>}
-                {series.year && <Badge tone="neutral">{series.year}</Badge>}
-                <Badge tone="neutral">HD</Badge>
+                {rating && <Badge tone="success" icon={CheckCircle2}>Match {Number(rating) * 10}%</Badge>}
+                {series.year && <Badge tone="neutral" icon={Calendar}>{series.year}</Badge>}
+                <Badge tone="neutral" icon={Tv}>HD</Badge>
               </div>
 
               <div className="flex items-center gap-3 mb-8">
