@@ -402,5 +402,45 @@ describe('xtream.loginXtream — health UI exposure (BUG-1 §2.3 Step 4)', () =>
     expect(result.health.vod.status).toBe('error');
     expect(result.health.vod.reason).toMatch(/Access denied/);
   });
+
+  // Bug fix (2026-05-15): le cover dei film non comparivano per i provider
+  // che mettono il poster in `cover_big`/`movie_image` invece di
+  // `stream_icon`. Il mapping di `processContent` ora applica un fallback
+  // a catena. Le serie usano `cover` (gestito storicamente).
+  it('maps VOD logo from cover_big / movie_image when stream_icon is missing', async () => {
+    vi.stubGlobal(
+      'fetch',
+      buildFetchMock([
+        { match: /player_api.php(?:\?[^/]*)?$|action=$/, response: AUTH_OK },
+        { match: /action=get_live_categories/, response: [mkCat('cat-1', 'News')] },
+        { match: /action=get_live_streams/,    response: [mkStream(101)] },
+        { match: /action=get_vod_categories/,  response: [mkCat('cat-1', 'Movies')] },
+        {
+          match: /action=get_vod_streams/,
+          response: [
+            // provider A: solo cover_big (stream_icon vuoto)
+            { stream_id: 201, name: 'M1', category_id: 'cat-1', container_extension: 'mp4', stream_icon: '', cover_big: 'http://cdn/poster-a.jpg' },
+            // provider B: solo movie_image
+            { stream_id: 202, name: 'M2', category_id: 'cat-1', container_extension: 'mkv', movie_image: 'http://cdn/poster-b.jpg' },
+            // provider C: standard stream_icon
+            { stream_id: 203, name: 'M3', category_id: 'cat-1', container_extension: 'mp4', stream_icon: 'http://cdn/poster-c.jpg' },
+            // provider D: nessuna immagine → logo undefined (accettabile)
+            { stream_id: 204, name: 'M4', category_id: 'cat-1', container_extension: 'mp4' },
+          ],
+        },
+        { match: /action=get_series_categories/, response: [mkCat('cat-1', 'Drama')] },
+        { match: /action=get_series/,            response: [{ series_id: 301, name: 'S1', category_id: 'cat-1', cover: 'http://cdn/series.jpg' }] },
+      ]),
+    );
+
+    const result = await loginXtream(CREDS, true);
+    const movies = result.vod[0].channels;
+    expect(movies.find(c => c.name === 'M1')?.logo).toBe('http://cdn/poster-a.jpg');
+    expect(movies.find(c => c.name === 'M2')?.logo).toBe('http://cdn/poster-b.jpg');
+    expect(movies.find(c => c.name === 'M3')?.logo).toBe('http://cdn/poster-c.jpg');
+    expect(movies.find(c => c.name === 'M4')?.logo).toBeUndefined();
+    // Sanity check: le serie continuano a popolare logo da `cover`.
+    expect(result.series[0].channels[0].logo).toBe('http://cdn/series.jpg');
+  });
 });
 

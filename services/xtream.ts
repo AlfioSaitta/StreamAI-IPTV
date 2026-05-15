@@ -271,11 +271,24 @@ export const loginXtream = async (creds: XtreamCredentials, forceRefresh = false
           const rawName = stream.name || '';
           const cleanName = MetadataService.cleanTitle(rawName);
 
+          // Bug fix (2026-05-15): alcuni provider Xtream non popolano
+          // `stream_icon` nel payload di `get_vod_streams`, mettendo il poster
+          // in `cover_big` (o, raramente, in `movie_image`). Le serie usano
+          // `cover` (campo standard di `get_series`), i live usano sempre
+          // `stream_icon`. Fallback in ordine di preferenza: prima i campi
+          // più "alti" (poster grande), poi le icone più piccole.
+          const logo: string | undefined =
+            stream.stream_icon ||
+            stream.cover ||
+            stream.cover_big ||
+            stream.movie_image ||
+            undefined;
+
           const channel: Channel = {
             id: type === 'series' ? `series-${stream.series_id}` : stream.stream_id.toString(),
             name: rawName,
             cleanName: cleanName,
-            logo: stream.stream_icon || stream.cover,
+            logo,
             group: categoryMap[catId]?.name || 'Uncategorized',
             url: streamUrl,
             type: type,
