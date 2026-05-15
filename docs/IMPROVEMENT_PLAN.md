@@ -88,7 +88,7 @@ Per ogni tranche idealmente chiudere con:
 | B.3 i18n lazy | ✅ | 11 chunk per-lingua |
 | B.4 Routing dichiarativo (`useBackStack`) | ✅ | |
 | B.5 Upgrade React 19 | ✅ | `useActionState`, `useTransition` |
-| C.1 Cheatsheet shortcut | 🚧 | overlay ok, onboarding al primo avvio mancante |
+| C.1 Cheatsheet shortcut | ✅ | overlay + onboarding al primo avvio profilo + toggle riattivazione |
 | C.2 Onboarding profilo | ✅ | wizard 3 step + test Xtream + import M3U remoto |
 | C.3 Cmd+K palette | ✅ | recent searches + filtri chip + filtri avanzati |
 | C.4 Continua a guardare + auto-next | ✅ | soglia + countdown + toggle per-tipo (film/serie) |
@@ -102,7 +102,7 @@ Per ogni tranche idealmente chiudere con:
 | G.1 vitest + test moduli puri | 🚧 | 161/161 verdi, coverage parziale |
 | K Quick wins | 🚧 | 7/10 (mancano bonjour-service, content-visibility) |
 
-**Test suite:** 199/199 verdi (17 file), `npm run typecheck` clean,
+**Test suite:** 204/204 verdi (18 file), `npm run typecheck` clean,
 `npm run build` Vite 5 verde.
 
 ### Hotspot di complessità (file > 700 righe)
@@ -683,11 +683,20 @@ Tutti i componenti chiave migrati a DS v1:
 
 ## 7. UX gap residui (C)
 
-### C.1 Discoverability scorciatoie 🚧
+### C.1 Discoverability scorciatoie ✅
 
 - [x] Overlay `?` / `Shift+/` cheatsheet completa.
 - [x] Tooltip su pulsanti player con scorciatoia (`F`, `M`, `P`, ...).
-- [ ] Mostrare cheatsheet al **primo avvio profilo**, poi "Non mostrare più".
+- [x] **Onboarding al primo avvio profilo (2026-05-15):** `App.tsx` apre
+  automaticamente `ShortcutsCheatsheet` 600 ms dopo l'attivazione del
+  profilo se `ProfilePreferences.hasSeenShortcutsCheatsheet !== true`.
+  L'overlay in modalità onboarding mostra una checkbox "Non mostrare più
+  al prossimo avvio" e una CTA "Ho capito"; alla chiusura, il flag viene
+  comunque marcato `true` (anche senza spunta, perché l'utente l'ha già
+  vista una volta). L'apertura manuale via `?` / `Shift+/` NON mostra la
+  checkbox. Toggle "Mostra scorciatoie al primo avvio" in
+  `ProfileSettings → Riproduzione` per riattivare l'onboarding al
+  prossimo accesso. Tests `tests/onboarding/cheatsheet.test.tsx` (5).
 
 ### C.2 Onboarding profilo ✅
 

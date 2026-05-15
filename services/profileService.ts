@@ -18,6 +18,7 @@ export const DEFAULT_PREFERENCES: ProfilePreferences = {
   continueWatchingMoviesEnabled: false,
   continueWatchingSeriesEnabled: true,
   hideAiUnavailableHint: false,
+  hasSeenShortcutsCheatsheet: false,
   autoNextEpisodeEnabled: true
 };
 

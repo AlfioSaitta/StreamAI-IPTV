@@ -187,6 +187,13 @@ export interface ProfilePreferences {
    */
   hideAiUnavailableHint?: boolean;
   /**
+   * Quando `true`, l'utente ha già visto (o esplicitamente dismissato) la
+   * scheda scorciatoie al primo avvio profilo (C.1). L'overlay rimane
+   * sempre richiamabile manualmente con `?` / `Shift+/`. Resettabile dalla
+   * schermata Impostazioni per rivederla al prossimo avvio.
+   */
+  hasSeenShortcutsCheatsheet?: boolean;
+  /**
    * Show a 10s "Up Next" countdown overlay during the last seconds of an
    * episode (Series only) and auto-play the next episode unless dismissed.
    * Default `true`.

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { X, Keyboard } from 'lucide-react';
 import { IconButton } from './shared';
 
@@ -16,6 +16,19 @@ interface ShortcutsCheatsheetProps {
   isOpen: boolean;
   onClose: () => void;
   groups?: ShortcutGroup[];
+  /**
+   * C.1 (2026-05-15): se `true` mostra la checkbox "Non mostrare più al
+   * prossimo avvio". Usata solo quando l'overlay viene aperto
+   * automaticamente al primo avvio profilo. Quando l'utente apre la
+   * cheatsheet con `?` / `Shift+/`, la checkbox NON viene mostrata
+   * (l'apertura manuale non è un onboarding).
+   */
+  showDontShowAgain?: boolean;
+  /**
+   * Invocato alla chiusura con la checkbox spuntata. Il chiamante è
+   * responsabile della persistenza (`ProfileService.updatePreferences`).
+   */
+  onDontShowAgain?: () => void;
 }
 
 /**
@@ -60,9 +73,30 @@ const Kbd: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   </kbd>
 );
 
-const ShortcutsCheatsheet: React.FC<ShortcutsCheatsheetProps> = ({ isOpen, onClose, groups }) => {
+const ShortcutsCheatsheet: React.FC<ShortcutsCheatsheetProps> = ({ isOpen, onClose, groups, showDontShowAgain, onDontShowAgain }) => {
   const closeBtnRef = useRef<HTMLButtonElement>(null);
   const data = useMemo(() => groups ?? DEFAULT_SHORTCUT_GROUPS, [groups]);
+  const [dontShow, setDontShow] = useState(false);
+  // Ref sincronizzato con `dontShow` per leggere il valore aggiornato dal
+  // listener `keydown` (Esc), che viene registrato una sola volta all'open.
+  const dontShowRef = useRef(false);
+  useEffect(() => { dontShowRef.current = dontShow; }, [dontShow]);
+  // Ref agli ultimi callback per evitare di dover ri-registrare il listener.
+  const onCloseRef = useRef(onClose);
+  const onDontShowAgainRef = useRef(onDontShowAgain);
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+  useEffect(() => { onDontShowAgainRef.current = onDontShowAgain; }, [onDontShowAgain]);
+
+  // Reset della checkbox ogni volta che la cheatsheet viene riaperta:
+  // lo stato "Non mostrare più" è una scelta puntuale, non persistente.
+  useEffect(() => {
+    if (isOpen) setDontShow(false);
+  }, [isOpen]);
+
+  const handleClose = () => {
+    if (showDontShowAgain && dontShowRef.current) onDontShowAgainRef.current?.();
+    onCloseRef.current();
+  };
 
   useEffect(() => {
     if (!isOpen) return;
@@ -70,7 +104,7 @@ const ShortcutsCheatsheet: React.FC<ShortcutsCheatsheetProps> = ({ isOpen, onClo
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
-        onClose();
+        handleClose();
       }
     };
     window.addEventListener('keydown', onKey, true);
@@ -80,7 +114,9 @@ const ShortcutsCheatsheet: React.FC<ShortcutsCheatsheetProps> = ({ isOpen, onClo
       window.removeEventListener('keydown', onKey, true);
       window.clearTimeout(t);
     };
-  }, [isOpen, onClose]);
+    // `handleClose` rilegge `dontShow` via closure: deps minime ok.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -90,7 +126,7 @@ const ShortcutsCheatsheet: React.FC<ShortcutsCheatsheetProps> = ({ isOpen, onClo
       aria-modal="true"
       aria-labelledby="shortcuts-cheatsheet-title"
       className="fixed inset-0 z-[300] flex items-center justify-center bg-surface-scrim backdrop-blur-sm p-4"
-      onClick={onClose}
+      onClick={handleClose}
     >
       <div
         className="relative w-full max-w-2xl max-h-[85vh] overflow-auto rounded-modal border border-DEFAULT bg-surface-1 shadow-elev-3 p-6 md:p-8"
@@ -116,7 +152,7 @@ const ShortcutsCheatsheet: React.FC<ShortcutsCheatsheetProps> = ({ isOpen, onClo
             aria-label="Chiudi scheda scorciatoie"
             variant="ghost"
             size="md"
-            onClick={onClose}
+            onClick={handleClose}
           />
         </div>
 
@@ -149,6 +185,28 @@ const ShortcutsCheatsheet: React.FC<ShortcutsCheatsheetProps> = ({ isOpen, onClo
           Per dispositivi senza tastiera: tutti i comandi sono accessibili anche dai
           pulsanti del player e dal menu contestuale, navigabili con Tab/D-pad.
         </p>
+
+        {showDontShowAgain && (
+          <div className="mt-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-4 border-t border-subtle">
+            <label className="flex items-center gap-2 text-sm text-content-secondary cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={dontShow}
+                onChange={(e) => setDontShow(e.target.checked)}
+                className="tv-focus-dense w-4 h-4 rounded-control accent-brand-primary"
+                aria-label="Non mostrare più al prossimo avvio"
+              />
+              Non mostrare più al prossimo avvio
+            </label>
+            <button
+              type="button"
+              onClick={handleClose}
+              className="tv-focus rounded-control bg-brand-primary hover:bg-brand-primary-hover px-5 py-2 text-sm font-semibold text-white self-end sm:self-auto"
+            >
+              Ho capito
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

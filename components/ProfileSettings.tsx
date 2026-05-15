@@ -24,6 +24,7 @@ import {
   HardDrive,
   SkipForward,
   History,
+  Keyboard,
 } from 'lucide-react';
 import { useEscapeKey, useInitialTvFocus, useTvSpatialNavigation } from '../hooks/useTvFocus.ts';
 import { Avatar, AvatarPicker, Button, Card, FormField, Input, Select, ToggleSwitch } from './shared';
@@ -553,6 +554,29 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
               checked={preferences.autoNextEpisodeEnabled ?? (DEFAULT_PREFERENCES.autoNextEpisodeEnabled ?? true)}
               onChange={(v) => handlePreferenceChange('autoNextEpisodeEnabled', v)}
               ariaLabel="Episodio successivo automatico"
+            />
+          </div>
+
+          <Divider />
+
+          {/* C.1 (2026-05-15): consente all'utente di riaprire la cheatsheet
+              al prossimo avvio dopo averla dismessa con "Non mostrare più".
+              La cheatsheet rimane sempre richiamabile manualmente con `?`. */}
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <Keyboard className="w-icon-md h-icon-md text-content-muted" aria-hidden="true" />
+              <div>
+                <h3 className="font-medium text-content-primary">Mostra scorciatoie al primo avvio</h3>
+                <p className="text-sm text-content-muted mt-1">
+                  Apre automaticamente la scheda delle scorciatoie da tastiera la prossima volta
+                  che entri nel profilo. Resta sempre richiamabile manualmente con <kbd>?</kbd>.
+                </p>
+              </div>
+            </div>
+            <ToggleSwitch
+              checked={!(preferences.hasSeenShortcutsCheatsheet ?? false)}
+              onChange={(v) => handlePreferenceChange('hasSeenShortcutsCheatsheet', !v)}
+              ariaLabel="Mostra scorciatoie al primo avvio"
             />
           </div>
 

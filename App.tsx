@@ -220,6 +220,9 @@ function App() {
   // sessione corrente (in-memory) o permanentemente via preferenza profilo.
   const [aiHintSessionDismissed, setAiHintSessionDismissed] = useState(false);
   const [showCheatsheet, setShowCheatsheet] = useState(false);
+  // C.1 (2026-05-15): l'apertura automatica al primo avvio profilo mostra la
+  // checkbox "Non mostrare più". L'apertura manuale via `?` / `Shift+/` no.
+  const [cheatsheetOnboarding, setCheatsheetOnboarding] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [contentRefreshStatus, setContentRefreshStatus] = useState<ContentRefreshStatus>({ state: 'idle' });
@@ -291,6 +294,8 @@ function App() {
       if (isTyping) return;
       if (e.key === '?' || (e.shiftKey && e.key === '/')) {
         e.preventDefault();
+        // Apertura manuale: niente checkbox "Non mostrare più".
+        setCheatsheetOnboarding(false);
         setShowCheatsheet(prev => !prev);
         return;
       }
@@ -398,6 +403,23 @@ function App() {
             // l'hint può riapparire per il nuovo profilo (con la sua
             // preferenza `hideAiUnavailableHint` come gate permanente).
             setAiHintSessionDismissed(false);
+
+            // C.1 (2026-05-15): al primo avvio profilo apri la cheatsheet
+            // come onboarding (con checkbox "Non mostrare più"). Una volta
+            // chiusa, `hasSeenShortcutsCheatsheet` viene impostato a true e
+            // questo blocco non scatta più finché l'utente non la resetta
+            // dalle impostazioni. Skip se è già aperta o se altri modali
+            // identitari sono pending (login Xtream con creds mancanti).
+            if (!activeProfile.preferences?.hasSeenShortcutsCheatsheet && !showCheatsheet) {
+              // Piccolo delay per evitare di sovrapporsi al mount iniziale
+              // del catalogo (UX percepita: prima vede l'app, poi l'hint).
+              const t = window.setTimeout(() => {
+                setCheatsheetOnboarding(true);
+                setShowCheatsheet(true);
+              }, 600);
+              // Cleanup gestito dal cambio profilo successivo (id ref).
+              void t;
+            }
 
             if (activeProfile.xtreamCreds) {
                 // Try to load from cache immediately, then state updates
@@ -1044,8 +1066,31 @@ function App() {
           </div>
         )}
 
-        {/* Cheatsheet scorciatoie da tastiera (apertura: ?, Shift+/) */}
-        <ShortcutsCheatsheet isOpen={showCheatsheet} onClose={() => setShowCheatsheet(false)} />
+        {/* Cheatsheet scorciatoie da tastiera (apertura: ?, Shift+/, oppure
+            automatica al primo avvio profilo — vedi C.1). */}
+        <ShortcutsCheatsheet
+          isOpen={showCheatsheet}
+          onClose={() => {
+            setShowCheatsheet(false);
+            // L'apertura come onboarding va comunque registrata come "vista":
+            // se l'utente la chiude senza spuntare "Non mostrare più", non
+            // la riaprire al prossimo avvio (è già stata mostrata una volta).
+            if (cheatsheetOnboarding && activeProfile && !activeProfile.preferences?.hasSeenShortcutsCheatsheet) {
+              const updated = ProfileService.updatePreferences(activeProfile.id, { hasSeenShortcutsCheatsheet: true });
+              if (updated) setActiveProfile(updated);
+            }
+            setCheatsheetOnboarding(false);
+          }}
+          showDontShowAgain={cheatsheetOnboarding}
+          onDontShowAgain={() => {
+            // L'utente ha esplicitamente spuntato "Non mostrare più":
+            // identico al flag implicito, ma documenta l'intent dell'utente.
+            if (activeProfile) {
+              const updated = ProfileService.updatePreferences(activeProfile.id, { hasSeenShortcutsCheatsheet: true });
+              if (updated) setActiveProfile(updated);
+            }
+          }}
+        />
 
         {/* Palette di ricerca globale (apertura: Ctrl/Cmd+K) */}
         <CommandPalette
