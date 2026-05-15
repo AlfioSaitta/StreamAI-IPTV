@@ -15,6 +15,9 @@ export const DEFAULT_PREFERENCES: ProfilePreferences = {
   contentLastRefreshAt: undefined,
   contentLastRefreshError: undefined,
   continueWatchingCompletedThreshold: 0.95,
+  continueWatchingMoviesEnabled: false,
+  continueWatchingSeriesEnabled: true,
+  hideAiUnavailableHint: false,
   autoNextEpisodeEnabled: true
 };
 

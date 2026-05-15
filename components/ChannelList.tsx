@@ -48,6 +48,13 @@ interface ChannelListProps {
    */
   continueWatchingCompletedThreshold?: number;
   /**
+   * FIX 2026-05-15: abilita/disabilita la riga "Continua a guardare" per
+   * Film (default `false`) e Serie TV (default `true`). I canali Live
+   * non hanno il concetto di progress quindi non sono interessati.
+   */
+  continueWatchingMoviesEnabled?: boolean;
+  continueWatchingSeriesEnabled?: boolean;
+  /**
    * BUG-1 §2.3 Step 4: stato di salute per blocco (live/vod/series). Quando
    * il blocco corrente è in `error`, mostriamo un EmptyState dedicato con
    * il motivo e una CTA per riscaricare la lista.
@@ -264,6 +271,8 @@ const ChannelList: React.FC<ChannelListProps> = ({
   allChannels,
   onShowDetails,
   continueWatchingCompletedThreshold = 0.95,
+  continueWatchingMoviesEnabled = false,
+  continueWatchingSeriesEnabled = true,
   catalogHealth,
   onRefreshCatalog,
   contentRefreshStatus,
@@ -327,6 +336,15 @@ const ChannelList: React.FC<ChannelListProps> = ({
 
       return history
           .filter(h => h.progress && h.progress > 0 && h.progress < completedThreshold)
+          // FIX 2026-05-15: rispetta le preferenze per-tipo "Continua a
+          // guardare" (movies off di default, series on). I record `live`
+          // non hanno progress quindi sono già filtrati dal predicato
+          // precedente; non li tocchiamo.
+          .filter(h => {
+              if (h.type === 'movie'  && !continueWatchingMoviesEnabled)  return false;
+              if (h.type === 'series' && !continueWatchingSeriesEnabled) return false;
+              return true;
+          })
           // Filtra per tipo se non siamo nella Home
           .filter(h => {
               if (activeTab === 'home') return true;
@@ -356,7 +374,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
           })
           .sort((a, b) => b.timestamp - a.timestamp)
           .map(item => item.channel);
-  }, [indexedBaseCategories, history, activeTab, indexedAllChannels, indexedSeriesCategories, continueWatchingCompletedThreshold]);
+  }, [indexedBaseCategories, history, activeTab, indexedAllChannels, indexedSeriesCategories, continueWatchingCompletedThreshold, continueWatchingMoviesEnabled, continueWatchingSeriesEnabled]);
 
   const watchlistSet = useMemo(() => new Set(watchlistIds), [watchlistIds]);
 

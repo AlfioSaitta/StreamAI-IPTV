@@ -496,6 +496,28 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
               </a>
             </div>
           </div>
+
+          <Divider />
+
+          {/* FIX 2026-05-15: re-enable della notifica "AI non configurata"
+              dopo che l'utente l'ha silenziata con "Non mostrare più". */}
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <Sparkles className="w-icon-md h-icon-md text-content-muted" aria-hidden="true" />
+              <div>
+                <h3 className="font-medium text-content-primary">Notifica "AI non configurata"</h3>
+                <p className="text-sm text-content-muted mt-1">
+                  Mostra un promemoria discreto quando la chiave Gemini non è impostata.
+                  Si chiude da sola dopo qualche secondo.
+                </p>
+              </div>
+            </div>
+            <ToggleSwitch
+              checked={!(preferences.hideAiUnavailableHint ?? false)}
+              onChange={(v) => handlePreferenceChange('hideAiUnavailableHint', !v)}
+              ariaLabel='Notifica "AI non configurata"'
+            />
+          </div>
         </SectionCard>
 
         {/* Playback & Debug Settings */}
@@ -571,6 +593,52 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
               <option value="95">95% (default)</option>
               <option value="98">98%</option>
             </Select>
+          </div>
+
+          <Divider />
+
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <History className="w-icon-md h-icon-md text-content-muted" aria-hidden="true" />
+              <div>
+                <h3 className="font-medium text-content-primary">
+                  Continua a guardare — Film
+                </h3>
+                <p className="text-sm text-content-muted mt-1">
+                  Mostra la riga "Continua a guardare" per i film. Disabilitata
+                  di default: la maggior parte degli utenti vede i film una sola
+                  volta e non vuole vederli "in sospeso".
+                </p>
+              </div>
+            </div>
+            <ToggleSwitch
+              checked={preferences.continueWatchingMoviesEnabled ?? (DEFAULT_PREFERENCES.continueWatchingMoviesEnabled ?? false)}
+              onChange={(v) => handlePreferenceChange('continueWatchingMoviesEnabled', v)}
+              ariaLabel="Continua a guardare per i film"
+            />
+          </div>
+
+          <Divider />
+
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <History className="w-icon-md h-icon-md text-content-muted" aria-hidden="true" />
+              <div>
+                <h3 className="font-medium text-content-primary">
+                  Continua a guardare — Serie TV
+                </h3>
+                <p className="text-sm text-content-muted mt-1">
+                  Mostra la riga "Continua a guardare" per le serie TV.
+                  Abilitata di default per riprendere facilmente gli episodi
+                  interrotti.
+                </p>
+              </div>
+            </div>
+            <ToggleSwitch
+              checked={preferences.continueWatchingSeriesEnabled ?? (DEFAULT_PREFERENCES.continueWatchingSeriesEnabled ?? true)}
+              onChange={(v) => handlePreferenceChange('continueWatchingSeriesEnabled', v)}
+              ariaLabel="Continua a guardare per le serie TV"
+            />
           </div>
         </SectionCard>
 

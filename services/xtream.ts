@@ -301,9 +301,15 @@ export const loginXtream = async (creds: XtreamCredentials, forceRefresh = false
         });
       }
 
-      return Object.values(categoryMap)
-        .filter(c => c.channels.length > 0)
-        .sort((a, b) => a.name.localeCompare(b.name));
+      const filtered = Object.values(categoryMap).filter(c => c.channels.length > 0);
+      // FIX 2026-05-15: per la sezione Live mantieni l'ordine dei gruppi
+      // così come restituito dal server Xtream (l'utente lo configura sul
+      // provider in base a importanza/preferenze nazionali). VOD e Serie
+      // restano ordinate alfabeticamente per semplificare la ricerca in
+      // liste molto lunghe (centinaia di generi).
+      return type === 'live'
+        ? filtered
+        : filtered.sort((a, b) => a.name.localeCompare(b.name));
     };
 
     // Estrai i dati grezzi (array vuoto su errore: la health structure tiene

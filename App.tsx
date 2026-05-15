@@ -58,7 +58,7 @@ import { ProfileService, DEFAULT_PREFERENCES } from './services/profileService.t
 import { CacheService } from './services/cacheService.ts';
 import { i18n } from './services/i18n.ts';
 import { Category, Channel, XtreamCredentials, StreamType, Profile, XtreamContent } from './types.ts';
-import { Server, Wifi, Sparkles } from 'lucide-react';
+import { Server, Wifi, Sparkles, X } from 'lucide-react';
 import { platformService } from './services/platformService.ts';
 import { hasAiApiKey, isAiAvailable, isAiTemporarilySuspended } from './services/geminiService.ts';
 import { EpgReminderService, type ReminderFiredEvent } from './services/epg/reminderService.ts';
@@ -109,25 +109,85 @@ const NetworkStatusBanner = () => {
   );
 };
 
-const AiUnavailableHint = ({ hasKey, isSuspended, onOpenSettings }: { hasKey: boolean; isSuspended: boolean; onOpenSettings: () => void }) => {
+const AiUnavailableHint = ({
+  hasKey,
+  isSuspended,
+  onOpenSettings,
+  onDismiss,
+  onDontShowAgain,
+}: {
+  hasKey: boolean;
+  isSuspended: boolean;
+  onOpenSettings: () => void;
+  onDismiss: () => void;
+  onDontShowAgain: () => void;
+}) => {
   const message = isSuspended
     ? 'AI sospesa temporaneamente dopo errori o quota esaurita. Riproverà automaticamente più tardi.'
     : 'Gemini non configurato. Aggiungi una chiave API nelle impostazioni profilo per abilitare i consigli AI.';
 
+  // FIX 2026-05-15: auto-dismiss dopo 8s + checkbox "Non mostrare più".
+  // L'hint resta sempre dismissibile manualmente. La preferenza
+  // `hideAiUnavailableHint` lo silenzia permanentemente per il profilo.
+  const [dontShow, setDontShow] = useState(false);
+  useEffect(() => {
+    const id = setTimeout(() => {
+      if (dontShow) onDontShowAgain();
+      else onDismiss();
+    }, 8000);
+    return () => clearTimeout(id);
+    // `dontShow` letto al fire del timer: deps minime per evitare reset.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleClose = () => {
+    if (dontShow) onDontShowAgain();
+    else onDismiss();
+  };
+
   return (
-    <div className="fixed bottom-6 right-6 z-40 max-w-sm rounded-2xl border border-white/10 bg-gray-900/95 p-4 text-gray-300 shadow-2xl backdrop-blur-xl">
+    <div
+      role="status"
+      aria-live="polite"
+      className="fixed bottom-6 right-6 z-40 max-w-sm rounded-modal border border-DEFAULT bg-surface-1/95 p-4 text-content-secondary shadow-elev-3 backdrop-blur-xl animate-fade-in"
+    >
       <div className="flex items-start gap-3">
-        <div className="rounded-full bg-purple-500/20 p-2">
-          <Sparkles className="w-5 h-5 text-purple-300" />
+        <div className="rounded-full bg-brand-accent/20 p-2 shrink-0">
+          <Sparkles className="w-icon-md h-icon-md text-brand-accent" aria-hidden="true" />
         </div>
-        <div className="min-w-0">
-          <p className="font-semibold text-white">{isSuspended ? 'AI temporaneamente non disponibile' : 'AI non configurata'}</p>
-          <p className="mt-1 text-sm text-gray-400">{message}</p>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <p className="font-semibold text-content-primary">
+              {isSuspended ? 'AI temporaneamente non disponibile' : 'AI non configurata'}
+            </p>
+            <button
+              type="button"
+              onClick={handleClose}
+              aria-label="Chiudi notifica"
+              className="tv-focus-dense -mr-1 -mt-1 p-1 rounded-control text-content-muted hover:text-content-primary hover:bg-surface-2"
+            >
+              <X className="w-icon-sm h-icon-sm" aria-hidden="true" />
+            </button>
+          </div>
+          <p className="mt-1 text-sm text-content-muted">{message}</p>
           {!hasKey && (
-            <button onClick={onOpenSettings} className="tv-focus mt-3 rounded-lg bg-purple-600 px-4 py-2 text-sm font-bold text-white hover:bg-purple-500">
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              className="tv-focus mt-3 rounded-control bg-brand-accent hover:bg-brand-accent-hover px-4 py-2 text-sm font-semibold text-white"
+            >
               Apri impostazioni
             </button>
           )}
+          <label className="mt-3 flex items-center gap-2 text-xs text-content-muted cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={dontShow}
+              onChange={(e) => setDontShow(e.target.checked)}
+              className="w-4 h-4 rounded border-DEFAULT bg-surface-2 text-brand-accent focus:ring-brand-accent/40"
+            />
+            <span>Non mostrare più</span>
+          </label>
         </div>
       </div>
     </div>
@@ -156,6 +216,9 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [showXtreamModal, setShowXtreamModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  // FIX 2026-05-15: dismiss della notifica "AI non configurata" per la
+  // sessione corrente (in-memory) o permanentemente via preferenza profilo.
+  const [aiHintSessionDismissed, setAiHintSessionDismissed] = useState(false);
   const [showCheatsheet, setShowCheatsheet] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
@@ -331,7 +394,11 @@ function App() {
     if (activeProfile?.id) {
         if (activeProfile.id !== lastProfileIdRef.current) {
             lastProfileIdRef.current = activeProfile.id;
-            
+            // Reset il dismiss della notifica AI quando si cambia profilo:
+            // l'hint può riapparire per il nuovo profilo (con la sua
+            // preferenza `hideAiUnavailableHint` come gate permanente).
+            setAiHintSessionDismissed(false);
+
             if (activeProfile.xtreamCreds) {
                 // Try to load from cache immediately, then state updates
                 handleXtreamLogin(activeProfile.xtreamCreds, false); 
@@ -853,6 +920,14 @@ function App() {
               activeProfile.preferences?.continueWatchingCompletedThreshold
               ?? DEFAULT_PREFERENCES.continueWatchingCompletedThreshold
             }
+            continueWatchingMoviesEnabled={
+              activeProfile.preferences?.continueWatchingMoviesEnabled
+              ?? DEFAULT_PREFERENCES.continueWatchingMoviesEnabled
+            }
+            continueWatchingSeriesEnabled={
+              activeProfile.preferences?.continueWatchingSeriesEnabled
+              ?? DEFAULT_PREFERENCES.continueWatchingSeriesEnabled
+            }
             // BUG-1 §2.3 Step 4: passa health + handler refresh per
             // mostrare EmptyState con CTA quando un blocco è in errore.
             catalogHealth={catalogHealth}
@@ -899,11 +974,17 @@ function App() {
             </Suspense>
         )}
 
-        {!currentChannel && !selectedSeries && (liveCategories.length > 0 || vodCategories.length > 0) && !isAiAvailable(activeProfile.preferences?.geminiApiKey) && (
+        {!currentChannel && !selectedSeries && (liveCategories.length > 0 || vodCategories.length > 0) && !isAiAvailable(activeProfile.preferences?.geminiApiKey) && !aiHintSessionDismissed && !activeProfile.preferences?.hideAiUnavailableHint && (
             <AiUnavailableHint
               hasKey={hasAiApiKey(activeProfile.preferences?.geminiApiKey)}
               isSuspended={isAiTemporarilySuspended()}
               onOpenSettings={() => setShowSettings(true)}
+              onDismiss={() => setAiHintSessionDismissed(true)}
+              onDontShowAgain={() => {
+                  setAiHintSessionDismissed(true);
+                  const updated = ProfileService.updatePreferences(activeProfile.id, { hideAiUnavailableHint: true });
+                  if (updated) setActiveProfile(updated);
+              }}
             />
         )}
 

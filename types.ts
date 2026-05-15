@@ -169,6 +169,24 @@ export interface ProfilePreferences {
    */
   continueWatchingCompletedThreshold?: number;
   /**
+   * Mostra la riga "Continua a guardare" per i Film. Default `false`:
+   * molti utenti vedono i film una volta sola e non vogliono che restino
+   * "in sospeso" se interrompono per qualche minuto.
+   */
+  continueWatchingMoviesEnabled?: boolean;
+  /**
+   * Mostra la riga "Continua a guardare" per le Serie TV. Default `true`:
+   * il caso d'uso tipico (riprendere un episodio interrotto) ne giustifica
+   * l'abilitazione automatica.
+   */
+  continueWatchingSeriesEnabled?: boolean;
+  /**
+   * Quando `true`, la notifica "AI non configurata" non viene più mostrata
+   * (l'utente l'ha esplicitamente silenziata con la checkbox "Non mostrare
+   * più"). Resettato a `false` solo dalla schermata Impostazioni.
+   */
+  hideAiUnavailableHint?: boolean;
+  /**
    * Show a 10s "Up Next" countdown overlay during the last seconds of an
    * episode (Series only) and auto-play the next episode unless dismissed.
    * Default `true`.
