@@ -4,7 +4,7 @@
 > `IMPROVEMENT_PLAN.md` (P0-P8) e `IMPROVEMENT_PLAN_V2.md` (URG-1, UI-1, B-K).
 > I file separati sono stati rimossi: questo è l'unico piano valido.
 >
-> **Ultimo aggiornamento:** 2026-05-14
+> **Ultimo aggiornamento:** 2026-05-15
 > **Baseline reale (da `package.json`):** React **19.2.6**, Vite 5,
 > Electron 37, Capacitor 7, Video.js 8.23, hls.js 1.5, mpegts.js 1.7,
 > `@google/genai` 1.34, TypeScript strict, Tailwind CSS, Vitest 3.2.
@@ -20,7 +20,7 @@
 ## 📋 Indice
 
 - [0. Convenzioni di gestione del piano](#0-convenzioni-di-gestione-del-piano)
-- [📊 1. Stato di completamento globale](#-1-stato-di-completamento-globale-2026-05-14)
+- [📊 1. Stato di completamento globale](#-1-stato-di-completamento-globale-2026-05-15)
 - [🐞 2. BUG-1: sezione "Films" sempre vuota](#-2-bug-1-sezione-films-sempre-vuota)
 - [🚨 3. URG-1: Seek VOD bloccante](#-3-urg-1-seek-vod-bloccante)
 - [🎨 4. UI-1: Design System v1](#-4-ui-1-design-system-v1)
@@ -67,7 +67,7 @@ Per ogni tranche idealmente chiudere con:
 
 ---
 
-## 📊 1. Stato di completamento globale (2026-05-14)
+## 📊 1. Stato di completamento globale (2026-05-15)
 
 | Area | Stato | Note |
 | ---- | ----- | ---- |
@@ -89,8 +89,9 @@ Per ogni tranche idealmente chiudere con:
 | B.4 Routing dichiarativo (`useBackStack`) | ✅ | |
 | B.5 Upgrade React 19 | ✅ | `useActionState`, `useTransition` |
 | C.1 Cheatsheet shortcut | 🚧 | overlay ok, onboarding al primo avvio mancante |
-| C.3 Cmd+K palette | ✅ | recent searches + filtri chip |
-| C.4 Continua a guardare + auto-next | ✅ | soglia configurabile + countdown |
+| C.2 Onboarding profilo | ✅ | wizard 3 step + test Xtream + import M3U remoto |
+| C.3 Cmd+K palette | ✅ | recent searches + filtri chip + filtri avanzati |
+| C.4 Continua a guardare + auto-next | ✅ | soglia + countdown + toggle per-tipo (film/serie) |
 | D.1 EPG (mini + Guide + reminder) | ✅ | Fasi 1-3 |
 | D.4 Sottotitoli MVP (SRT/VTT sideload) | 🚧 | manca HLS embed + OpenSub |
 | D.5 Sleep timer | ✅ | preset + fine programma |
@@ -101,7 +102,7 @@ Per ogni tranche idealmente chiudere con:
 | G.1 vitest + test moduli puri | 🚧 | 161/161 verdi, coverage parziale |
 | K Quick wins | 🚧 | 7/10 (mancano bonjour-service, content-visibility) |
 
-**Test suite:** 161/161 verdi (13 file), `npm run typecheck` clean,
+**Test suite:** 199/199 verdi (17 file), `npm run typecheck` clean,
 `npm run build` Vite 5 verde.
 
 ### Hotspot di complessità (file > 700 righe)
@@ -730,6 +731,10 @@ Tutti i componenti chiave migrati a DS v1:
 - [x] Soglia "completato" configurabile (default 95%, `[0.70, 0.99]`).
 - [x] Auto-next episodio con countdown 10s (`useAutoNextEpisode` +
   `AutoNextOverlay`). Riarmo se seek-back > 30s dalla fine.
+- [x] **Toggle per-tipo (2026-05-15):** `ProfilePreferences.continueWatchingMoviesEnabled`
+  (default `false`) e `continueWatchingSeriesEnabled` (default `true`). Il
+  carosello "Continua a guardare" in `ChannelList` filtra per tipo prima
+  della tab attiva. Toggle dedicati in `ProfileSettings → Riproduzione`.
 - [ ] Sync progress Desktop ↔ Android (D.6 BYOC).
 
 ### C.5 Gesture touch Android ⏳
@@ -751,6 +756,21 @@ Tutti i componenti chiave migrati a DS v1:
 
 - [ ] Cambio lingua a caldo senza reload (B.3 ha già il lazy load).
 - [ ] Locale data/ora con `Intl.DateTimeFormat`.
+
+### C.8 UX papercuts (2026-05-15) ✅
+
+- [x] **AI hint dismissibile.** Il banner "AI non configurata" mostrato in
+  `App.tsx` (`AiUnavailableHint`) ora ha: auto-dismiss 8 s, pulsante `X`,
+  checkbox "Non mostrare più" che setta `ProfilePreferences.hideAiUnavailableHint`.
+  Stato in-memory `aiHintSessionDismissed` per silenziarlo nella sessione
+  senza toccare il profilo; reset al cambio profilo. Componenti DS-v1
+  (`Card`, `IconButton`, `text-state-warning`).
+- [x] **Ordine gruppi Live preservato.** `services/xtream.ts` →
+  `processContent()` ora mantiene l'ordine d'inserimento delle categorie
+  per `type === 'live'` (così come restituite dal server Xtream),
+  conservando l'ordinamento alfabetico solo per `movie`/`series`. Risolve
+  la sensazione di "categorie mescolate" segnalata dagli utenti.
+- [x] **Toggle Continua a guardare per-tipo.** Vedi C.4.
 
 ---
 

@@ -22,15 +22,19 @@ Questo file serve come guida e contesto per gli agenti AI che collaborano allo s
 ## 📂 Struttura Directory Chiave
 - `/components`: Componenti UI.
   - `VideoPlayerNew.tsx`: Player unificato. Gestisce Video.js, OSD, Timeline, scorciatoie tastiera e bridge verso player nativo Android.
-  - `ChannelList.tsx`: Lista canali virtualizzata (react-window) per alte prestazioni.
+  - `ChannelList.tsx`: Lista canali virtualizzata (react-window) per alte prestazioni. Carosello "Continua a guardare" filtrato per tipo via `ProfilePreferences.continueWatching{Movies,Series}Enabled`.
   - `AIRecommender.tsx`: Interfaccia utente per l'assistente AI.
   - `CastDevicePicker.tsx`: UI per la selezione dei dispositivi di casting.
+  - `OnboardingWizard.tsx`: Wizard 3 step per creazione profilo (identità → fonte Xtream/M3U/skip → preferenze) con test connettività in tempo reale e validazione URL `.m3u`.
+  - `player/StreamDiagnostics.tsx`: Pannello diagnostica stream (buffer health live, ring buffer 10 errori, URL sanificato, warning codec/HDR).
 - `/services`: Logica di business (Singleton pattern).
   - `platformService.ts`: Astrazione per gestire differenze tra Electron, Web e Capacitor.
   - `geminiService.ts`: Logica di interazione con Google Gemini.
-  - `xtream.ts`: Client API per server IPTV Xtream Codes.
+  - `xtream.ts`: Client API per server IPTV Xtream Codes. `processContent()` preserva l'ordine d'inserimento dei gruppi `live` (alfabetico solo per `movie`/`series`).
   - `deviceDiscovery.ts`: Logica di scansione rete per trovare dispositivi Cast/DLNA.
   - `advertisingService.js`: (Electron Main Process) Servizio per annunciare l'app via mDNS/SSDP. **Deve essere incluso nella build.**
+  - `profileService.ts`: CRUD profili. `DEFAULT_PREFERENCES` include `continueWatchingMoviesEnabled` (false), `continueWatchingSeriesEnabled` (true), `hideAiUnavailableHint` (false), `autoNextEpisodeEnabled` (true).
+  - `parser.ts` / worker pipeline: parsing M3U asincrono (`parseM3UAsync`); per playlist >256 kB la parsing è delegata a Web Worker, per non bloccare la UI all'attivazione del profilo.
 - `/android`: Progetto nativo Android (Gradle).
 - `/scripts`: Script di automazione (es. patching FFmpeg per Electron).
 
@@ -133,6 +137,9 @@ Queste funzionalità definiscono l'identità di StreamAI e devono essere preserv
 2.  **Player Android:** Su Android, il tag `<video>` HTML5 ha performance scarse per IPTV. Usare sempre il player nativo tramite `nativeVideoPlayer.ts` quando `platformService.isNative` è true.
 3.  **Mixed Content:** L'app deve poter riprodurre stream HTTP (non sicuri) anche se l'app è servita in contesto sicuro. Questo è configurato in `electron/main.js` e `android/app/src/main/AndroidManifest.xml` (usesCleartextTraffic).
 4.  **Electron Build:** Assicurarsi che la cartella `services` sia inclusa in `package.json` -> `build.files` affinché `advertisingService.js` sia disponibile nella build di produzione (ASAR).
+5.  **Ordine gruppi Live:** Non riordinare alfabeticamente le categorie `live` in `xtream.ts → processContent()`. L'utente si aspetta lo stesso ordine del server. L'ordinamento alfabetico va applicato solo a `movie`/`series`.
+6.  **AI hint dismiss:** Quando si modifica `AiUnavailableHint` in `App.tsx`, preservare le due dimensioni di stato: `aiHintSessionDismissed` (in-memory, reset al cambio profilo) **e** `ProfilePreferences.hideAiUnavailableHint` (persistente, gestito dalla checkbox "Non mostrare più").
+7.  **Profilo M3U:** Se `Profile.playlistUrl` è valorizzato, all'attivazione del profilo `App.tsx` carica e fa parsing della playlist via `parseM3UAsync` (worker se >256 kB) **prima** di mostrare il catalogo. Non bypassare questo step.
 
 ## 🚀 Comandi Utili
 - `npm run dev`: Avvio sviluppo Electron.

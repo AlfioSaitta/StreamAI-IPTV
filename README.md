@@ -30,14 +30,19 @@ Si distingue per l'integrazione con **Google Gemini AI**, che offre raccomandazi
 - **Caching Intelligente**: Risposte AI salvate localmente per ridurre latenza e costi API.
 
 ### 👤 Profili Utente
+- **Onboarding guidato**: wizard a 3 step (identità → fonte contenuti → preferenze) con scelta avatar/colore, **test connessione Xtream in tempo reale** e **import M3U remoto** (validazione `#EXTM3U` + conteggio canali).
 - **Multi-profilo**: Supporto per più utenti con preferenze separate.
 - **Cronologia separata**: Ogni profilo mantiene la propria cronologia di visione.
 - **Progresso salvato**: Riprendi esattamente da dove avevi interrotto.
+- **Continua a guardare per-tipo**: toggle indipendenti per Film e Serie (default: Serie ON, Film OFF), così l'utente sceglie cosa tenere "in sospeso".
+- **AI hint dismissibile**: il banner "AI non configurata" si chiude da solo dopo 8 s, può essere chiuso con `X` o silenziato in modo permanente tramite checkbox "Non mostrare più".
 - **Catalogo aggiornabile**: da Impostazioni puoi riscaricare manualmente Live/VOD/Serie dal server Xtream e abilitare l'aggiornamento automatico in background con frequenza configurabile.
+- **Ordine gruppi Live preservato**: per la sezione Live i gruppi sono mostrati nello stesso ordine restituito dal server Xtream (l'ordinamento alfabetico resta solo su Film/Serie).
 
 ### 🔧 Ottimizzazioni Tecniche
 - **Virtualizzazione Liste**: Rendering efficiente per playlist con migliaia di canali (react-window).
 - **Memoization**: Riduzione drastica dei re-render inutili per fluidità UI.
+- **Web Worker pipeline**: parsing M3U pesanti (>256 kB) e indicizzazione catalogo in background tramite worker, così il main thread resta reattivo durante gli aggiornamenti playlist.
 - **Buffering differenziato**: Configurazioni separate per Live/VOD/Series.
 - **Cache immagini**: Download intelligente delle copertine per risparmio banda.
 - **Avvio rapido**: Streaming ottimizzato per partenza immediata.
@@ -313,6 +318,13 @@ Il player mostra un overlay diagnostico quando uno stream fallisce:
 - pulsante **Riprova** con limite di retry per evitare loop infiniti;
 - sezione **Dettagli tecnici** con URL sanitizzato, protocollo, MIME e motore usato;
 - pulsante **Info stream** per raccogliere codec video/audio, risoluzione, bitrate, container, protocollo, qualità playback e stato supporto.
+
+In aggiunta, il pannello **Stream Diagnostics** (`components/player/StreamDiagnostics.tsx`, slide-from-right DS v1) mostra in tempo reale:
+
+- **Buffer health** aggiornato ogni secondo mentre il pannello è aperto (livello di buffer, frame dropped, jitter quando esposto dall'engine);
+- **Ring buffer degli ultimi 10 errori** del playback (`playbackError`) con timestamp, tipo e messaggio sanitizzato;
+- **URL sorgente sanitizzato** con pulsante copia (credenziali Xtream mascherate);
+- **Warning automatici** per profili HEVC/HDR/Dolby Vision e frame drop ricorrenti.
 
 Per stream live MPEG-TS/HLS il rilevamento codec usa più fonti: Video.js/HLS.js, track API browser, manifest HLS `CODECS`, byte iniziali dello stream e parsing PAT/PMT MPEG-TS quando possibile. Alcuni provider bloccano fetch paralleli o CORS: in quei casi il pannello mostra comunque il metodo di rilevamento e l'affidabilità del dato.
 

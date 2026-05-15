@@ -35,18 +35,23 @@ streamai-iptv/
 │   ├── VideoPlayerNew.tsx     # Unified player (Video.js + Native + OSD)
 │   ├── AIRecommender.tsx      # AI assistant interface
 │   ├── ChannelList.tsx        # Virtualized channel list (react-window)
-│   └── CastDevicePicker.tsx   # Cast device selection UI
+│   ├── CastDevicePicker.tsx   # Cast device selection UI
+│   ├── OnboardingWizard.tsx   # 3-step profile creation wizard (identity → source → prefs)
+│   └── player/
+│       └── StreamDiagnostics.tsx  # Live buffer health + recent errors panel
 ├── services/           # Business logic (Singleton pattern)
 │   ├── platformService.ts     # Platform abstraction (Electron/Web/Capacitor)
 │   ├── geminiService.ts       # Google Gemini AI integration
-│   ├── xtream.ts              # Xtream Codes API client
+│   ├── xtream.ts              # Xtream Codes API client (preserves live group order)
+│   ├── profileService.ts      # Profile CRUD + DEFAULT_PREFERENCES
+│   ├── parser.ts              # M3U parser + parseM3UAsync (worker for >256 kB)
 │   ├── deviceDiscovery.ts     # Network scanning for Cast/DLNA devices
 │   └── advertisingService.js  # (Electron Main) mDNS/SSDP advertising
 ├── scripts/            # Build automation scripts
 │   └── patch-ffmpeg.js        # HEVC codec patching for Electron
 ├── android/            # Native Android project (Gradle)
 ├── main.js             # Electron entry point
-├── App.tsx             # Main React component
+├── App.tsx             # Main React component (also: AiUnavailableHint banner)
 └── AGENTS.md           # Detailed technical documentation for AI agents
 ```
 
@@ -144,6 +149,10 @@ These features define StreamAI's identity and must be preserved:
 2. **Android Player:** HTML5 `<video>` has poor IPTV performance on Android. Use native player via `nativeVideoPlayer.ts` when `platformService.isNative` is true.
 3. **Mixed Content:** App must play HTTP (insecure) streams even in secure context. Configured in `electron/main.js` and `android/app/src/main/AndroidManifest.xml` (usesCleartextTraffic).
 4. **Electron Build:** Ensure `services` folder is included in `package.json` → `build.files` so `advertisingService.js` is available in production ASAR build.
+5. **Xtream Live group order:** Do NOT sort `live` categories alphabetically in `services/xtream.ts → processContent()`. Users expect the server-defined order. Alphabetical sorting applies only to `movie`/`series`.
+6. **AI hint dismissal:** `AiUnavailableHint` in `App.tsx` uses two state layers — `aiHintSessionDismissed` (in-memory, resets on profile change) and `ProfilePreferences.hideAiUnavailableHint` (persistent, toggled by "Non mostrare più" checkbox). Preserve both when editing.
+7. **M3U profiles:** When `Profile.playlistUrl` is set, `App.tsx` must load and parse the playlist via `parseM3UAsync` (worker for >256 kB) on profile activation before rendering the catalog.
+8. **Per-type Continue Watching:** `ChannelList` filters the "Continue Watching" rail using `ProfilePreferences.continueWatchingMoviesEnabled` (default `false`) and `continueWatchingSeriesEnabled` (default `true`). Keep both toggles wired through `App.tsx` and `ProfileSettings.tsx`.
 
 ## Additional Context
 
