@@ -24,6 +24,9 @@ export interface Channel {
   tmdbId?: number; // Store TMDB ID if found
   /** EPG channel identifier (from M3U `tvg-id` or Xtream `epg_channel_id`). */
   tvgId?: string;
+  /** Epoch ms quando lo stream è stato aggiunto al provider (Xtream `added`).
+   *  Usato dal filtro "Nuovi" della ricerca globale (C.3). */
+  addedAt?: number;
 }
 
 export interface Category {
@@ -60,6 +63,31 @@ export interface XtreamContent {
   live: Category[];
   vod: Category[];
   series: Category[];
+  /**
+   * BUG-1 (§2.3 piano consolidato): stato di salute per blocco catalogo.
+   * - `ok`     → la fetch ha prodotto contenuti validi (almeno 1 stream).
+   * - `empty`  → server ha risposto OK ma con 0 stream (es. categoria VOD
+   *              disabilitata sull'abbonamento). Non è un errore tecnico
+   *              ma va segnalato all'utente.
+   * - `error`  → fetch fallita (network/parse/formato non valido).
+   * - `stale`  → blocco riusato dal precedente cache hit perché la nuova
+   *              fetch è regredita (es. 0 VOD mentre prima ne avevamo 800).
+   */
+  health: {
+    live: XtreamBlockHealth;
+    vod: XtreamBlockHealth;
+    series: XtreamBlockHealth;
+    /** Timestamp dell'ultima fetch riuscita (per il blocco più recente). */
+    fetchedAt: number;
+  };
+}
+
+export interface XtreamBlockHealth {
+  status: 'ok' | 'empty' | 'error' | 'stale';
+  /** Motivo umanamente leggibile (es. "Provider error: ...", "Network timeout"). */
+  reason?: string;
+  /** Numero di stream "grezzi" ricevuti (prima dell'aggregazione in categorie). */
+  itemCount?: number;
 }
 
 /**
@@ -172,6 +200,14 @@ export interface Profile {
   servers?: XtreamServer[];
   /** ID del server attivo (deve esistere in `servers`). */
   activeServerId?: string;
+  /**
+   * URL di una playlist M3U remota (alternativa a Xtream Codes, C.2).
+   * Quando presente e `xtreamCreds` è null, `App.tsx` scarica e fa parse
+   * della playlist via `parseM3UAsync` (worker se >256kB) per popolare la
+   * sezione Live. Le sezioni Movies/Series restano vuote in modalità M3U
+   * pura (le playlist M3U classiche non distinguono i tipi).
+   */
+  playlistUrl?: string;
   history: WatchHistoryItem[];
   watchlist: string[];
   preferences?: ProfilePreferences;

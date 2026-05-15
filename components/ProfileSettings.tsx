@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Profile, ProfilePreferences } from '../types.ts';
+import { Profile, ProfilePreferences, XtreamContent } from '../types.ts';
 import { ProfileService, DEFAULT_PREFERENCES } from '../services/profileService.ts';
 import { CacheService } from '../services/cacheService.ts';
 import { useLanguage } from '../contexts/LanguageContext.tsx';
@@ -37,6 +37,9 @@ interface ProfileSettingsProps {
   isContentRefreshing?: boolean;
   contentRefreshMessage?: string;
   onShowShortcuts?: () => void;
+  /** BUG-1 §2.3 Step 4: stato per blocco (live/vod/series) per mostrare
+   *  un riepilogo "Ultimo stato" nella sezione Sincronizzazione catalogo. */
+  catalogHealth?: XtreamContent['health'] | null;
 }
 
 const LANGUAGES = [
@@ -125,6 +128,7 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
   onRefreshContent,
   isContentRefreshing = false,
   contentRefreshMessage,
+  catalogHealth,
 }) => {
   const { t } = useLanguage();
   const [preferences, setPreferences] = useState<ProfilePreferences>(
@@ -575,6 +579,48 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
           {profile.xtreamCreds && (
             <div className="mb-6">
               <XtreamHealthBadge creds={profile.xtreamCreds} />
+            </div>
+          )}
+
+          {/* BUG-1 §2.3 Step 4: riepilogo "Ultimo stato" per blocco catalogo.
+              Permette all'utente di capire a colpo d'occhio se Films/Series
+              sono in errore senza aprire la tab corrispondente. */}
+          {catalogHealth && (
+            <div className="mb-6 grid grid-cols-1 md:grid-cols-3 gap-3">
+              {(['live', 'vod', 'series'] as const).map((key) => {
+                const block = catalogHealth[key];
+                const label =
+                  key === 'live' ? 'Live' : key === 'vod' ? 'Film' : 'Serie TV';
+                const tone =
+                  block.status === 'ok'      ? 'text-state-success' :
+                  block.status === 'stale'   ? 'text-state-warning' :
+                  block.status === 'empty'   ? 'text-state-warning' :
+                                                'text-state-error';
+                const dot =
+                  block.status === 'ok'      ? 'bg-state-success' :
+                  block.status === 'stale'   ? 'bg-state-warning' :
+                  block.status === 'empty'   ? 'bg-state-warning' :
+                                                'bg-state-error';
+                const statusText =
+                  block.status === 'ok'    ? `OK (${block.itemCount ?? 0} elementi)` :
+                  block.status === 'stale' ? `Cache (${block.itemCount ?? 0} elementi)` :
+                  block.status === 'empty' ? 'Vuoto' :
+                                              'Errore';
+                return (
+                  <Card key={key} elevation="flat" padding="sm">
+                    <div className="flex items-center gap-2">
+                      <span className={`inline-block w-2 h-2 rounded-full ${dot}`} aria-hidden="true" />
+                      <span className="text-sm font-medium text-content-primary">
+                        Ultimo stato {label}
+                      </span>
+                    </div>
+                    <p className={`mt-1 text-sm font-semibold ${tone}`}>{statusText}</p>
+                    {block.reason && (
+                      <p className="mt-1 text-xs text-content-muted line-clamp-2">{block.reason}</p>
+                    )}
+                  </Card>
+                );
+              })}
             </div>
           )}
 

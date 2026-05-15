@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useMemo, useDeferredValue } from 'react';
-import { Category, Channel, StreamType, WatchHistoryItem } from '../types.ts';
-import { Search, Play, Info, ChevronRight, LogOut, Clock, RefreshCw, BookmarkPlus, BookmarkCheck, Settings, X, Tv, SearchX, Server, Calendar } from 'lucide-react';
+import { Category, Channel, StreamType, WatchHistoryItem, XtreamContent } from '../types.ts';
+import { Search, Play, Info, ChevronRight, LogOut, Clock, RefreshCw, BookmarkPlus, BookmarkCheck, Settings, X, Tv, SearchX, Server, Calendar, AlertTriangle, Film as FilmIcon } from 'lucide-react';
 import CachedImage from './CachedImage.tsx';
 import { useLanguage } from '../contexts/LanguageContext.tsx';
 import EmptyState from './shared/EmptyState.tsx';
@@ -47,6 +47,16 @@ interface ChannelListProps {
    * default 0.95 (preserves previous behaviour). C.4.
    */
   continueWatchingCompletedThreshold?: number;
+  /**
+   * BUG-1 §2.3 Step 4: stato di salute per blocco (live/vod/series). Quando
+   * il blocco corrente è in `error`, mostriamo un EmptyState dedicato con
+   * il motivo e una CTA per riscaricare la lista.
+   */
+  catalogHealth?: XtreamContent['health'] | null;
+  /** Trigger forzato del refresh catalogo (bypassa la cache). */
+  onRefreshCatalog?: () => void;
+  /** Stato corrente del refresh (idle/refreshing/success/error) per disabilitare la CTA. */
+  contentRefreshStatus?: { state: 'idle' | 'refreshing' | 'success' | 'error'; message?: string };
 }
 
 // --- CHANNEL ITEM COMPONENT ---
@@ -254,6 +264,9 @@ const ChannelList: React.FC<ChannelListProps> = ({
   allChannels,
   onShowDetails,
   continueWatchingCompletedThreshold = 0.95,
+  catalogHealth,
+  onRefreshCatalog,
+  contentRefreshStatus,
 }) => {
   const { t } = useLanguage();
   const screenRef = useRef<HTMLDivElement>(null);
@@ -756,6 +769,61 @@ const ChannelList: React.FC<ChannelListProps> = ({
 
       {/* --- CONTENT ROWS (VIRTUALIZED) --- */}
       <div className={`relative z-20 px-4 md:px-12 space-y-10 ${!searchTerm && featuredItem ? '-mt-32' : 'mt-28'}`}>
+          {/* BUG-1 §2.3 Step 4: banner soft quando un blocco è in `error` /
+              `stale` ma altri funzionano (es. Live OK, VOD non scaricato).
+              In Home l'utente non vedrebbe la sezione interamente vuota:
+              meglio avvisare con un alert non invasivo + CTA Riscarica. */}
+          {!searchTerm && catalogHealth && (() => {
+            const problemBlocks: Array<{ name: string; reason: string; status: string }> = [];
+            if (catalogHealth.vod.status === 'error' || catalogHealth.vod.status === 'stale') {
+              problemBlocks.push({ name: 'Film', reason: catalogHealth.vod.reason || 'Errore sconosciuto', status: catalogHealth.vod.status });
+            }
+            if (catalogHealth.series.status === 'error' || catalogHealth.series.status === 'stale') {
+              problemBlocks.push({ name: 'Serie TV', reason: catalogHealth.series.reason || 'Errore sconosciuto', status: catalogHealth.series.status });
+            }
+            if (catalogHealth.live.status === 'error' || catalogHealth.live.status === 'stale') {
+              problemBlocks.push({ name: 'Live', reason: catalogHealth.live.reason || 'Errore sconosciuto', status: catalogHealth.live.status });
+            }
+            if (problemBlocks.length === 0) return null;
+            // Mostra il banner solo se nel tab attivo c'è già qualcosa da
+            // vedere (altrimenti l'EmptyState health-aware fa il lavoro).
+            const isErrorTone = problemBlocks.some(b => b.status === 'error');
+            const refreshing = contentRefreshStatus?.state === 'refreshing';
+            return (
+              <div
+                role="status"
+                className={`flex items-start gap-3 rounded-control border px-4 py-3 text-sm ${
+                  isErrorTone
+                    ? 'border-state-error/40 bg-state-error/10 text-state-error'
+                    : 'border-state-warning/40 bg-state-warning/10 text-state-warning'
+                }`}
+              >
+                <AlertTriangle className="w-icon-md shrink-0 mt-0.5" aria-hidden="true" />
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-content-primary">
+                    {isErrorTone
+                      ? `Catalogo parzialmente disponibile (${problemBlocks.map(b => b.name).join(', ')})`
+                      : `Alcune sezioni mostrano dati salvati in cache (${problemBlocks.map(b => b.name).join(', ')})`}
+                  </p>
+                  <p className="text-content-secondary mt-0.5 line-clamp-2">
+                    {problemBlocks[0].reason}
+                  </p>
+                </div>
+                {onRefreshCatalog && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={onRefreshCatalog}
+                    disabled={refreshing}
+                    className="shrink-0"
+                  >
+                    {refreshing ? 'Aggiornamento…' : 'Riscarica lista'}
+                  </Button>
+                )}
+              </div>
+            );
+          })()}
+
           {/* 1. Continua a guardare — sempre per primo: l'utente vede subito
                 cosa stava guardando e può riprendere con un solo click. */}
           {!searchTerm && continueWatching.length > 0 && (
@@ -807,18 +875,65 @@ const ChannelList: React.FC<ChannelListProps> = ({
                   );
               })
           ) : !hasRowsToRender ? (
-              <EmptyState
-                icon={debouncedSearchTerm ? SearchX : activeTab === 'home' ? Server : Tv}
-                title={getEmptyTitle()}
-                description={getEmptyDescription()}
-                actions={debouncedSearchTerm ? [
-                    { label: 'Cancella ricerca', onClick: () => setSearchTerm('') },
-                    { label: 'Cambia server', onClick: onOpenServer, variant: 'secondary' }
-                ] : [
-                    { label: 'Cambia server', onClick: onOpenServer },
-                    { label: 'Torna alla Home', onClick: () => setActiveTab('home'), variant: 'secondary' }
-                ]}
-              />
+              // BUG-1 §2.3 Step 4: se il tab specifico è in errore (es. VOD
+              // non scaricato), mostra un EmptyState dedicato con il motivo
+              // tecnico e la CTA Riscarica, invece del generico "no content".
+              (() => {
+                const activeBlockHealth =
+                  activeTab === 'movie'  ? catalogHealth?.vod :
+                  activeTab === 'series' ? catalogHealth?.series :
+                  activeTab === 'live'   ? catalogHealth?.live :
+                  null;
+                const isBlockError = activeBlockHealth?.status === 'error';
+                const isBlockEmpty = activeBlockHealth?.status === 'empty';
+                if ((isBlockError || isBlockEmpty) && !debouncedSearchTerm && onRefreshCatalog) {
+                  const sectionLabel =
+                    activeTab === 'movie'  ? 'Film' :
+                    activeTab === 'series' ? 'Serie TV' :
+                    activeTab === 'live'   ? 'Canali Live' :
+                    'Contenuti';
+                  const refreshing = contentRefreshStatus?.state === 'refreshing';
+                  return (
+                    <EmptyState
+                      icon={isBlockError ? AlertTriangle : (activeTab === 'movie' ? FilmIcon : Tv)}
+                      title={isBlockError
+                        ? `Catalogo ${sectionLabel} non disponibile`
+                        : `Nessun ${sectionLabel.toLowerCase()} disponibile`}
+                      description={
+                        activeBlockHealth?.reason ||
+                        (isBlockError
+                          ? `Si è verificato un errore durante il caricamento dei ${sectionLabel.toLowerCase()}.`
+                          : `Il server non ha restituito alcun contenuto per la sezione "${sectionLabel}".`)
+                      }
+                      actions={[
+                        {
+                          label: refreshing ? 'Aggiornamento…' : 'Riscarica lista',
+                          onClick: onRefreshCatalog,
+                        },
+                        {
+                          label: 'Apri impostazioni server',
+                          onClick: onOpenServer,
+                          variant: 'secondary',
+                        },
+                      ]}
+                    />
+                  );
+                }
+                return (
+                  <EmptyState
+                    icon={debouncedSearchTerm ? SearchX : activeTab === 'home' ? Server : Tv}
+                    title={getEmptyTitle()}
+                    description={getEmptyDescription()}
+                    actions={debouncedSearchTerm ? [
+                        { label: 'Cancella ricerca', onClick: () => setSearchTerm('') },
+                        { label: 'Cambia server', onClick: onOpenServer, variant: 'secondary' }
+                    ] : [
+                        { label: 'Cambia server', onClick: onOpenServer },
+                        { label: 'Torna alla Home', onClick: () => setActiveTab('home'), variant: 'secondary' }
+                    ]}
+                  />
+                );
+              })()
           ) : null}
 
           {/* Load More Trigger */}

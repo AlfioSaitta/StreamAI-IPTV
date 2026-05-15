@@ -5,7 +5,7 @@
 
 import type { EpgProgramme, XtreamCredentials } from '../../types.ts';
 import { CacheService } from '../cacheService.ts';
-import { parseXmltvProgrammes } from './xmltvParser.ts';
+import { parseXmltvAsync } from '../workers/index.ts';
 
 const EPG_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 const PAST_PROGRAMME_RETENTION_MS = 24 * 60 * 60 * 1000; // keep 24h backlog
@@ -115,7 +115,14 @@ class EpgServiceClass {
     // 2. Fetch from provider
     try {
       const xml = await this.fetchXmltv(creds);
-      const programmes = pruneProgrammes(parseXmltvProgrammes(xml));
+      // E.3 — parse + prune in worker se il payload è grande, altrimenti in
+      // main thread. La facciata `parseXmltvAsync` decide in base alla soglia
+      // e fa fallback sincrono in ambienti senza Worker (Node/tests).
+      const { programmes } = await parseXmltvAsync(
+        xml,
+        PAST_PROGRAMME_RETENTION_MS,
+        FUTURE_PROGRAMME_HORIZON_MS,
+      );
       const fetchedAt = Date.now();
       const index = buildIndex(programmes, fetchedAt);
 

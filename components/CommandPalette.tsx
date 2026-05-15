@@ -1,7 +1,13 @@
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from 'react';
-import { Search, X, Clock, Tv, Film, Library, Sparkles, type LucideIcon } from 'lucide-react';
+import { Search, X, Clock, Tv, Film, Library, Sparkles, BadgeCheck, Sparkle, Tag, type LucideIcon } from 'lucide-react';
 import type { Channel, StreamType } from '../types.ts';
-import { indexChannels, searchIndexedChannels, type IndexedChannel } from '../services/catalogIndex.ts';
+import {
+  indexChannels,
+  searchIndexedChannels,
+  extractTopGenres,
+  NEW_ITEM_WINDOW_MS,
+  type IndexedChannel,
+} from '../services/catalogIndex.ts';
 import { Chip, IconButton } from './shared';
 
 const RECENT_SEARCHES_KEY_PREFIX = 'streamai.cmdk.recent';
@@ -119,6 +125,10 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose, channe
   const [filter, setFilter] = useState<PaletteFilter>('all');
   const [activeIndex, setActiveIndex] = useState(0);
   const [recent, setRecent] = useState<string[]>([]);
+  // C.3 Filtri avanzati (toggle multipli, combinabili con la tab type filter).
+  const [hdOnly, setHdOnly] = useState(false);
+  const [newOnly, setNewOnly] = useState(false);
+  const [genreFilter, setGenreFilter] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
 
@@ -139,6 +149,9 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose, channe
     setQuery('');
     setFilter('all');
     setActiveIndex(0);
+    setHdOnly(false);
+    setNewOnly(false);
+    setGenreFilter(null);
     setRecent(loadRecent(profileId));
     const t = window.setTimeout(() => inputRef.current?.focus(), 30);
     return () => window.clearTimeout(t);
@@ -151,9 +164,26 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose, channe
   }, [isOpen, channels]);
 
   const filteredIndex = useMemo(() => {
-    if (filter === 'all') return indexed;
-    return indexed.filter(c => c.type === filter);
-  }, [indexed, filter]);
+    let pool = filter === 'all' ? indexed : indexed.filter(c => c.type === filter);
+    // C.3 Filtri avanzati — applicati in pipeline dopo la tab type filter.
+    if (hdOnly) pool = pool.filter(c => c.isHD);
+    if (newOnly) {
+      const cutoff = Date.now() - NEW_ITEM_WINDOW_MS;
+      pool = pool.filter(c => typeof c.addedAt === 'number' && c.addedAt >= cutoff);
+    }
+    if (genreFilter) {
+      pool = pool.filter(c => c.genreTokens.includes(genreFilter));
+    }
+    return pool;
+  }, [indexed, filter, hdOnly, newOnly, genreFilter]);
+
+  // Top generi calcolati sulla type-filter selezionata (senza HD/new/genre
+  // self-filter) per offrire all'utente sempre tutte le opzioni rilevanti.
+  const availableGenres = useMemo(() => {
+    if (!isOpen) return [] as string[];
+    const pool = filter === 'all' ? indexed : indexed.filter(c => c.type === filter);
+    return extractTopGenres(pool, 16);
+  }, [isOpen, indexed, filter]);
 
   const results = useMemo<IndexedChannel[]>(() => {
     if (!isOpen) return [];
@@ -167,7 +197,7 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose, channe
 
   useEffect(() => {
     setActiveIndex(0);
-  }, [deferredQuery, filter]);
+  }, [deferredQuery, filter, hdOnly, newOnly, genreFilter]);
 
   // Scroll the active item into view as the user navigates with arrow keys.
   useEffect(() => {
@@ -297,6 +327,59 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose, channe
           <span className="hidden md:inline text-[10px] tracking-widest uppercase text-content-disabled">
             ↑↓ naviga · Enter apri · Esc chiudi
           </span>
+        </div>
+
+        {/* C.3 Filtri avanzati — HD only, Nuovi, per genere. Tutti sono
+            toggle/select combinabili con la type-filter sopra. */}
+        <div className="flex items-center gap-2 px-5 py-2 border-b border-subtle overflow-x-auto no-scrollbar">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-content-disabled mr-1 flex-shrink-0">
+            Filtri
+          </span>
+          <Chip
+            selected={hdOnly}
+            icon={BadgeCheck}
+            size="sm"
+            onClick={() => setHdOnly(v => !v)}
+            aria-pressed={hdOnly}
+          >
+            Solo HD
+          </Chip>
+          <Chip
+            selected={newOnly}
+            icon={Sparkle}
+            size="sm"
+            onClick={() => setNewOnly(v => !v)}
+            aria-pressed={newOnly}
+          >
+            Nuovi
+          </Chip>
+          {availableGenres.length > 0 && (
+            <>
+              <span className="w-px h-5 bg-subtle mx-1 flex-shrink-0" aria-hidden="true" />
+              <Tag className="w-icon-xs h-icon-xs text-content-disabled flex-shrink-0" aria-hidden="true" />
+              <label className="sr-only" htmlFor="cmdk-genre">Genere</label>
+              <select
+                id="cmdk-genre"
+                value={genreFilter ?? ''}
+                onChange={e => setGenreFilter(e.target.value ? e.target.value : null)}
+                className="tv-focus-dense bg-surface-2 text-content-primary text-xs rounded-control border border-subtle px-2 py-1 hover:bg-surface-3 transition-colors"
+              >
+                <option value="">Tutti i generi</option>
+                {availableGenres.map(g => (
+                  <option key={g} value={g}>{g.charAt(0).toUpperCase() + g.slice(1)}</option>
+                ))}
+              </select>
+            </>
+          )}
+          {(hdOnly || newOnly || genreFilter) && (
+            <button
+              type="button"
+              onClick={() => { setHdOnly(false); setNewOnly(false); setGenreFilter(null); }}
+              className="tv-focus-dense ml-auto text-[10px] text-content-disabled hover:text-content-secondary uppercase tracking-widest rounded-control px-1.5 py-0.5 flex-shrink-0"
+            >
+              Pulisci
+            </button>
+          )}
         </div>
 
         {/* Recent searches (only when no query) */}

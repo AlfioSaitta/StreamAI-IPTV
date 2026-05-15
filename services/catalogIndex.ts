@@ -7,9 +7,26 @@ export interface IndexedSearchFields {
   genreLower: string;
   year: string;
   haystack: string;
+  /** C.3 Filtri avanzati — vero se il nome o group contiene un tag qualità HD+. */
+  isHD: boolean;
+  /** C.3 Filtri avanzati — lista normalizzata di generi atomici (lowercase). */
+  genreTokens: string[];
 }
 
 export type IndexedChannel = Channel & IndexedSearchFields;
+
+// Pattern compilato una sola volta. Match insensibile a maiuscole, riconosce
+// anche i separatori comuni (`[FHD]`, `.HD.`, `(4K)`, `1080p`, ecc.). 720p è
+// considerato HD; 480p/SD esclusi esplicitamente.
+const HD_RE = /(?:^|[\s([{._|-])(?:fhd|uhd|qhd|hdr|hdr10|hdr10\+|dolby|dv|hevc|h265|x265|4k|2160p|1440p|1080p|720p|hd)(?:$|[\s)\]}._|-])/i;
+
+const splitGenres = (raw: string | undefined): string[] => {
+  if (!raw) return [];
+  return raw
+    .split(/[,\/|;&]+/)
+    .map(g => g.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''))
+    .filter(g => g.length > 1);
+};
 
 const normalizeSearchText = (value: string | undefined): string => (value || '')
   .normalize('NFD')
@@ -25,6 +42,11 @@ export const indexChannel = (channel: Channel): IndexedChannel => {
   const groupLower = normalizeSearchText(channel.group);
   const genreLower = normalizeSearchText(channel.genre);
   const year = normalizeSearchText(channel.year);
+  // L'HD detection lavora sul nome **originale** (i tag tipo "[FHD]" sono
+  // proprio quelli che `cleanTitle` rimuove) + group per coprire i casi tipo
+  // "IT - Cinema HD".
+  const isHD = HD_RE.test(channel.name || '') || HD_RE.test(channel.group || '');
+  const genreTokens = splitGenres(channel.genre);
 
   return {
     ...channel,
@@ -33,7 +55,9 @@ export const indexChannel = (channel: Channel): IndexedChannel => {
     groupLower,
     genreLower,
     year,
-    haystack: `${cleanNameLower} ${nameLower} ${groupLower} ${genreLower} ${year}`.trim()
+    haystack: `${cleanNameLower} ${nameLower} ${groupLower} ${genreLower} ${year}`.trim(),
+    isHD,
+    genreTokens,
   };
 };
 
@@ -69,3 +93,26 @@ export const searchIndexedChannels = (channels: IndexedChannel[], query: string,
 
   return scored.slice(0, limit).map(entry => entry.channel);
 };
+
+/**
+ * C.3 Filtri avanzati: estrae i generi più frequenti dal catalogo indicizzato
+ * per popolare il selettore "Per genere" nella ricerca globale.
+ * @param channels indicizzati
+ * @param topN numero massimo di generi da restituire (ordinati per frequenza)
+ */
+export const extractTopGenres = (channels: IndexedChannel[], topN = 24): string[] => {
+  const counts = new Map<string, number>();
+  for (const ch of channels) {
+    for (const g of ch.genreTokens) {
+      counts.set(g, (counts.get(g) ?? 0) + 1);
+    }
+  }
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, topN)
+    .map(([g]) => g);
+};
+
+/** C.3 — soglia "nuovi" (ms): elementi aggiunti negli ultimi 30 giorni. */
+export const NEW_ITEM_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+

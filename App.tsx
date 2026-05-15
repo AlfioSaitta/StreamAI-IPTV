@@ -57,7 +57,7 @@ import { loginXtream } from './services/xtream.ts';
 import { ProfileService, DEFAULT_PREFERENCES } from './services/profileService.ts';
 import { CacheService } from './services/cacheService.ts';
 import { i18n } from './services/i18n.ts';
-import { Category, Channel, XtreamCredentials, StreamType, Profile } from './types.ts';
+import { Category, Channel, XtreamCredentials, StreamType, Profile, XtreamContent } from './types.ts';
 import { Server, Wifi, Sparkles } from 'lucide-react';
 import { platformService } from './services/platformService.ts';
 import { hasAiApiKey, isAiAvailable, isAiTemporarilySuspended } from './services/geminiService.ts';
@@ -161,6 +161,12 @@ function App() {
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [contentRefreshStatus, setContentRefreshStatus] = useState<ContentRefreshStatus>({ state: 'idle' });
   const contentRefreshInFlightRef = useRef(false);
+  // BUG-1 §2.3 Step 4: health per blocco (live/vod/series) propagato dal
+  // login Xtream a `ChannelList` per mostrare EmptyState dedicato sui blocchi
+  // in errore (es. "Catalogo film non disponibile" + CTA Riscarica).
+  const [catalogHealth, setCatalogHealth] = useState<XtreamContent['health'] | null>(null);
+  // Ref per chiamare refreshContentFromServer da handleXtreamLogin senza TDZ.
+  const refreshContentFromServerRef = useRef<((options?: { background?: boolean }) => Promise<unknown>) | null>(null);
 
   // Latest reminder that fired — shown as an in-app toast.
   const [reminderToast, setReminderToast] = useState<ReminderFiredEvent['reminder'] | null>(null);
@@ -329,6 +335,11 @@ function App() {
             if (activeProfile.xtreamCreds) {
                 // Try to load from cache immediately, then state updates
                 handleXtreamLogin(activeProfile.xtreamCreds, false); 
+            } else if (activeProfile.playlistUrl) {
+                // C.2: profilo con playlist M3U remota (alternativa a Xtream).
+                // Le playlist M3U classiche non distinguono Live/VOD/Series:
+                // tutto viene popolato in `liveCategories`.
+                void handleM3UProfile(activeProfile.playlistUrl);
             } else {
                 setLiveCategories([]);
                 setVodCategories([]);
@@ -342,6 +353,36 @@ function App() {
     }
   }, [activeProfile]);
 
+  // C.2: carica una playlist M3U remota e popola `liveCategories`. Niente
+  // cache health (le M3U non hanno il concept multi-blocco); errori
+  // mostrati come EmptyState dal flusso standard "zero contenuti".
+  const handleM3UProfile = async (url: string) => {
+      setIsLoading(true);
+      try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 30_000);
+          const res = await fetch(url, { signal: controller.signal });
+          clearTimeout(timer);
+          if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+          const text = await res.text();
+          const { parseM3UAsync } = await import('./services/workers/index.ts');
+          const categories = await parseM3UAsync(text);
+          setLiveCategories(categories);
+          setVodCategories([]);
+          setSeriesCategories([]);
+          setCatalogHealth(null);
+          setXtreamCreds(null);
+          setActiveTab('home');
+      } catch (err) {
+          console.error('[App] M3U playlist load failed:', err);
+          setLiveCategories([]);
+          setVodCategories([]);
+          setSeriesCategories([]);
+      } finally {
+          setIsLoading(false);
+      }
+  };
+
   const handleXtreamLogin = async (creds: XtreamCredentials, saveToProfile = true) => {
     setIsLoading(true);
     try {
@@ -350,8 +391,29 @@ function App() {
         setLiveCategories(content.live);
         setVodCategories(content.vod);
         setSeriesCategories(content.series);
+        setCatalogHealth(content.health ?? null);
         setXtreamCreds(creds);
-        
+
+        // BUG-1 §2.3 Step 4 + hotfix 2026-05-14: se la cache è legacy
+        // (`fetchedAt === 0`, sintetizzata da loginXtream) oppure VOD/Series
+        // sono in errore/stale, fai partire un refresh forzato in background
+        // (non bloccante). L'utente entra subito nell'app con la cache, e i
+        // dati si aggiornano dietro le quinte.
+        if (content.health) {
+          const isLegacyCache = content.health.fetchedAt === 0;
+          const blocksNeedRefresh =
+            content.health.vod.status    === 'error' ||
+            content.health.series.status === 'error' ||
+            content.health.vod.status    === 'stale' ||
+            content.health.series.status === 'stale';
+          if (isLegacyCache || blocksNeedRefresh) {
+            console.warn('[App] Catalog needs background refresh', { isLegacyCache, health: content.health });
+            setTimeout(() => {
+                refreshContentFromServerRef.current?.({ background: true }).catch(() => { /* swallow */ });
+            }, isLegacyCache ? 1_500 : 5_000);
+          }
+        }
+
         if (saveToProfile && activeProfile) {
             const updatedProfile = ProfileService.updateCredentials(activeProfile.id, creds);
             setActiveProfile(updatedProfile);
@@ -392,6 +454,7 @@ function App() {
           setLiveCategories(content.live);
           setVodCategories(content.vod);
           setSeriesCategories(content.series);
+          setCatalogHealth(content.health ?? null);
           setXtreamCreds(activeProfile.xtreamCreds);
 
           const refreshedAt = Date.now();
@@ -425,6 +488,11 @@ function App() {
           contentRefreshInFlightRef.current = false;
       }
   }, [activeProfile]);
+
+  // Aggiorna il ref ogni volta che la callback cambia (BUG-1 §2.3 Step 4).
+  useEffect(() => {
+    refreshContentFromServerRef.current = refreshContentFromServer;
+  }, [refreshContentFromServer]);
 
   useEffect(() => {
       if (!activeProfile?.id || !activeProfile.xtreamCreds) return;
@@ -680,6 +748,7 @@ function App() {
                     onRefreshContent={() => refreshContentFromServer({ background: false })}
                     isContentRefreshing={contentRefreshStatus.state === 'refreshing'}
                     contentRefreshMessage={contentRefreshStatus.message}
+                    catalogHealth={catalogHealth}
                 />
             </Suspense>
         );
@@ -784,6 +853,11 @@ function App() {
               activeProfile.preferences?.continueWatchingCompletedThreshold
               ?? DEFAULT_PREFERENCES.continueWatchingCompletedThreshold
             }
+            // BUG-1 §2.3 Step 4: passa health + handler refresh per
+            // mostrare EmptyState con CTA quando un blocco è in errore.
+            catalogHealth={catalogHealth}
+            onRefreshCatalog={() => refreshContentFromServer().catch(() => { /* errore già nello status */ })}
+            contentRefreshStatus={contentRefreshStatus}
         />
     );
   };
