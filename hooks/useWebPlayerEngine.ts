@@ -182,15 +182,13 @@ export const useWebPlayerEngine = (opts: WebPlayerEngineOptions): void => {
             return;
           }
           // Real Content-Type may reveal a container the videojs progressive
-          // engine cannot play correctly. Warn explicitly so the user
-          // understands the freeze is not a bug.
+          // engine cannot play correctly. Note: Matroska/MKV è supportato
+          // nativamente da Chromium (e quindi da Electron, anche con FFmpeg
+          // patchato per HEVC) finché non dichiariamo `video/x-matroska`
+          // come `type` della source — vedi MKV-FIX in questo stesso file.
+          // Non emettiamo più un warning su MKV per evitare falsi allarmi.
           const ct = (result.contentType ?? '').toLowerCase();
-          if (ct.includes('matroska') || ct.includes('mkv')) {
-            showOsd(
-              createElement(AlertTriangle, { className: 'w-12 h-12 text-white' }),
-              'MKV non supportato dal player web — prova HLS se disponibile',
-            );
-          } else if (ct.includes('mp2t') && !detectedSource.isLive) {
+          if (ct.includes('mp2t') && !detectedSource.isLive) {
             showOsd(
               createElement(AlertTriangle, { className: 'w-12 h-12 text-white' }),
               'MPEG-TS senza indici: il seek può essere lento',
@@ -199,6 +197,41 @@ export const useWebPlayerEngine = (opts: WebPlayerEngineOptions): void => {
         })
         .catch(() => undefined);
     }
+
+    // MKV-FIX (2026-05-16, rev. 2): non basta omettere il `type` dalla source
+    // perché Video.js inferisce comunque il MIME dall'estensione `.mkv`
+    // tramite il suo middleware "getMimetype" e finisce per chiamare
+    // `videoEl.canPlayType('video/x-matroska')`, che in Chromium torna ""
+    // → MEDIA_ERR_SRC_NOT_SUPPORTED (code 4 / "No compatible source was
+    // found").
+    // Soluzione: per MKV bypassiamo del tutto la negoziazione di Video.js
+    // (inizializziamo con `sources: []`) e poi, una volta che il player è
+    // ready, assegniamo l'URL direttamente all'elemento <video>
+    // sottostante. In questo modo Chromium chiama solo `load()` e fa lo
+    // sniffing della firma EBML del container — operazione che riesce
+    // sempre se il demuxer Matroska è compilato in (lo è in Electron,
+    // anche con la build FFmpeg patchata da BranchBit per HEVC). Se i
+    // codec interni non sono supportati arriverà un MEDIA_ERR_DECODE
+    // (code 3) ben più informativo del MEDIA_ERR_SRC_NOT_SUPPORTED
+    // attuale.
+    const bypassVideojsSource =
+      detectedSource.engine === 'videojs' && detectedSource.protocol === 'mkv';
+
+    // Per gli altri protocolli che usano l'engine videojs evitiamo di
+    // dichiarare un `type` quando il MIME rilevato è "incerto"
+    // (protocollo `unknown`, MIME generico tipo `application/octet-stream`):
+    // meglio nessun MIME che un MIME sbagliato, così Chromium sniffa.
+    const shouldDeclareType =
+      detectedSource.engine === 'videojs'
+      && detectedSource.protocol !== 'mkv'
+      && detectedSource.protocol !== 'unknown'
+      && !!detectedSource.mimeType
+      && detectedSource.mimeType !== 'application/octet-stream';
+    const videojsSources = bypassVideojsSource
+      ? []
+      : detectedSource.engine === 'videojs'
+        ? [shouldDeclareType ? { src: source, type: detectedSource.mimeType } : { src: source }]
+        : [];
 
     const player = videojs(videoEl, {
       autoplay: false,
@@ -209,9 +242,28 @@ export const useWebPlayerEngine = (opts: WebPlayerEngineOptions): void => {
       // (especially for non-faststart MP4s where the index lives at the end
       // of the file). Live keeps `metadata` to avoid wasting bandwidth.
       preload: isVodProgressive ? 'auto' : 'metadata',
-      sources: detectedSource.engine === 'videojs' ? [{ src: source, type: detectedSource.mimeType }] : [],
+      sources: videojsSources,
     });
     playerRef.current = player;
+
+    // MKV-FIX (rev. 2): una volta che Video.js è pronto, forziamo l'URL
+    // direttamente sull'elemento <video> aggirando del tutto il middleware
+    // di Video.js (che fallirebbe la negoziazione di MIME `video/x-matroska`
+    // su Chromium). `player.ready()` garantisce che la tech HTML5 sia
+    // già montata, quindi l'evento `loadedmetadata` viene comunque
+    // propagato attraverso il player.
+    if (bypassVideojsSource) {
+      player.ready(() => {
+        if (player.isDisposed()) return;
+        const techEl = (player.tech({ IWillNotUseThisInPlugins: true }) as any)?.el?.() as HTMLVideoElement | null;
+        const target = techEl ?? videoEl;
+        target.setAttribute('data-mkv-bypass', 'true');
+        if (target.src !== source) {
+          target.src = source;
+          target.load();
+        }
+      });
+    }
 
     loadTimeoutRef.current = window.setTimeout(() => {
       if (player.isDisposed() || (player.currentTime() || 0) > 0 || !isBuffering) return;

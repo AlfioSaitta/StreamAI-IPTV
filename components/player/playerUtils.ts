@@ -65,6 +65,11 @@ export const detectStreamSource = (url: string, channelType?: Channel['type']): 
   if (/\.(webm)(?:$|[?#])/.test(lowerUrl)) {
     return { protocol: 'webm', mimeType: 'video/webm', engine: 'videojs', isXtreamLike, isExtensionless, isLive, label: 'WebM progressivo' };
   }
+  // MED-1 (Step 3-ter): MKV/Matroska supportato nativamente da Media3 su Android.
+  // Sul web rimane "best effort" (i browser ne supportano un subset via <video>).
+  if (/\.(mkv|matroska)(?:$|[?#])/.test(lowerUrl)) {
+    return { protocol: 'mkv', mimeType: 'video/x-matroska', engine: 'videojs', isXtreamLike, isExtensionless, isLive, label: 'MKV/Matroska' };
+  }
 
   const shouldAssumeMp4 = /\.(mp4|m4v|mov)(?:$|[?#])/.test(lowerUrl) || (isXtreamLike && (channelType === 'movie' || channelType === 'series')) || isExtensionless;
   return {
@@ -118,6 +123,21 @@ export const classifyPlaybackError = (
     return { title: 'Errore codec/decodifica', message: 'Il video potrebbe usare un codec non supportato o un flusso corrotto. Se è HEVC/H.265, verifica i codec del sistema.', category: 'decode', canRetry: retryCount < MAX_PLAYBACK_RETRIES, retryCount, technicalDetails: details };
   }
   if (code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) {
+    // MKV-specific hint: con il bypass di Video.js attivo, un
+    // SRC_NOT_SUPPORTED su MKV indica quasi sempre un codec interno non
+    // decodificabile dal Chromium di Electron (tipicamente HEVC/H.265 o
+    // AV1 senza supporto hardware). Suggeriamo di verificare i codec
+    // (script `npm run postinstall` rifa il patch FFmpeg BranchBit).
+    if (sourceInfo.protocol === 'mkv') {
+      return {
+        title: 'MKV non riproducibile',
+        message: 'Il container MKV è stato accettato ma il codec video o audio interno non è supportato dal player. Probabilmente è HEVC/H.265 o AV1 senza decoder hardware/software disponibile. Verifica i codec di sistema o usa lo script `npm run postinstall` per rigenerare la patch FFmpeg con HEVC.',
+        category: 'decode',
+        canRetry: retryCount < MAX_PLAYBACK_RETRIES,
+        retryCount,
+        technicalDetails: details,
+      };
+    }
     return { title: 'Formato non supportato', message: `Il formato ${sourceInfo.label} non è stato accettato dal player corrente. Prova un altro stream o verifica codec/protocollo.`, category: 'unsupported', canRetry: retryCount < MAX_PLAYBACK_RETRIES, retryCount, technicalDetails: details };
   }
   if (sourceInfo.protocol === 'mpegts' && engine === 'videojs') {
