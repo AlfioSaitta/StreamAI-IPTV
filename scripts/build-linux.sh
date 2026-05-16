@@ -208,7 +208,7 @@ EOF
     -w /project \
     "$DOCKER_IMAGE" \
     bash -c "git config --global --add safe.directory /project && \
-             ./node_modules/.bin/electron-builder build --linux ${target}"
+             ./node_modules/.bin/electron-builder build --linux ${target} --publish never"
 }
 
 FAILED=()
@@ -219,7 +219,7 @@ for t in "${EB_TARGETS[@]}"; do
     fi
   else
     echo "▶ electron-builder build --linux ${t}"
-    if ! ./node_modules/.bin/electron-builder build --linux "${t}"; then
+    if ! ./node_modules/.bin/electron-builder build --linux "${t}" --publish never; then
       FAILED+=("$t")
     fi
   fi
