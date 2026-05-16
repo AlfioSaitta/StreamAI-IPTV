@@ -32,7 +32,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            rpm fakeroot dpkg-sig debsigs reprepro createrepo-c \
+            rpm fakeroot debsigs reprepro createrepo-c \
             libarchive-tools zstd gnupg2
 
       - name: Install npm dependencies
@@ -98,20 +98,41 @@ jobs:
             fi
           done
 
-          # ---- DEB: dpkg-sig --verify (preferred, validates _gpgbuilder
-          # signature) with fallback to debsigs --verify.
+          # ---- DEB: debsigs --sign=origin embeds an OpenPGP detached
+          # signature as the ar member '_gpgorigin', covering the
+          # concatenation of debian-binary + control.tar.* + data.tar.*.
+          # debsigs --verify needs system policy files we don't ship in CI,
+          # so we extract the signature and verify it manually with gpg.
+          DIST_ABS="$PWD"
           for f in *.deb; do
-            if command -v dpkg-sig >/dev/null 2>&1; then
-              if ! dpkg-sig --verify "$f"; then
-                echo "::error::DEB $f signature verification failed" >&2
-                fail=1
-              fi
+            members="$(ar t "$f")"
+            sig_member=""
+            if grep -qx '_gpgorigin' <<<"$members"; then
+              sig_member="_gpgorigin"
+            elif grep -qx '_gpgbuilder' <<<"$members"; then
+              sig_member="_gpgbuilder"
             else
-              if ! debsigs --verify "$f"; then
-                echo "::error::DEB $f signature verification failed" >&2
-                fail=1
-              fi
+              echo "::error::DEB $f has no _gpgorigin/_gpgbuilder ar member (unsigned)" >&2
+              fail=1
+              continue
             fi
+            tmpdir="$(mktemp -d)"
+            ( cd "$tmpdir" && ar x "$DIST_ABS/$f" )
+            # Concatenate the signed members in canonical ar order.
+            signed_blob="$tmpdir/.signed"
+            : > "$signed_blob"
+            for m in debian-binary control.tar.* data.tar.*; do
+              for path in "$tmpdir"/$m; do
+                [[ -f "$path" ]] && cat "$path" >> "$signed_blob"
+              done
+            done
+            if gpg --verify "$tmpdir/$sig_member" "$signed_blob" 2>&1; then
+              echo "  ✓ $f ($sig_member) OK"
+            else
+              echo "::error::DEB $f signature ($sig_member) does not validate" >&2
+              fail=1
+            fi
+            rm -rf "$tmpdir"
           done
 
           # ---- Arch: detached .sig produced by gpg --detach-sign.
