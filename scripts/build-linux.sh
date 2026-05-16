@@ -114,7 +114,7 @@ done
 # 1. Vite build (skippable when iterating on packaging only).
 if [[ "${SKIP_BUILD:-0}" != "1" ]]; then
   echo "▶ Vite production build"
-  npx --no vite build
+  ./node_modules/.bin/vite build
 fi
 
 # 2. Regenerate hicolor icons.
@@ -194,7 +194,7 @@ EOF
     -w /project \
     "$DOCKER_IMAGE" \
     bash -c "git config --global --add safe.directory /project && \
-             npx --no electron-builder --linux ${target}"
+             ./node_modules/.bin/electron-builder build --linux ${target}"
 }
 
 FAILED=()
@@ -204,8 +204,8 @@ for t in "${EB_TARGETS[@]}"; do
       FAILED+=("$t")
     fi
   else
-    echo "▶ electron-builder --linux ${t}"
-    if ! npx --no electron-builder --linux "${t}"; then
+    echo "▶ electron-builder build --linux ${t}"
+    if ! ./node_modules/.bin/electron-builder build --linux "${t}"; then
       FAILED+=("$t")
     fi
   fi
