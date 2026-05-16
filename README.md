@@ -106,11 +106,27 @@ npm run typecheck
 # Type-check + build
 npm run check
 
-# Build + pacchetto Linux (.tar.gz)
+# Build + pacchetto Linux (auto-detect distro host)
 npm run dist:linux
+
+# …oppure target espliciti:
+npm run dist:linux:deb       # Debian / Ubuntu / Mint / Pop!_OS
+npm run dist:linux:rpm       # Fedora / openSUSE / RHEL / Rocky
+npm run dist:linux:pacman    # Arch / Manjaro / EndeavourOS
+npm run dist:linux:appimage  # AppImage universale (on-demand)
+npm run dist:linux:tar       # tar.xz portatile (on-demand)
+npm run dist:linux:all       # tutti i formati sopra
 ```
 
-L'archivio sarà disponibile in `dist/streamai-iptv-X.X.X.tar.gz`
+Gli artefatti finiscono in `dist/`. Se `GPG_KEY_ID` è impostato in ambiente,
+ogni pacchetto viene firmato automaticamente (vedi [`docs/SIGNING.md`](docs/SIGNING.md)).
+
+> **Prerequisiti host:** `rpm`, `fakeroot`, `dpkg-sig`, `gnupg2`,
+> `libarchive-tools` (per `bsdtar`), e `docker` se vuoi pubblicare il repo
+> Arch via `npm run repo:publish`.
+
+Per le istruzioni di installazione lato utente finale (repo APT/RPM/Arch
+ospitati su GitHub Pages) consulta [`docs/INSTALL.md`](docs/INSTALL.md).
 
 ---
 

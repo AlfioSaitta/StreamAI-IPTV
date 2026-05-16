@@ -149,4 +149,7 @@ Queste funzionalità definiscono l'identità di StreamAI e devono essere preserv
 ## 🚀 Comandi Utili
 - `npm run dev`: Avvio sviluppo Electron.
 - `npm run android:run`: Build, Sync e Run su dispositivo Android.
-- `npm run dist:linux`: Build pacchetto Linux.
+- `npm run dist:linux`: Build pacchetto Linux per la distro host (deb/rpm/pacman auto-detect).
+- `npm run dist:linux:{deb,rpm,pacman,appimage,tar,all}`: Target espliciti.
+- `npm run gpg:setup`: Genera la chiave GPG maintainer (vedi `docs/SIGNING.md`).
+- `npm run repo:publish`: Assembla `public-repo/` per GitHub Pages.

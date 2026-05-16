@@ -40,3 +40,15 @@ android/.jdk-mirror/
 # Test runner
 coverage/
 .vitest-cache/
+
+# GPG signing material — keep only public key + fingerprint
+docs/keys/*.key
+docs/keys/*.key.asc
+docs/keys/*.key.asc.gpg
+docs/keys/*-revoke.asc
+docs/keys/*.secret.asc
+
+# Linux packaging output
+public-repo/
+build/icons/
+
