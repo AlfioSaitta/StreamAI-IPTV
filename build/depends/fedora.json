@@ -1,0 +1,20 @@
+{
+  "rpm": [
+    "xdg-utils",
+    "gtk3",
+    "libnotify",
+    "nss",
+    "libXScrnSaver",
+    "libXtst",
+    "atk",
+    "at-spi2-atk",
+    "at-spi2-core",
+    "libsecret",
+    "libdrm",
+    "mesa-libgbm",
+    "alsa-lib",
+    "cups-libs",
+    "libxkbcommon"
+  ]
+}
+

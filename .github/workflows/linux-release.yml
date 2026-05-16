@@ -62,7 +62,7 @@ jobs:
           GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
         run: bash scripts/import-gpg-key.sh
 
-      - name: Build all Linux packages
+      - name: Build all Linux packages (per-distro)
         env:
           GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
@@ -74,10 +74,11 @@ jobs:
         run: |
           set -e
           cd dist
-          for f in *.rpm; do [[ -e "$f" ]] && rpm --checksig "$f"; done
-          for f in *.deb; do [[ -e "$f" ]] && debsigs --verify "$f" || true; done
-          for f in *.pkg.tar.zst; do [[ -e "$f" ]] && gpg --verify "${f}.sig" "$f"; done
-          for f in *.AppImage *.tar.xz; do [[ -e "$f" ]] && gpg --verify "${f}.asc" "$f"; done
+          shopt -s nullglob
+          for f in *.rpm;          do rpm --checksig "$f"; done
+          for f in *.deb;          do debsigs --verify "$f" || true; done
+          for f in *.pkg.tar.zst;  do gpg --verify "${f}.sig" "$f"; done
+          for f in *.AppImage *.tar.xz; do gpg --verify "${f}.asc" "$f"; done
           gpg --verify SHA256SUMS.asc SHA256SUMS
 
       - name: Extract version

@@ -5,38 +5,65 @@ distribuzioni Linux tramite un repository pubblico ospitato su GitHub Pages:
 
 > `https://<user>.github.io/StreamAI-IPTV`
 
-Sostituisci `<user>` con l'organizzazione/utente GitHub del progetto.
+Ogni distro ha un canale dedicato con dipendenze native (nomi pacchetto
+specifici della distro, non solo SONAME). Sostituisci `<user>` con
+l'organizzazione/utente GitHub del progetto.
 
 ---
 
-## Debian / Ubuntu / Linux Mint / Pop!_OS
+## Debian
 
 ```bash
 sudo install -d /etc/apt/keyrings
 curl -fsSL https://<user>.github.io/StreamAI-IPTV/pubkey.asc \
   | sudo gpg --dearmor -o /etc/apt/keyrings/streamai.gpg
-echo "deb [signed-by=/etc/apt/keyrings/streamai.gpg] https://<user>.github.io/StreamAI-IPTV/apt stable main" \
+echo "deb [signed-by=/etc/apt/keyrings/streamai.gpg] https://<user>.github.io/StreamAI-IPTV/apt/debian stable main" \
   | sudo tee /etc/apt/sources.list.d/streamai.list
 sudo apt update
 sudo apt install streamai
 ```
 
-## Fedora / RHEL / Rocky / AlmaLinux
+## Ubuntu / Linux Mint / Pop!_OS
+
+```bash
+sudo install -d /etc/apt/keyrings
+curl -fsSL https://<user>.github.io/StreamAI-IPTV/pubkey.asc \
+  | sudo gpg --dearmor -o /etc/apt/keyrings/streamai.gpg
+echo "deb [signed-by=/etc/apt/keyrings/streamai.gpg] https://<user>.github.io/StreamAI-IPTV/apt/ubuntu stable main" \
+  | sudo tee /etc/apt/sources.list.d/streamai.list
+sudo apt update
+sudo apt install streamai
+```
+
+> Ubuntu 24.04+ usa varianti con suffisso `t64` per alcune librerie (es.
+> `libgtk-3-0t64`): il pacchetto Ubuntu le richiede con sintassi OR-alternativa
+> in modo da funzionare anche su versioni più vecchie e su Debian.
+
+## openSUSE Tumbleweed / Leap
 
 ```bash
 sudo rpm --import https://<user>.github.io/StreamAI-IPTV/pubkey.asc
-sudo curl -fsSL https://<user>.github.io/StreamAI-IPTV/rpm/streamai.repo \
+sudo zypper addrepo https://<user>.github.io/StreamAI-IPTV/rpm/opensuse streamai
+sudo zypper refresh
+sudo zypper install streamai
+```
+
+## Fedora
+
+```bash
+sudo rpm --import https://<user>.github.io/StreamAI-IPTV/pubkey.asc
+sudo curl -fsSL https://<user>.github.io/StreamAI-IPTV/rpm/fedora/streamai.repo \
   -o /etc/yum.repos.d/streamai.repo
 sudo dnf install streamai
 ```
 
-## openSUSE
+## RHEL / Rocky / AlmaLinux
 
 ```bash
 sudo rpm --import https://<user>.github.io/StreamAI-IPTV/pubkey.asc
-sudo zypper addrepo https://<user>.github.io/StreamAI-IPTV/rpm streamai
-sudo zypper refresh
-sudo zypper install streamai
+sudo curl -fsSL https://<user>.github.io/StreamAI-IPTV/rpm/rhel/streamai.repo \
+  -o /etc/yum.repos.d/streamai.repo
+sudo dnf install streamai
 ```
 
 ## Arch / Manjaro / EndeavourOS / CachyOS

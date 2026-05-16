@@ -1,0 +1,19 @@
+{
+  "pacman": [
+    "xdg-utils",
+    "gtk3",
+    "libnotify",
+    "nss",
+    "libxss",
+    "libxtst",
+    "atk",
+    "at-spi2-core",
+    "libsecret",
+    "libdrm",
+    "mesa",
+    "alsa-lib",
+    "libcups",
+    "libxkbcommon"
+  ]
+}
+

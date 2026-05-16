@@ -1,0 +1,20 @@
+{
+  "rpm": [
+    "xdg-utils",
+    "libgtk-3-0",
+    "libnotify4",
+    "mozilla-nss",
+    "libXss1",
+    "libXtst6",
+    "libatk-1_0-0",
+    "libatk-bridge-2_0-0",
+    "libatspi0",
+    "libsecret-1-0",
+    "libdrm2",
+    "libgbm1",
+    "libasound2",
+    "libcups2",
+    "libxkbcommon0"
+  ]
+}
+
