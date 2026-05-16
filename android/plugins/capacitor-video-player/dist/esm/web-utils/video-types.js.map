@@ -1,0 +1,1 @@
+{"version":3,"file":"video-types.js","sourceRoot":"","sources":["../../../src/web-utils/video-types.ts"],"names":[],"mappings":"AAEA,MAAM,CAAC,MAAM,gCAAgC,GAAa;IACxD,MAAM;IACN,WAAW;IACX,UAAU;IACV,MAAM;IACN,KAAK;CACN,CAAC;AAEF,MAAM,CAAC,MAAM,UAAU,GAA0C;IAC/D,GAAG,EAAE,WAAW;IAChB,IAAI,EAAE,WAAW;IACjB,IAAI,EAAE,WAAW;IACjB,IAAI,EAAE,WAAW;IACjB,IAAI,EAAE,uBAAuB;CAC9B,CAAC"}

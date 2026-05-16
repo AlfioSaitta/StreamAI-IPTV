@@ -11,6 +11,12 @@ node_modules
 dist
 dist-ssr
 *.local
+
+# Track build artifacts of the vendored capacitor-video-player plugin so the
+# Vite/Electron web bundle can resolve its main/module entries on CI (the
+# global `dist` rule above would otherwise drop them, breaking `npm ci`).
+!android/plugins/capacitor-video-player/dist/
+!android/plugins/capacitor-video-player/dist/**
 .env
 .env.*
 !.env.example
