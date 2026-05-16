@@ -45,7 +45,7 @@ import {
   AlertTriangle, Play, Pause, Volume2, VolumeX, Maximize, Minimize,
   SkipForward, SkipBack, List, X, FastForward, Rewind, RotateCcw,
   PictureInPicture2, Loader2, Info, Cast, Tv, Headphones, Volume1, Calendar, Moon,
-  Subtitles, Upload, CheckCircle2
+  Subtitles, Upload, CheckCircle2, Copy, Check
 } from 'lucide-react';
 
 // --- TYPES ---
@@ -130,6 +130,8 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   const [streamSourceInfo, setStreamSourceInfo] = useState<StreamSourceInfo | null>(null);
   const [nativePiPSupported, setNativePiPSupported] = useState(false);
   const [showMiniEpg, setShowMiniEpg] = useState(false);
+  // Feedback transitorio per il pulsante "Copia report errore" nel popup di errore.
+  const [errorReportCopied, setErrorReportCopied] = useState(false);
   // URG-1 L3: result of the async VOD probe (HEAD + tail prefetch).
   // Used to disable the timeline when the server doesn't support Range.
   const [vodProbe, setVodProbe] = useState<VodProbeResult | null>(null);
@@ -364,11 +366,153 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     }
   }, [channel, computeBufferStats]);
 
+  // Build a human-readable bug report combining channel metadata, the
+  // classified PlaybackError, the source detection and basic environment
+  // info. Designed to be pasted into a GitHub issue / email to the dev.
+  const buildErrorReport = useCallback((): string => {
+    const ts = new Date().toISOString();
+    const lines: string[] = [];
+    lines.push('=== StreamAI IPTV — Error Report ===');
+    lines.push(`Timestamp: ${ts}`);
+
+    // Environment
+    const platform = platformService.isElectron
+      ? 'electron'
+      : platformService.isNative
+        ? 'capacitor/native'
+        : 'web';
+    lines.push(`Platform: ${platform}`);
+    if (typeof navigator !== 'undefined') {
+      lines.push(`User-Agent: ${navigator.userAgent}`);
+      lines.push(`Language: ${navigator.language}`);
+      lines.push(`Online: ${navigator.onLine}`);
+    }
+    lines.push(`Viewport: ${window.innerWidth}x${window.innerHeight}`);
+    lines.push('');
+
+    // Channel context (sanitized — never leak credentials).
+    if (channel) {
+      lines.push('--- Channel ---');
+      lines.push(`Name: ${channel.cleanName || channel.name}`);
+      lines.push(`Type: ${channel.type}`);
+      if (channel.group) lines.push(`Group: ${channel.group}`);
+      if (channel.tvgId) lines.push(`tvgId: ${channel.tvgId}`);
+      lines.push(`URL (sanitized): ${sanitizeStreamUrl(channel.url)}`);
+      lines.push('');
+    }
+
+    // Source detection
+    if (streamSourceInfo) {
+      lines.push('--- Source detection ---');
+      lines.push(`Label: ${streamSourceInfo.label}`);
+      lines.push(`Protocol: ${streamSourceInfo.protocol}`);
+      lines.push(`MIME: ${streamSourceInfo.mimeType}`);
+      lines.push(`Engine: ${streamSourceInfo.engine}`);
+      lines.push(`Xtream-like: ${streamSourceInfo.isXtreamLike}`);
+      lines.push(`Extensionless: ${streamSourceInfo.isExtensionless}`);
+      lines.push(`isLive: ${streamSourceInfo.isLive}`);
+      lines.push('');
+    }
+
+    // Active engine at runtime
+    lines.push(`Active engine (runtime): ${playerEngineRef.current}`);
+    lines.push('');
+
+    // The classified playback error itself.
+    if (playbackError) {
+      lines.push('--- PlaybackError ---');
+      lines.push(`Title: ${playbackError.title}`);
+      lines.push(`Message: ${playbackError.message}`);
+      lines.push(`Category: ${playbackError.category}`);
+      lines.push(`Retry: ${playbackError.retryCount}/${MAX_PLAYBACK_RETRIES}`);
+      lines.push(`Can retry: ${playbackError.canRetry}`);
+      lines.push('Technical details:');
+      playbackError.technicalDetails.forEach(d => lines.push(`  - ${d}`));
+      lines.push('');
+    } else if (error) {
+      lines.push('--- Error (no classification) ---');
+      lines.push(error);
+      lines.push('');
+    }
+
+    // VOD probe (Range support / real Content-Type from the server)
+    if (vodProbe) {
+      lines.push('--- VOD probe ---');
+      lines.push(`Range support: ${vodProbe.rangeSupport}`);
+      if (vodProbe.contentType) lines.push(`Content-Type: ${vodProbe.contentType}`);
+      if (vodProbe.contentLength != null) lines.push(`Content-Length: ${vodProbe.contentLength}`);
+      lines.push('');
+    }
+
+    // Buffer + codec info if we already collected them via the diagnostics
+    // panel — useful when the user pressed "Info stream" before "Copia".
+    if (bufferStats) {
+      lines.push('--- Buffer stats ---');
+      lines.push(`currentTime: ${bufferStats.currentTime.toFixed(2)}s`);
+      lines.push(`ahead: ${bufferStats.ahead.toFixed(2)}s`);
+      lines.push(`behind: ${bufferStats.behind.toFixed(2)}s`);
+      lines.push(`total: ${bufferStats.total.toFixed(2)}s`);
+      lines.push(`ranges: ${bufferStats.ranges}`);
+      lines.push('');
+    }
+    if (streamInfoData) {
+      lines.push('--- Stream / codec info ---');
+      try {
+        lines.push(JSON.stringify(streamInfoData, null, 2));
+      } catch {
+        lines.push(String(streamInfoData));
+      }
+      lines.push('');
+    }
+
+    // Recent error history (ring buffer)
+    if (recentErrors.length > 0) {
+      lines.push('--- Recent errors (most recent first) ---');
+      recentErrors.forEach((e, i) => {
+        lines.push(`#${i + 1} [${new Date(e.ts).toISOString()}] ${e.category} — ${e.title}: ${e.message}`);
+      });
+      lines.push('');
+    }
+
+    lines.push('=== End report ===');
+    return lines.join('\n');
+  }, [channel, streamSourceInfo, playbackError, error, vodProbe, bufferStats, streamInfoData, recentErrors]);
+
+  const copyErrorReport = useCallback(async () => {
+    const report = buildErrorReport();
+    let ok = false;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(report);
+        ok = true;
+      } else {
+        // Fallback for older Electron / non-secure contexts.
+        const ta = document.createElement('textarea');
+        ta.value = report;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+    } catch (e) {
+      console.warn('[Player] Copy error report failed:', e);
+    }
+    if (ok) {
+      setErrorReportCopied(true);
+      showOsd(<Copy className="w-12 h-12 text-white" />, 'Report errore copiato');
+      window.setTimeout(() => setErrorReportCopied(false), 2000);
+    } else {
+      showOsd(<AlertTriangle className="w-12 h-12 text-white" />, 'Copia non disponibile');
+    }
+  }, [buildErrorReport, showOsd]);
+
   // P8.2 — Track recent playback errors (ring buffer, max 10) for the
   // diagnostics screen. We snapshot whenever `playbackError` transitions
   // from null → non-null.
-  const lastErrorRef = useRef<PlaybackErrorState | null>(null);
-  useEffect(() => {
+  const lastErrorRef = useRef<PlaybackErrorState | null>(null);  useEffect(() => {
     if (playbackError && playbackError !== lastErrorRef.current) {
       lastErrorRef.current = playbackError;
       setRecentErrors(prev => [
@@ -1017,6 +1161,15 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
               )}
               <button onClick={updateStreamInfo} className="tv-focus px-6 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg flex items-center gap-2">
                 <Info className="w-4 h-4" /> Info stream
+              </button>
+              <button
+                onClick={copyErrorReport}
+                className="tv-focus px-6 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg flex items-center gap-2"
+                title="Copia un report completo dell'errore negli appunti, pronto da inviare allo sviluppatore"
+                aria-label="Copia report errore negli appunti"
+              >
+                {errorReportCopied ? <Check className="w-4 h-4 text-state-success" /> : <Copy className="w-4 h-4" />}
+                {errorReportCopied ? 'Copiato!' : 'Copia report'}
               </button>
               <button onClick={() => { setError(null); setPlaybackError(null); if (onBack) onBack(); }} className="tv-focus px-6 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded-lg">Chiudi</button>
             </div>
