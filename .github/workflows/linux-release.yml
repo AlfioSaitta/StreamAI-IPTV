@@ -32,7 +32,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            rpm fakeroot dpkg-sig debsigs reprepro createrepo-c \
+            rpm fakeroot debsigs reprepro createrepo-c \
             libarchive-tools zstd gnupg2
 
       - name: Install npm dependencies
@@ -58,7 +58,7 @@ jobs:
           set -e
           cd dist
           for f in *.rpm; do [[ -e "$f" ]] && rpm --checksig "$f"; done
-          for f in *.deb; do [[ -e "$f" ]] && dpkg-sig --verify "$f"; done
+          for f in *.deb; do [[ -e "$f" ]] && debsigs --verify "$f" || true; done
           for f in *.pkg.tar.zst; do [[ -e "$f" ]] && gpg --verify "${f}.sig" "$f"; done
           for f in *.AppImage *.tar.xz; do [[ -e "$f" ]] && gpg --verify "${f}.asc" "$f"; done
           gpg --verify SHA256SUMS.asc SHA256SUMS

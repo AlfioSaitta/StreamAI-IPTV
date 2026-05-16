@@ -24,7 +24,7 @@ curl -fsSL https://<user>.github.io/StreamAI-IPTV/pubkey.asc \
 
 | Formato            | Comando                                                  |
 |--------------------|----------------------------------------------------------|
-| `.deb`             | `dpkg-sig --verify streamai_*.deb`                       |
+| `.deb`             | `debsigs --verify streamai_*.deb`                        |
 | `.rpm`             | `rpm --checksig streamai-*.rpm`                          |
 | `.pkg.tar.zst`     | `gpg --verify streamai-*.pkg.tar.zst.sig`                |
 | `.AppImage`        | `gpg --verify StreamAI-*.AppImage.asc`                   |
