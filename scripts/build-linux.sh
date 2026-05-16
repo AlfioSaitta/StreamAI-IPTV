@@ -113,6 +113,14 @@ done
 
 # 1. Vite build (skippable when iterating on packaging only).
 if [[ "${SKIP_BUILD:-0}" != "1" ]]; then
+  # Recover from a previous Docker run that wrote root-owned files into
+  # dist/ (older versions of this script did not pass --user to docker).
+  if [[ -d "$ROOT/dist" ]] && ! find "$ROOT/dist" -maxdepth 2 -not -user "$(id -un)" -print -quit | grep -q .; then
+    : # all good
+  elif [[ -d "$ROOT/dist" ]] && find "$ROOT/dist" -maxdepth 2 -not -user "$(id -un)" -print -quit 2>/dev/null | grep -q .; then
+    echo "▶ Cleaning root-owned files left by previous Docker run (sudo needed)"
+    sudo rm -rf "$ROOT/dist"
+  fi
   echo "▶ Vite production build"
   ./node_modules/.bin/vite build
 fi
@@ -185,12 +193,18 @@ EOF
     return 1
   fi
   echo "▶ Building $target inside ${DOCKER_IMAGE}"
+  # Run as the host UID/GID so the artefacts written under dist/ remain
+  # owned by the invoking user (otherwise subsequent vite/electron-builder
+  # runs on the host fail with EACCES when trying to clean dist/).
+  local UID_GID="$(id -u):$(id -g)"
   docker run --rm \
-    --env ELECTRON_CACHE=/root/.cache/electron \
-    --env ELECTRON_BUILDER_CACHE=/root/.cache/electron-builder \
+    --user "$UID_GID" \
+    --env HOME=/tmp \
+    --env ELECTRON_CACHE=/tmp/.cache/electron \
+    --env ELECTRON_BUILDER_CACHE=/tmp/.cache/electron-builder \
     -v "$ROOT":/project \
-    -v "$HOME/.cache/electron":/root/.cache/electron \
-    -v "$HOME/.cache/electron-builder":/root/.cache/electron-builder \
+    -v "$HOME/.cache/electron":/tmp/.cache/electron \
+    -v "$HOME/.cache/electron-builder":/tmp/.cache/electron-builder \
     -w /project \
     "$DOCKER_IMAGE" \
     bash -c "git config --global --add safe.directory /project && \
