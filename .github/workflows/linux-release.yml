@@ -28,12 +28,40 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - name: Install packaging toolchain
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            rpm fakeroot debsigs reprepro createrepo-c \
-            libarchive-tools zstd gnupg2
+      # ---- Caches --------------------------------------------------------
+      # 1) Electron binary archives (~80 MB per version): re-used across
+      #    every electron-builder target — both native and inside Docker
+      #    (build-linux.sh mounts $HOME/.cache/electron into the container).
+      # 2) electron-builder caches: fpm bundle, AppImage tools, 7za, etc.
+      #    (~200 MB cumulative). Same volume-mount trick applies.
+      # Keyed on package-lock.json so the cache only invalidates when
+      # electron / electron-builder versions change.
+      - name: Cache Electron + electron-builder downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            electron-${{ runner.os }}-
+
+      # 3) APT archives for the packaging toolchain. cache-apt-pkgs-action
+      #    persists /var/cache/apt/archives across runs and replays the
+      #    install from cache when the package set is unchanged (~30 s -> ~3 s).
+      - name: Install packaging toolchain (cached)
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: rpm fakeroot debsigs reprepro createrepo-c libarchive-tools zstd gnupg2
+          version: v1
+
+      # 4) Docker images pulled by build-linux.sh (rpmbuild >= 4.20 on noble
+      #    triggers the electronuserland/builder fallback for every .rpm
+      #    job). Caching the image saves the ~1 GB pull each run.
+      - name: Cache Docker images (electronuserland/builder)
+        uses: ScribeMD/docker-cache@0.5.0
+        with:
+          key: docker-${{ runner.os }}-electronuserland-builder
 
       - name: Install npm dependencies
         run: npm ci
@@ -225,11 +253,18 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - name: Install repo tooling
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            reprepro createrepo-c libarchive-tools zstd gnupg2
+      - name: Install repo tooling (cached)
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: reprepro createrepo-c libarchive-tools zstd gnupg2
+          version: v1
+
+      # publish-repo.sh uses 'docker run archlinux:latest' for 'repo-add';
+      # cache the ~400 MB image across runs.
+      - name: Cache Docker images (archlinux:latest)
+        uses: ScribeMD/docker-cache@0.5.0
+        with:
+          key: docker-${{ runner.os }}-archlinux-latest
 
       - name: Download built artefacts
         uses: actions/download-artifact@v4
