@@ -12,7 +12,7 @@ Si distingue per l'integrazione con **Google Gemini AI**, che offre raccomandazi
 - **Movies (VOD)**: Film on-demand con seeking fluido, timeline interattiva e anteprima al passaggio del mouse.
 - **Series**: Episodi con navigazione tra stagioni e puntate, e salvataggio automatico del progresso.
 - **Codec HEVC/H.265**: Supporto nativo per video 4K con codec proprietari (via BranchBit).
-- **Player Nativo (Android)**: Utilizzo del player di sistema (ExoPlayer) per massime prestazioni su mobile.
+- **Player Nativo (Android)**: Utilizzo del player di sistema basato su **AndroidX Media3 1.10.1** (ExoPlayer di nuova generazione) per massime prestazioni su mobile.
 - **OSD (On-Screen Display)**: Feedback visivo immediato per volume, seeking, play/pausa e stato buffer.
 - **Diagnostica stream**: classificazione errori HTTP/codec/timeout, retry controllato e pannello “Info stream” con URL sanitizzato, protocollo, engine, codec video/audio e dati qualità quando disponibili.
 - **Fallback multi-engine**: HLS.js, MPEG-TS (`mpegts.js`), Video.js e player nativo Android vengono scelti in base a protocollo, estensione e URL Xtream-like.
@@ -181,7 +181,7 @@ I file `*.keystore`, `*.jks`, APK/AAB e gli asset Android generati sono esclusi 
 
 ### Funzionalità Android
 - ✅ Streaming Live/VOD/Series
-- ✅ Player nativo (ExoPlayer tramite `capacitor-video-player`) per prestazioni superiori
+- ✅ Player nativo basato su **AndroidX Media3 1.10.1** (tramite il plugin `capacitor-video-player` vendorato in `android/plugins/`) per prestazioni superiori
 - ✅ Picture-in-Picture su Android 8+ / API 26+ quando supportato dal device
 - ✅ Fullscreen
 - ✅ Supporto HTTP cleartext per stream IPTV

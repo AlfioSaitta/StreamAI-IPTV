@@ -12,7 +12,7 @@ This file provides context and guidelines for GitHub Copilot coding agent when w
 - Universal casting to Chromecast, DLNA/UPnP, and AirPlay devices
 - Picture-in-Picture support (Desktop and Android)
 - Full keyboard/remote control support for TV interfaces
-- Native Android player using ExoPlayer for optimal performance
+- Native Android player using **AndroidX Media3** (1.10.1) for optimal performance
 
 ## Tech Stack
 
@@ -22,7 +22,10 @@ This file provides context and guidelines for GitHub Copilot coding agent when w
 - **Styling:** Tailwind CSS (dark theme by default)
 - **Video Player:** 
   - Desktop/Web: Video.js with custom OSD and interactive timeline
-  - Android: Capacitor Video Player (ExoPlayer native)
+  - Android: Capacitor Video Player (native player on **AndroidX Media3
+    1.10.1** — `androidx.media3:media3-exoplayer:1.10.1`, pin 2026-05-15;
+    plugin vendored in `android/plugins/capacitor-video-player/`, see
+    MED-1 in `docs/IMPROVEMENT_PLAN.md` §4-bis)
 - **AI:** Google Gemini API (@google/genai)
 - **Networking:** mDNS (Bonjour), SSDP, DIAL for device discovery and advertising
 - **Icons:** Lucide React
@@ -146,13 +149,14 @@ These features define StreamAI's identity and must be preserved:
 ## Important Gotchas
 
 1. **HEVC Codec:** Electron uses custom FFmpeg build via `scripts/patch-ffmpeg.js`. Modify with caution.
-2. **Android Player:** HTML5 `<video>` has poor IPTV performance on Android. Use native player via `nativeVideoPlayer.ts` when `platformService.isNative` is true.
-3. **Mixed Content:** App must play HTTP (insecure) streams even in secure context. Configured in `electron/main.js` and `android/app/src/main/AndroidManifest.xml` (usesCleartextTraffic).
-4. **Electron Build:** Ensure `services` folder is included in `package.json` → `build.files` so `advertisingService.js` is available in production ASAR build.
-5. **Xtream Live group order:** Do NOT sort `live` categories alphabetically in `services/xtream.ts → processContent()`. Users expect the server-defined order. Alphabetical sorting applies only to `movie`/`series`.
-6. **AI hint dismissal:** `AiUnavailableHint` in `App.tsx` uses two state layers — `aiHintSessionDismissed` (in-memory, resets on profile change) and `ProfilePreferences.hideAiUnavailableHint` (persistent, toggled by "Non mostrare più" checkbox). Preserve both when editing.
-7. **M3U profiles:** When `Profile.playlistUrl` is set, `App.tsx` must load and parse the playlist via `parseM3UAsync` (worker for >256 kB) on profile activation before rendering the catalog.
-8. **Per-type Continue Watching:** `ChannelList` filters the "Continue Watching" rail using `ProfilePreferences.continueWatchingMoviesEnabled` (default `false`) and `continueWatchingSeriesEnabled` (default `true`). Keep both toggles wired through `App.tsx` and `ProfileSettings.tsx`.
+2. **Android Player:** HTML5 `<video>` has poor IPTV performance on Android. Use native player via `nativeVideoPlayer.ts` when `platformService.isNative` is true. The native player is now backed by **AndroidX Media3 1.10.1** (`androidx.media3.exoplayer.ExoPlayer` + `androidx.media3.session.MediaSession` + `androidx.media3.cast.CastPlayer`) with `setEnableDecoderFallback(true)`, HDR tunneling, HLS chunkless preparation and IPTV-friendly buffer tuning.
+3. **Android player plugin (vendor):** `capacitor-video-player` is vendored in `android/plugins/capacitor-video-player/` to detach from the orphan upstream. `package.json` uses `"capacitor-video-player": "file:android/plugins/capacitor-video-player"`. Apply patches and Media3 bumps there; `node_modules/capacitor-video-player` no longer exists as a GitHub package. A CI guard `scripts/check-media3-migration.mjs` (run via `npm run check`) fails the build if `com.google.android.exoplayer2.*` references creep back in.
+4. **Mixed Content:** App must play HTTP (insecure) streams even in secure context. Configured in `electron/main.js` and `android/app/src/main/AndroidManifest.xml` (usesCleartextTraffic).
+5. **Electron Build:** Ensure `services` folder is included in `package.json` → `build.files` so `advertisingService.js` is available in production ASAR build.
+6. **Xtream Live group order:** Do NOT sort `live` categories alphabetically in `services/xtream.ts → processContent()`. Users expect the server-defined order. Alphabetical sorting applies only to `movie`/`series`.
+7. **AI hint dismissal:** `AiUnavailableHint` in `App.tsx` uses two state layers — `aiHintSessionDismissed` (in-memory, resets on profile change) and `ProfilePreferences.hideAiUnavailableHint` (persistent, toggled by "Non mostrare più" checkbox). Preserve both when editing.
+8. **M3U profiles:** When `Profile.playlistUrl` is set, `App.tsx` must load and parse the playlist via `parseM3UAsync` (worker for >256 kB) on profile activation before rendering the catalog.
+9. **Per-type Continue Watching:** `ChannelList` filters the "Continue Watching" rail using `ProfilePreferences.continueWatchingMoviesEnabled` (default `false`) and `continueWatchingSeriesEnabled` (default `true`). Keep both toggles wired through `App.tsx` and `ProfileSettings.tsx`.
 
 ## Additional Context
 

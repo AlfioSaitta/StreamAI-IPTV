@@ -101,5 +101,19 @@ describe('detectStreamSource', () => {
     expect(info.protocol).toBe('hls');
     expect(info.engine).toBe('videojs');
   });
+
+  // MED-1 (Step 3-ter): MKV/Matroska riconosciuto come container progressivo.
+  it('detects MKV / Matroska VOD URLs', async () => {
+    vi.resetModules();
+    vi.doMock('hls.js', () => ({ default: { isSupported: () => true } }));
+    vi.doMock('mpegts.js', () => ({ default: { isSupported: () => true } }));
+    const { detectStreamSource } = await import('../../components/player/playerUtils');
+    const a = detectStreamSource('http://srv.test/movie/u/p/42.mkv', 'movie');
+    expect(a.protocol).toBe('mkv');
+    expect(a.mimeType).toBe('video/x-matroska');
+    expect(a.label).toBe('MKV/Matroska');
+    const b = detectStreamSource('https://x.test/file.matroska?token=abc');
+    expect(b.protocol).toBe('mkv');
+  });
 });
 

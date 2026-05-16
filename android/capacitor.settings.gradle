@@ -6,4 +6,4 @@ include ':capacitor-app'
 project(':capacitor-app').projectDir = new File('../node_modules/@capacitor/app/android')
 
 include ':capacitor-video-player'
-project(':capacitor-video-player').projectDir = new File('../node_modules/capacitor-video-player/android')
+project(':capacitor-video-player').projectDir = new File('plugins/capacitor-video-player/android')

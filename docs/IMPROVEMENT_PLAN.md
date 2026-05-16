@@ -24,6 +24,7 @@
 - [🐞 2. BUG-1: sezione "Films" sempre vuota](#-2-bug-1-sezione-films-sempre-vuota)
 - [🚨 3. URG-1: Seek VOD bloccante](#-3-urg-1-seek-vod-bloccante)
 - [🎨 4. UI-1: Design System v1](#-4-ui-1-design-system-v1)
+- [🎬 4-bis. MED-1: Migrazione ExoPlayer → AndroidX Media3](#-4-bis-med-1-migrazione-exoplayer--androidx-media3)
 - [5. Roadmap prioritaria P0-P8](#5-roadmap-prioritaria-p0-p8)
 - [6. Debt tecnico ad alto impatto (B)](#6-debt-tecnico-ad-alto-impatto-b)
 - [7. UX gap residui (C)](#7-ux-gap-residui-c)
@@ -74,6 +75,7 @@ Per ogni tranche idealmente chiudere con:
 | 🐞 **BUG-1 Films sempre vuota** | ✅ Completato | Vedi §2 — cache hardening + retry mirato + UI feedback + 15 test |
 | 🚨 URG-1 Seek VOD bloccante | ✅ 3/4 livelli | Livello 4 (Range proxy Electron) opzionale |
 | 🎨 UI-1 Design System v1 | ✅ 100% | DS v1 + migrazione + accessibilità, 0 occorrenze red/purple |
+| 🎬 **MED-1 Migrazione ExoPlayer → AndroidX Media3 1.10.1** | 🚧 Codice pronto | Vedi §4-bis — vendor plugin + porting Java/XML/Gradle completato, ProGuard + CI guard verdi. Gate fisico Smoke matrix aperto (richiede device API 26+ con JDK 17 completo). |
 | P0 Sicurezza runtime | 🚧 | `npm audit` triage, hardening WS remote, IPC validation aperti |
 | P1 Bundle iniziale | ✅ | 580 → 146 kB gzip (lazy + auto split) |
 | P2 Player Desktop/Android | ✅ | Error handling, PiP native, fallback codec |
@@ -419,6 +421,926 @@ Tutti i componenti chiave migrati a DS v1:
 
 ---
 
+## 🎬 4-bis. MED-1: Migrazione ExoPlayer → AndroidX Media3
+
+> **Priorità: P1 — debt strutturale Android.** Aggiunto 2026-05-15.
+> Il player nativo Android utilizza il plugin Capacitor
+> `capacitor-video-player` (fork `@brylsherbert/capacitor-video-player`
+> 7.0.32, sorgente `github:phiamo/capacitor-video-player`) che internamente
+> dipende da **ExoPlayer 2.19.0** (`com.google.android.exoplayer:exoplayer-*`).
+> La libreria standalone **ExoPlayer 2.x è deprecata da marzo 2024** (last
+> release `2.19.1`, end-of-life): Google indirizza ufficialmente la
+> migrazione a **AndroidX Media3** (`androidx.media3:media3-*`). Restare su
+> ExoPlayer 2 significa: nessun fix di sicurezza, nessun supporto Android
+> 15/16, nessuna nuova feature (HDR10+, Dolby Vision aggiornato, AV1 SW
+> migliorato, MediaSession nuova generazione).
+
+### 4-bis.1 Stato attuale (analisi statica approfondita 2026-05-16)
+
+#### 4-bis.1.a Dipendenze e versioni rilevate
+
+- **Plugin path:** `node_modules/capacitor-video-player/android/`.
+- **Pacchetto npm:** `@brylsherbert/capacitor-video-player@7.0.32`, installato
+  via `"capacitor-video-player": "github:phiamo/capacitor-video-player"` in
+  `package.json`. Upstream `phiamo` non ha commit attivi su Media3.
+- **Versione ExoPlayer 2.19.0 (DEPRECATA)** in
+  `node_modules/capacitor-video-player/android/build.gradle`:
+  ```groovy
+  implementation 'com.google.android.exoplayer:exoplayer-core:2.19.0'
+  implementation 'com.google.android.exoplayer:exoplayer-ui:2.19.0'
+  implementation 'com.google.android.exoplayer:exoplayer-hls:2.19.0'
+  implementation 'com.google.android.exoplayer:exoplayer-dash:2.19.0'
+  implementation 'com.google.android.exoplayer:exoplayer-smoothstreaming:2.19.0'
+  implementation 'com.google.android.exoplayer:extension-mediasession:2.19.0'
+  implementation 'com.google.android.exoplayer:exoplayer:2.19.0'
+  implementation 'com.google.android.exoplayer:extension-cast:2.19.0'
+  implementation 'com.squareup.picasso:picasso:2.71828'
+  ```
+- **AndroidX coadiuvanti già in uso (restano nella migrazione):**
+  - `androidx.mediarouter.app.MediaRouteButton`
+  - `androidx.mediarouter.media.MediaRouter` / `MediaRouter.Callback` / `MediaRouteSelector`
+  - `android.support.v4.media.session.MediaSessionCompat`
+    (legacy `androidx.media:media`) — verrà sostituito da
+    `androidx.media3.session.MediaSession`.
+  - `com.google.android.gms.cast.framework.CastContext` /
+    `com.google.android.gms.cast.framework.CastButtonFactory` (Cast SDK,
+    NON parte di Media3 — resta).
+- **`android/variables.gradle`** non dichiara `media3Version` né
+  `playServicesCastVersion`. compileSdk 36, minSdk 24, targetSdk 36,
+  Java 17.
+- **HEVC su Electron** (`scripts/patch-ffmpeg.js`) è completamente
+  indipendente — non viene toccato dalla migrazione Android.
+
+#### 4-bis.1.b API ExoPlayer 2 effettivamente usate (mappa esaustiva)
+
+Estratto da `node_modules/capacitor-video-player/android/src/main/java/com/jeep/plugin/capacitor/capacitorvideoplayer/`:
+
+| File | Righe | Simboli chiave |
+| ---- | ----- | -------------- |
+| `FullscreenExoPlayerFragment.java` | 1.410 | `ExoPlayer` (singleton statico), `Player.Listener`, `StyledPlayerView` + `StyledPlayerView.ControllerVisibilityListener`, `AspectRatioFrameLayout` (`RESIZE_MODE_FIT/FILL/ZOOM`), `DefaultTimeBar`, `PlayerControlView`, `MediaItem` + `MediaItem.SubtitleConfiguration`, `MediaMetadata`, `PlaybackParameters`, `DefaultLoadControl`, `LoadControl`, `TrackSelector`, `AdaptiveTrackSelection`, `DefaultTrackSelector`, `DefaultBandwidthMeter`, `DefaultHttpDataSource.Factory`, `DefaultDataSourceFactory`, `HlsMediaSource.Factory`, `DashMediaSource.Factory`, `SsMediaSource.Factory`, `ProgressiveMediaSource.Factory`, `SingleSampleMediaSource.Factory`, `MergingMediaSource`, `CaptionStyleCompat`, `MimeTypes` (`TEXT_VTT`, `APPLICATION_SUBRIP`, `TEXT_SSA`, `APPLICATION_TTML`), `C.ROLE_FLAG_CAPTION`, `C.SELECTION_FLAG_DEFAULT`, `C.TIME_UNSET`, `CastPlayer`, `SessionAvailabilityListener`, `MediaSessionCompat`, `MediaSessionConnector`, `PictureInPictureParams.Builder`, `MediaRouteButton`, `CastContext`, `CastButtonFactory`, `CastStateListener`, `Format` (via `player.getVideoFormat()` per Rational aspect ratio in PiP). |
+| `CapacitorVideoPlayerPlugin.java` | 1.307 | Bridge `@CapacitorPlugin`. Espone metodi: `initPlayer`, `isPlaying`, `play`, `pause`, `stop`, `getDuration`, `getCurrentTime`, `setCurrentTime`, `setVolume`, `getVolume`, `setMuted`, `getMuted`, `setRate`, `getRate`, `stopAllPlayers`, `showController`, `isControllerIsFullyVisible`, `exitPlayer`. Opzioni: `mode` (`fullscreen` | `embedded`), `url`, `playerId`, `componentTag`, `title`, `smallTitle`, `accentColor`, `chromecast`, `artwork`, `subtitle`, `language`, `subtitleOptions` (`foregroundColor`, `backgroundColor`, `fontSize`), `headers`, `pipEnabled`, `controls`, `autoPlay`. |
+| `CapacitorVideoPlayer.java` | 71 | Stub di facciata. |
+
+**`supportedFormat` dichiarato** (`FullscreenExoPlayerFragment.java:128`):
+`["mp4", "webm", "ogv", "3gp", "flv", "dash", "mpd", "m3u8", "ism", "ytube", ""]`.
+
+**Branch `buildHttpMediaSource()` (riga 927)** → selezione `MediaSource` per estensione:
+- `mp4 | webm | ogv | 3gp | flv | ""` → `ProgressiveMediaSource.Factory`.
+- `dash | mpd` → `DashMediaSource.Factory`.
+- `m3u8` → `HlsMediaSource.Factory`.
+- `ism` → `SsMediaSource.Factory`.
+
+**Sottotitoli** (`getSubTitle`, riga 980): costruisce
+`MediaItem.SubtitleConfiguration` con `C.ROLE_FLAG_CAPTION` +
+`C.SELECTION_FLAG_DEFAULT` e li **fonde via `MergingMediaSource`**.
+Supporta `.vtt` (`MimeTypes.TEXT_VTT`), `.srt`
+(`MimeTypes.APPLICATION_SUBRIP`), `.ssa` / `.ass` (`MimeTypes.TEXT_SSA`),
+`.ttml` / `.dfxp` / `.xml` (`MimeTypes.APPLICATION_TTML`).
+
+**Caption styling** (`setSubtitle`, riga 851): usa `CaptionStyleCompat`
+con foreground/background configurabili via `subtitleOptions`.
+
+**Cast integration** (righe 1.274-1.360): `CastContext.getSharedInstance(...)`
+→ `castPlayer = new CastPlayer(castContext)` + `castPlayer.setSessionAvailabilityListener(...)`.
+Sul session start, sposta il `MediaItem` corrente da `exoPlayer` a
+`castPlayer.setMediaItem(mediaItem, videoPosition)` e
+`styledPlayerView.setPlayer(castPlayer)`.
+
+**MediaSession** (righe 842-846):
+```text
+mediaSession = new MediaSessionCompat(context, "capacitorvideoplayer");
+mediaSessionConnector = new MediaSessionConnector(mediaSession);
+mediaSessionConnector.setPlayer(player);
+mediaSession.setActive(true);
+```
+
+**PiP** (righe 596-650): `pictureInPictureParams = new PictureInPictureParams.Builder()`
+con aspect ratio derivato da `player.getVideoFormat()` (`Rational(width, height)`).
+Chiamato da `MainActivity.onUserLeaveHint()` (cfr. note P2.2 in §5)
+oppure da pulsante dedicato `pipBtn` nel control view.
+
+#### 4-bis.1.c Bridge JS e contratto invariante
+
+`services/nativeVideoPlayer.ts` (260 righe) espone:
+
+```ts
+interface CapacitorVideoPlayerPlugin {
+  initPlayer(options): Promise<{ result: boolean }>;
+  isPlaying({ playerId }): Promise<{ value: boolean }>;
+  play({ playerId }): Promise<{ result: boolean }>;
+  pause({ playerId }): Promise<{ result: boolean }>;
+  stop({ playerId }): Promise<{ result: boolean }>;
+  getDuration({ playerId }): Promise<{ value: number }>;
+  getCurrentTime({ playerId }): Promise<{ value: number }>;
+  setCurrentTime({ playerId, seektime }): Promise<{ result: boolean }>;
+  setVolume({ playerId, volume }): Promise<{ result: boolean }>;
+  setMuted({ playerId, muted }): Promise<{ result: boolean }>;
+  stopAllPlayers(): Promise<{ result: boolean }>;
+  addListener(event, fn): Promise<{ remove: () => void }>;
+}
+```
+
+**Eventi nativi consumati** (`setupListeners`):
+`jeepCapVideoPlayerPlay`, `jeepCapVideoPlayerPause`,
+`jeepCapVideoPlayerEnded`, `jeepCapVideoPlayerExit`,
+`jeepCapVideoPlayerReady`, `jeepCapVideoPlayerCurrentTime`.
+
+**Capability sniffing JS:** `supportsPiP` legge `navigator.userAgent`
+(`Android >= 8`). `enterPictureInPicture()` prova
+`enterPictureInPicture | enterPip | pip | requestPictureInPicture` in
+ordine (compat fork divergenti).
+
+**Hook React di consumo:** `hooks/useNativePlayerEngine.ts`. Si limita
+a `init`/`play`/`pause`/`seek`/`setVolume`/`setMuted` + listener →
+sincronizza con stato React e `usePlayerOsd`. **Non** dipende dalle
+internals Java: la migrazione è trasparente lato hook.
+
+**Detection lato JS** (`components/player/playerUtils.ts:47`
+`detectStreamSource`):
+- `.m3u8` → HLS (engine `hlsjs` / `videojs`).
+- `.mpd` → DASH (engine `videojs`).
+- `.ts|.mpeg|.mpg` o Xtream-live extensionless → MPEG-TS (engine `mpegts` / `videojs`).
+- `.webm` → WebM progressivo.
+- `.mp4|.m4v|.mov` o Xtream movie/series → MP4 progressivo.
+- Native engine (`'native'`) usato su Capacitor (`platformService.isNative`).
+
+#### 4-bis.1.d Configurazione Android contestuale (resta invariata)
+
+- **`android/app/src/main/AndroidManifest.xml`**:
+  `supportsPictureInPicture="true"`, `resizeableActivity="true"`,
+  `screenOrientation="sensorLandscape"`,
+  `configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"`,
+  `android:hardwareAccelerated="true"`, `android:largeHeap="true"`,
+  `usesCleartextTraffic="true"`, `network_security_config` per HTTP.
+  Permessi: `INTERNET`, `ACCESS_NETWORK_STATE`, `ACCESS_WIFI_STATE`,
+  `WAKE_LOCK`, `FOREGROUND_SERVICE`. Feature: `picture_in_picture`,
+  `touchscreen` (entrambe non-required).
+- **`MainActivity.java`**: immersive landscape (`WindowCompat` +
+  `WindowInsetsControllerCompat`), cutout mode `ALWAYS` (API 30+) /
+  `SHORT_EDGES` (API 28-29), re-apply su `onPictureInPictureModeChanged`.
+  Nessuna API ExoPlayer/Media3 chiamata direttamente: deleghiamo tutto al
+  plugin.
+- **`capacitor.config.ts`**: `allowMixedContent: true`,
+  `captureInput: true`, `server.cleartext: true`. Nessun setting Media3-specific.
+
+### 4-bis.2 Obiettivi (con parità funzionale al pixel)
+
+1. **Aggiornare a AndroidX Media3 `1.10.1`** (pin 2026-05-15). Bumpabile
+   solo a patch `1.10.x` senza re-eseguire la smoke matrix. Fallback
+   minimo accettato: `1.4.1`. Riferimento ufficiale:
+   <https://developer.android.com/jetpack/androidx/releases/media3>.
+2. **Zero regressioni di codec.** Tutti i codec **video** oggi
+   riproducibili su Android devono restarlo (vedi matrice §4-bis.11):
+   H.264/AVC (Baseline/Main/High, profilo 4.x e 5.x), H.265/HEVC
+   (Main/Main10, HDR10/HDR10+/Dolby Vision quando supportato dall'OEM),
+   VP8, VP9 (Profile 0/2 inclusi HDR), AV1 (Main Profile, decoder SW
+   `media3-decoder-av1` opzionale o HW), MPEG-2 Video, MPEG-4 Part 2,
+   H.263 (3GP legacy).
+3. **Zero regressioni di codec audio.** AAC LC/HE-AACv1/HE-AACv2/AAC-ELD,
+   MP3, Vorbis, Opus, FLAC, AC-3 / E-AC-3 (Dolby Digital / DD+, anche
+   passthrough Bluetooth/HDMI dove l'OEM lo espone), AC-4 (Atmos),
+   DTS / DTS-HD / DTS-Express (passthrough), PCM, AMR-NB/WB.
+4. **Zero regressioni sui container/protocolli** dichiarati in
+   `supportedFormat` + quelli derivati: MP4/MOV/M4V, WebM, OGG/OGV, 3GP,
+   FLV, MKV (Matroska — Media3 lo supporta via `MatroskaExtractor`,
+   anche se non era nella lista whitelist; vedi §4-bis.6 Step 3-bis),
+   MPEG-TS (Progressive over HTTP via `TsExtractor`), DASH (`.mpd`),
+   HLS (`.m3u8`), SmoothStreaming (`.ism`/`.isml`).
+5. **Zero regressioni sui sottotitoli:** WebVTT, SRT (SubRip), SSA/ASS,
+   TTML/DFXP/XML (sideload SingleSampleMediaSource), **+ embed
+   CEA-608/708** dentro HLS/TS e **WebVTT in-HLS**.
+6. **Feature trasversali preservate:**
+   - PiP Android con aspect ratio dinamico (`Rational(width, height)`).
+   - MediaSession (lock screen + Bluetooth + cuffie + Android Auto base).
+   - Chromecast fallback Media3 (`CastPlayer`) + MediaRouter button.
+   - HTTP headers custom (User-Agent, Authorization, cookies Xtream).
+   - Resize mode FIT/FILL/ZOOM ciclico (`AspectRatioFrameLayout`).
+   - Caption styling (foreground/background/font size).
+   - Seek, volume, mute, playback rate, autoplay, poster, live edge.
+   - Retry esponenziale lato JS (`useNativePlayerEngine` →
+     `scheduleRetry` + `classifyPlaybackError`).
+7. **API JS invariata:** `services/nativeVideoPlayer.ts` resta byte-per-byte
+   identico. La firma del plugin Capacitor non cambia.
+8. **Vendor del plugin in-tree** in `android/plugins/capacitor-video-player/`
+   per indipendenza dall'upstream orfano e patch idempotente in CI.
+
+### 4-bis.3 Strategia (3 opzioni — decisione richiesta in Step 0)
+
+| Opzione | Vantaggi | Costi | Rischi |
+| ------- | -------- | ----- | ------ |
+| **A. Fork interno del plugin (vendor + porting Java)** ⭐ raccomandata | Controllo totale, niente dipendenza GitHub orfana, possiamo aggiungere feature (tracce audio multiple, HDR toggle, EXO-renderers AV1 SW) | ~5 g porting + smoke | `MediaSessionConnector` → `MediaSession` è riscrittura non meccanica |
+| B. Adottare plugin community già su Media3 | Meno codice nostro | Nessun plugin Capacitor Media3 maturo allo stato dell'arte (verificato 2026-05-16: nessun match su npm con `capacitor` + `media3` + manutenzione attiva) | Feature gap (cast, mediasession, sottotitoli SRT/SSA/TTML) da verificare |
+| C. Scrivere plugin Capacitor custom da zero | Architettura pulita, niente debito ereditato | 8-10 g sviluppo + test | Massimo lavoro, retake completo del fragment fullscreen + control view |
+
+> **Decisione di default (rivedibile):** Opzione **A** — vendor + porting,
+> perché il plugin attuale è già un fork di un fork e l'upstream non è
+> manutenuto da > 18 mesi. Opzione C resta come fallback strategico per
+> tranche future (D.4 audio tracks + D.4 OpenSubtitles).
+
+### 4-bis.4 Tabella di mapping API (ExoPlayer 2 → Media3 1.10.1)
+
+> Mappatura completa basata sul grep effettivo del plugin
+> (`FullscreenExoPlayerFragment.java`). Le righe contrassegnate con ⚠
+> richiedono intervento manuale (non meccanico).
+
+| ExoPlayer 2.19 | AndroidX Media3 1.10.1 | Note |
+| -------------- | ---------------------- | ---- |
+| `com.google.android.exoplayer2.SimpleExoPlayer` | `androidx.media3.exoplayer.ExoPlayer` (via `ExoPlayer.Builder`) | `SimpleExoPlayer` rimosso |
+| `com.google.android.exoplayer2.ExoPlayer` | `androidx.media3.exoplayer.ExoPlayer` | Builder pattern obbligatorio |
+| `com.google.android.exoplayer2.C` | `androidx.media3.common.C` | Constants `ROLE_FLAG_CAPTION`, `SELECTION_FLAG_DEFAULT`, `TIME_UNSET` invariate |
+| `com.google.android.exoplayer2.MediaItem` (+ `.SubtitleConfiguration`) | `androidx.media3.common.MediaItem` (+ `.SubtitleConfiguration`) | API identica |
+| `com.google.android.exoplayer2.Player` | `androidx.media3.common.Player` | `STATE_IDLE/BUFFERING/READY/ENDED` invariati |
+| `com.google.android.exoplayer2.Player.Listener` | `androidx.media3.common.Player.Listener` | Già usato (no `EventListener`) |
+| `com.google.android.exoplayer2.PlaybackParameters` | `androidx.media3.common.PlaybackParameters` | |
+| `com.google.android.exoplayer2.MediaMetadata` | `androidx.media3.common.MediaMetadata` | |
+| `com.google.android.exoplayer2.Format` | `androidx.media3.common.Format` | `Format.width/height/codecs/colorInfo` usati per Rational PiP + diagnostica |
+| `com.google.android.exoplayer2.audio.AudioAttributes` | `androidx.media3.common.AudioAttributes` | |
+| `com.google.android.exoplayer2.util.MimeTypes` | `androidx.media3.common.MimeTypes` | `TEXT_VTT`, `APPLICATION_SUBRIP`, `TEXT_SSA`, `APPLICATION_TTML` invariati |
+| `com.google.android.exoplayer2.source.hls.HlsMediaSource[.Factory]` | `androidx.media3.exoplayer.hls.HlsMediaSource[.Factory]` | `setAllowChunklessPreparation(true)` consigliato in Media3 per ridurre TTFF |
+| `…source.dash.DashMediaSource[.Factory]` | `androidx.media3.exoplayer.dash.DashMediaSource[.Factory]` | |
+| `…source.smoothstreaming.SsMediaSource[.Factory]` | `androidx.media3.exoplayer.smoothstreaming.SsMediaSource[.Factory]` | |
+| `…source.ProgressiveMediaSource[.Factory]` | `androidx.media3.exoplayer.source.ProgressiveMediaSource[.Factory]` | Default extractor list copre MP4/MKV/WebM/OGG/FLV/3GP/TS/FLAC/ADTS/AMR |
+| `…source.SingleSampleMediaSource[.Factory]` | `androidx.media3.exoplayer.source.SingleSampleMediaSource[.Factory]` | Usato per subtitle sideload |
+| `…source.MergingMediaSource` | `androidx.media3.exoplayer.source.MergingMediaSource` | Audio+video+subs |
+| `…source.MediaSource[.Factory]` | `androidx.media3.exoplayer.source.MediaSource[.Factory]` | Interface |
+| `…trackselection.AdaptiveTrackSelection[.Factory]` | `androidx.media3.exoplayer.trackselection.AdaptiveTrackSelection[.Factory]` | |
+| `…trackselection.DefaultTrackSelector` | `androidx.media3.exoplayer.trackselection.DefaultTrackSelector` | API `setParameters(...)` allargata |
+| `…trackselection.TrackSelector` | `androidx.media3.exoplayer.trackselection.TrackSelector` | |
+| `…trackselection.ExoTrackSelection` | `androidx.media3.exoplayer.trackselection.ExoTrackSelection` | |
+| `…ui.StyledPlayerView` | `androidx.media3.ui.PlayerView` | ⚠ `StyledPlayerView` rimosso/unificato in `PlayerView` (anche `StyledPlayerView.ControllerVisibilityListener` → `PlayerView.ControllerVisibilityListener`) |
+| `…ui.AspectRatioFrameLayout` | `androidx.media3.ui.AspectRatioFrameLayout` | `RESIZE_MODE_FIT/FILL/ZOOM/FIXED_WIDTH/FIXED_HEIGHT` invariati |
+| `…ui.DefaultTimeBar` | `androidx.media3.ui.DefaultTimeBar` | |
+| `…ui.PlayerControlView` | `androidx.media3.ui.PlayerControlView` | `VisibilityListener` con stessa firma |
+| `…ui.CaptionStyleCompat` | `androidx.media3.ui.CaptionStyleCompat` | `EDGE_TYPE_NONE` invariato |
+| `…upstream.DataSource[.Factory]` | `androidx.media3.datasource.DataSource[.Factory]` | |
+| `…upstream.DefaultDataSourceFactory` | `androidx.media3.datasource.DefaultDataSource.Factory` | ⚠ ridenominato e ora **nested class** di `DefaultDataSource` |
+| `…upstream.DefaultHttpDataSource[.Factory]` | `androidx.media3.datasource.DefaultHttpDataSource[.Factory]` | `setUserAgent`, `setConnectTimeoutMs`, `setReadTimeoutMs`, `setAllowCrossProtocolRedirects`, `setDefaultRequestProperties(Map)` invariati |
+| `…upstream.DefaultBandwidthMeter` | `androidx.media3.exoplayer.upstream.DefaultBandwidthMeter` | |
+| `…DefaultLoadControl[.Builder]` | `androidx.media3.exoplayer.DefaultLoadControl[.Builder]` | `setBufferDurationsMs` invariato |
+| `…LoadControl` | `androidx.media3.exoplayer.LoadControl` | |
+| `…DefaultRenderersFactory` (non in uso, ma utile) | `androidx.media3.exoplayer.DefaultRenderersFactory` | Da introdurre per `setEnableDecoderFallback(true)` e `EXTENSION_RENDERER_MODE_PREFER` (AV1/FFmpeg) |
+| `…ext.mediasession.MediaSessionConnector` | `androidx.media3.session.MediaSession` (+ opzionalmente `MediaSessionService`) | ⚠ **Riscrittura non meccanica** — niente più connector |
+| `android.support.v4.media.session.MediaSessionCompat` | rimuovere (sostituito da `androidx.media3.session.MediaSession`) | ⚠ |
+| `…ext.cast.CastPlayer` | `androidx.media3.cast.CastPlayer` | API quasi 1:1 |
+| `…ext.cast.SessionAvailabilityListener` | `androidx.media3.cast.SessionAvailabilityListener` | |
+| `com.google.android.gms.cast.framework.CastContext` | **invariato** (Cast SDK, non Media3) | |
+| `com.google.android.gms.cast.framework.CastButtonFactory` | **invariato** | |
+| `androidx.mediarouter.app.MediaRouteButton` | **invariato** (AndroidX MediaRouter) | |
+| `androidx.mediarouter.media.MediaRouter` | **invariato** | |
+| `com.squareup.picasso.Picasso` | **invariato** (artwork loader) | |
+| `…AnalyticsListener` (eventuale uso futuro) | `androidx.media3.exoplayer.analytics.AnalyticsListener` | Utile per `StreamDiagnostics` lato P8.2 |
+
+### 4-bis.5 Dipendenze Gradle target
+
+`android/variables.gradle` (aggiungere):
+
+```groovy
+ext {
+    // …existing (minSdk 24, compileSdk 36, targetSdk 36)…
+    media3Version = '1.10.1'           // pin stabile 2026-05-15; bump solo a patch 1.10.x
+    playServicesCastVersion = '21.5.0' // richiesto da media3-cast
+}
+```
+
+`android/plugins/capacitor-video-player/build.gradle` (post-vendor):
+
+```groovy
+dependencies {
+    // RIMUOVERE le 8 implementation com.google.android.exoplayer:*:2.19.0
+
+    // Core + protocolli (HLS/DASH/SS/Progressive con extractor MP4/MKV/WebM/OGG/3GP/FLV/TS/FLAC/ADTS/AMR)
+    implementation "androidx.media3:media3-exoplayer:$media3Version"
+    implementation "androidx.media3:media3-exoplayer-hls:$media3Version"
+    implementation "androidx.media3:media3-exoplayer-dash:$media3Version"
+    implementation "androidx.media3:media3-exoplayer-smoothstreaming:$media3Version"
+
+    // UI (PlayerView, ControlView, TimeBar, SubtitleView)
+    implementation "androidx.media3:media3-ui:$media3Version"
+
+    // MediaSession nuova generazione (sostituisce extension-mediasession)
+    implementation "androidx.media3:media3-session:$media3Version"
+
+    // Chromecast (sostituisce extension-cast)
+    implementation "androidx.media3:media3-cast:$media3Version"
+    implementation "com.google.android.gms:play-services-cast-framework:$playServicesCastVersion"
+
+    // Datasource + Common (necessari come deps esplicite per Media3 1.10)
+    implementation "androidx.media3:media3-datasource:$media3Version"
+    implementation "androidx.media3:media3-common:$media3Version"
+    implementation "androidx.media3:media3-extractor:$media3Version"
+
+    // Opzionale ma RACCOMANDATO per IPTV: decoder SW di fallback
+    // implementation "androidx.media3:media3-decoder:$media3Version"
+    // implementation "androidx.media3:media3-exoplayer-ima:$media3Version"  // SOLO se serve ads
+    // implementation "androidx.media3:media3-datasource-okhttp:$media3Version"  // SOLO se vogliamo cookie store unificato
+
+    // AndroidX coadiuvanti (restano come da plugin originale)
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation 'androidx.mediarouter:mediarouter:1.7.0'
+    implementation 'androidx.coordinatorlayout:coordinatorlayout:1.2.0'
+    implementation 'androidx.recyclerview:recyclerview:1.3.2'
+    implementation 'androidx.cardview:cardview:1.0.0'
+    implementation 'androidx.gridlayout:gridlayout:1.0.0'
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+
+    // Picasso resta come da plugin originale
+    implementation 'com.squareup.picasso:picasso:2.71828'
+
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+}
+```
+
+> **Nota copertura codec.** Media3 `media3-exoplayer` + `media3-extractor`
+> coprono **out-of-the-box**: H.264, H.265, VP8, VP9, AV1 (HW), MPEG-2,
+> MPEG-4 Part 2, AAC, MP3, Vorbis, Opus, FLAC, AC-3, E-AC-3, AC-4,
+> Raw/PCM, AMR-NB/WB, in container MP4/Matroska/WebM/OGG/3GP/FLV/MPEG-TS/MP3/FLAC/WAV/AAC-ADTS.
+> Per AV1 SW (device sprovvisti di decoder HW) si può abilitare il
+> renderer extension AV1 in tranche separata (cfr. nota in §4-bis.6 Step 3-bis).
+
+### 4-bis.6 Roadmap operativa (step incrementali)
+
+#### Step 0 — Decisione strategia & vendor del plugin (0.3 g)
+
+- [x] Confermata Opzione **A** (fork interno).
+- [x] Versione Media3 pinnata a **`1.10.1`** in `android/variables.gradle`
+  (`media3Version`) e nel `build.gradle` del plugin vendorato.
+- [x] Plugin copiato in `android/plugins/capacitor-video-player/`
+  (rimossi `build/`, `node_modules/`, `ios/`, `*.bak`, `.podspec`).
+- [x] `android/capacitor.settings.gradle` proietta il progetto Gradle su
+  `./plugins/capacitor-video-player/android` (con nota che `npx cap sync`
+  rigenera il file → ri-applicare la proiezione locale se necessario).
+- [x] `package.json` ora usa `"capacitor-video-player": "file:android/plugins/capacitor-video-player"`.
+- [x] `android/plugins/capacitor-video-player/README.md` creato con
+  rationale fork + lista patch applicate + versioni pinnate.
+
+#### Step 0-bis — Snapshot funzionale "before" (0.3 g)
+
+> **Scopo:** baseline misurabile per verificare zero regressioni.
+
+- [ ] Catturare con device API 26+ (o emulatore con codec HEVC):
+  - Tempi cold-start fullscreen su HLS live + VOD MP4 (3 misure media).
+  - Codec effettivamente in uso (`player.getVideoFormat().codecs`,
+    `player.getAudioFormat().codecs`) loggati per: HLS H.264+AAC,
+    HLS HEVC+E-AC-3, MP4 H.264+AAC, MPEG-TS H.264+AAC.
+  - Throughput HLS (`AnalyticsListener.onBandwidthEstimate`).
+  - 1 screenshot per resize mode (FIT/FILL/ZOOM).
+  - Snapshot lock-screen controls con MediaSessionConnector attivo.
+- [ ] Salvare in `docs/assets/med1-baseline/` (gitignored se
+  contengono PII), tenere link nel PR.
+
+#### Step 1 — Bump dipendenze Gradle (0.2 g) ✅
+
+- [x] Aggiunti `media3Version = '1.10.1'` e `playServicesCastVersion =
+  '21.5.0'` in `android/variables.gradle`.
+- [x] Riscritto blocco `dependencies` del plugin vendorato
+  (`android/plugins/capacitor-video-player/android/build.gradle`):
+  rimosse 8 `implementation com.google.android.exoplayer:*:2.19.0`,
+  aggiunte 10 `androidx.media3:*:1.10.1` + `play-services-cast-framework`.
+- [x] `compileSdk 36`, `minSdk 24`, `targetSdk 36`, `buildFeatures.buildConfig
+  true`, Java 17.
+- [ ] **Gate fisico:** `./gradlew :capacitor-video-player:assembleDebug
+  --warning-mode=all` (richiede JDK 17 completo, vedi nota P2.2).
+
+#### Step 2 — Porting import Java (1 g) ✅
+
+- [x] Applicato lo script `sed` di mapping API completo su
+  `android/plugins/capacitor-video-player/.../*.java`:
+  `com.google.android.exoplayer2.*` → `androidx.media3.*`. Coperti:
+  `C`, `MediaItem`, `MediaMetadata`, `Player` (+ `Player.Listener`),
+  `Format`, `AudioAttributes`, `MimeTypes`, `ExoPlayer`,
+  `DefaultLoadControl` / `LoadControl`, `DefaultRenderersFactory`,
+  `AdaptiveTrackSelection` / `DefaultTrackSelector` / `ExoTrackSelection`
+  / `TrackSelector`, `DataSource` / `DefaultHttpDataSource` /
+  `DefaultBandwidthMeter`, `PlayerView` (ex `StyledPlayerView`),
+  `AspectRatioFrameLayout`, `DefaultTimeBar`, `PlayerControlView`,
+  `CaptionStyleCompat`, `HlsMediaSource` / `DashMediaSource` /
+  `SsMediaSource`, `ProgressiveMediaSource` / `SingleSampleMediaSource` /
+  `MergingMediaSource`, `CastPlayer` / `SessionAvailabilityListener`.
+- [x] **Manuali (non sostituibili con sed):**
+  - `new SimpleExoPlayer.Builder(...)` → `new ExoPlayer.Builder(...)`.
+  - `new DefaultDataSourceFactory(context, "jeep-exoplayer-plugin")` →
+    `new DefaultDataSource.Factory(context,
+    new DefaultHttpDataSource.Factory().setUserAgent("jeep-exoplayer-plugin"))`.
+  - `new DefaultDataSourceFactory(context, httpDataSourceFactory)` →
+    `new DefaultDataSource.Factory(context).setUpstreamDataSourceFactory(httpDataSourceFactory)`.
+  - `Util.SDK_INT` (`com.google.android.exoplayer2.util.Util`, ora marker
+    `@UnstableApi` in Media3) → `android.os.Build.VERSION.SDK_INT`.
+  - `player.prepare(mediaSource, false, false)` (API rimossa) →
+    `player.setMediaSource(mediaSource); player.prepare();`.
+  - `player.getCurrentWindowIndex()` →
+    `player.getCurrentMediaItemIndex()`.
+  - `player.REPEAT_MODE_*` (accesso statico via istanza) →
+    `Player.REPEAT_MODE_*`.
+- [x] XML layout `fragment_fs_exoplayer.xml`,
+  `exo_playback_control_view.xml`, `exoplayer_layout_youtube.xml`
+  aggiornati. Tutti gli attributi `app:show_buffering`, `app:resize_mode`,
+  `app:player_layout_id`, `app:controller_layout_id` invariati (Media3
+  mantiene lo stesso schema XML).
+- [x] `@androidx.media3.common.util.UnstableApi` applicato a livello
+  classe su `FullscreenExoPlayerFragment` per opt-in alle API ancora
+  unstable in Media3 (HLS/DASH/SS factory, LoadControl, RenderersFactory,
+  TrackSelector).
+- [x] **CI guard** `scripts/check-media3-migration.mjs` esegue grep
+  ricorsivo su `android/plugins/` e `android/app/src/` (skip commenti);
+  integrato in `npm run check` (script `check:media3`). Verde su
+  `npm run check:media3`.
+#### Step 3 — Riscrittura MediaSession (1 g, **breaking**) ✅
+
+> `MediaSessionConnector` non esiste in Media3. Sostituirlo con la nuova
+> `androidx.media3.session.MediaSession` che è auto-bound al `Player`.
+
+- [ ] Rimuovere imports/campi:
+  ```text
+  // RIMUOVERE
+  import android.support.v4.media.session.MediaSessionCompat;
+  import com.google.android.exoplayer2.ext.mediasession.MediaSessionConnector;
+  private MediaSessionCompat mediaSession;
+  private MediaSessionConnector mediaSessionConnector;
+  ```
+- [ ] Aggiungere:
+  ```text
+  import androidx.media3.session.MediaSession;
+  // ...
+  private MediaSession mediaSession;
+  ```
+- [ ] Init (sostituire le righe 842-846 di `FullscreenExoPlayerFragment.java`):
+  ```text
+  // Media3: MediaSession forwarda automaticamente play/pause/seek/skip al Player.
+  mediaSession = new MediaSession.Builder(context, player)
+      .setId("streamai-fullscreen-player")
+      .build();
+  ```
+- [ ] Rilascio (cercare il blocco `mediaSession.setActive(false)` ~r.724):
+  ```text
+  if (mediaSession != null) {
+      mediaSession.release();
+      mediaSession = null;
+  }
+  ```
+- [ ] Metadati lock-screen: settati via `MediaItem.Builder()`
+  `.setMediaMetadata(new MediaMetadata.Builder()
+      .setTitle(title)
+      .setSubtitle(smallTitle)
+      .setArtworkUri(Uri.parse(artwork))
+      .build())`. La `MediaSession` Media3 prende automaticamente
+  questi metadata e li pubblica al Notification + lock screen.
+- [ ] **Opzionale (rinviabile a tranche futura):** introdurre
+  `MediaSessionService` per controllo persistente quando l'app va in
+  background. Richiede una `Service` class + entry in `AndroidManifest.xml`.
+  Non necessario per lo scenario fullscreen-only attuale; documentare
+  in `android/plugins/capacitor-video-player/README.md` come "Future
+  work — D.5 audio-only mode".
+
+#### Step 3-bis — Configurare codec/renderer fallback (0.5 g, **critico**) ✅
+
+> **Garanzia parità codec.** Senza questo step, alcuni device OEM
+> potrebbero rifiutare HEVC HW e cadere silenziosamente; con Media3
+> `DefaultRenderersFactory` possiamo abilitare il fallback SW.
+
+- [ ] In `setupPlayer()` di `FullscreenExoPlayerFragment.java`:
+  ```text
+  DefaultRenderersFactory renderersFactory =
+      new DefaultRenderersFactory(context)
+          .setEnableDecoderFallback(true)                            // HEVC HW → fallback decoder alternativo
+          .setExtensionRendererMode(
+              DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER); // usa decoder extension se disponibili
+
+  player = new ExoPlayer.Builder(context, renderersFactory)
+      .setTrackSelector(trackSelector)
+      .setLoadControl(loadControl)
+      .setBandwidthMeter(bandwidthMeter)
+      .build();
+  ```
+- [ ] `DefaultTrackSelector` con parametri estesi (HDR + multi-lingua):
+  ```text
+  trackSelector = new DefaultTrackSelector(context);
+  trackSelector.setParameters(
+      trackSelector.buildUponParameters()
+          .setPreferredAudioLanguage(Locale.getDefault().getLanguage())
+          .setPreferredTextLanguage(Locale.getDefault().getLanguage())
+          .setSelectUndeterminedTextLanguage(true)
+          .setTunnelingEnabled(true)        // tunneling HW per HDR/4K dove supportato
+          .build()
+  );
+  ```
+- [ ] **HLS:** in `HlsMediaSource.Factory(dataSourceFactory)
+  .setAllowChunklessPreparation(true)` per stream HLS con multivariant
+  playlist senza segment probe (TTFF -300ms tipici su provider Xtream).
+- [ ] **DASH:** verificare che `setAllowChunklessPreparation(true)`
+  equivalente sia su (vale per HLS, in DASH non serve).
+- [ ] **Buffer tuning IPTV-friendly** (più aggressivo dei default
+  Media3, allineato a quanto già fa il plugin):
+  ```text
+  loadControl = new DefaultLoadControl.Builder()
+      .setBufferDurationsMs(
+          /* minBufferMs */            15_000,
+          /* maxBufferMs */            50_000,
+          /* bufferForPlaybackMs */     1_500,
+          /* bufferForPlaybackAfterRebufferMs */ 5_000)
+      .setPrioritizeTimeOverSizeThresholds(true)
+      .build();
+  ```
+- [ ] **AV1 SW fallback (opzionale, rinviabile):** se la matrice device
+  mostra spike di errori AV1 su API < 31, aggiungere
+  `implementation "androidx.media3:media3-decoder-av1:$media3Version"`
+  e settare `EXTENSION_RENDERER_MODE_PREFER`.
+
+#### Step 3-ter — Container & sottotitoli (parità + bonus, 0.3 g)
+
+> Garantire che ogni formato della §4-bis.11 continui a funzionare e
+> che nuovi formati (es. MKV) siano riconosciuti senza branch.
+
+- [ ] In `buildHttpMediaSource()` (riga 927): mantenere lo `switch`
+  per estensione, ma per ogni branch usare `MediaItem.Builder()` invece
+  di `MediaItem.fromUri(uri)` così possiamo allegare le
+  `SubtitleConfiguration` direttamente (best-practice Media3):
+  ```text
+  MediaItem.Builder b = new MediaItem.Builder().setUri(uri);
+  if (sturi != null) {
+      b.setSubtitleConfigurations(java.util.Collections.singletonList(
+          new MediaItem.SubtitleConfiguration.Builder(sturi)
+              .setMimeType(subtitleMimeType)
+              .setLanguage(language)
+              .setLabel(languageLabel)
+              .setRoleFlags(C.ROLE_FLAG_CAPTION)
+              .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+              .build()));
+  }
+  MediaItem mediaItem = b.build();
+  ```
+  Con questa forma Media3 gestisce internamente il merge audio+video+subs
+  via `MergingMediaSource` quando l'engine è `ProgressiveMediaSource`,
+  ma per HLS il flusso può anche embeddare WebVTT/CEA-608 nativamente.
+- [ ] **Aggiungere supporto MKV esplicito:** estendere `supportedFormat`
+  con `mkv | matroska` → branch `ProgressiveMediaSource` (Media3
+  riconosce MKV via `MatroskaExtractor` di default; il branch serve
+  solo per detection lato JS in futuro).
+- [ ] **CEA-608/708 (closed captions su HLS/MPEG-TS):** abilitato di
+  default da `HlsMediaSource`. Verificare che `PlayerView.setShowSubtitleButton(true)`
+  sia attivo (cfr. Step 2 — proprietà del PlayerView in XML).
+- [ ] Mapping MIME sub (riga 1006): invariato post-sed (`MimeTypes`
+  ridenominato). Verificare aggiunta `mks` per Matroska subs:
+  ```text
+  } else if (extension.equals("mks")) {
+      mimeType = MimeTypes.APPLICATION_MATROSKA;  // se necessario, altrimenti fallback
+  }
+  ```
+
+#### Step 4 — Cast extension Media3 (0.5 g) ✅
+
+- [ ] Sostituire import `com.google.android.exoplayer2.ext.cast.CastPlayer`
+  → `androidx.media3.cast.CastPlayer`. API quasi 1:1.
+- [ ] `castPlayer = new CastPlayer(castContext);` resta invariato come
+  firma.
+- [ ] `castPlayer.setSessionAvailabilityListener(...)` invariato
+  (interfaccia con stessi callback `onCastSessionAvailable` /
+  `onCastSessionUnavailable`).
+- [ ] `castPlayer.setMediaItem(mediaItem, videoPosition)` → invariato.
+- [ ] `playerView.setPlayer(castPlayer)` / `playerView.setPlayer(player)`
+  → invariato (toggle tra local e cast player).
+- [ ] Verificare che `play-services-cast-framework` 21.5.0 sia risolto
+  (Step 1). `./gradlew :app:dependencies | grep play-services-cast`.
+- [ ] **NB:** il casting "primario" di StreamAI passa già da
+  `services/castService.ts` (Chromecast / DLNA / AirPlay via JS/IPC
+  Electron). `CastPlayer` di Media3 è usato dal plugin solo come
+  fallback Android-only (apparirà quando l'utente tocca il
+  `MediaRouteButton` nel control view nativo). Mantenere parità
+  funzionale: niente regressione né doppio cast.
+
+#### Step 5 — PiP, layout e attributi UI (0.3 g) ✅
+
+- [ ] `PictureInPictureParams.Builder` e `Rational(width, height)` da
+  `player.getVideoFormat()`: invariato (API Android, non Media3).
+- [ ] In `MainActivity.java`: nessuna modifica (immersive + cutout già
+  ortogonali alla migrazione).
+- [ ] `AndroidManifest.xml` invariato (`supportsPictureInPicture="true"`,
+  `screenOrientation="sensorLandscape"`, ecc.).
+- [ ] **Attributi `PlayerView`** da verificare in `fragment_fs_exoplayer.xml`:
+  - `app:show_buffering="when_playing"` ✓
+  - `app:resize_mode="fit|fill|zoom|fixed_width|fixed_height"` ✓
+  - `app:use_controller="true|false"` ✓
+  - `app:controller_layout_id="@layout/exo_playback_control_view"` ✓
+  - `app:player_layout_id="@layout/exo_player_view"` ✓ (Media3 espone
+    sempre `R.layout.exo_player_view`)
+  - `app:subtitle_view_size` se usato.
+- [ ] **ID drawable `exo_*`** in `exo_playback_control_view.xml`:
+  Media3 mantiene gli stessi nomi (`@id/exo_play_pause`, `@id/exo_position`,
+  `@id/exo_duration`, `@id/exo_progress`, `@id/exo_rew`, `@id/exo_ffwd`).
+  Verificare che `findViewById(R.id.exo_progress)` (riga 152) continui
+  a risolvere `DefaultTimeBar`.
+
+#### Step 6 — ProGuard / R8 / opt-in (0.2 g) ✅
+
+- [ ] Aggiungere a `android/app/proguard-rules.pro`:
+  ```
+  # Media3
+  -keep class androidx.media3.** { *; }
+  -keep interface androidx.media3.** { *; }
+  -dontwarn androidx.media3.**
+
+  # Google Cast (Play Services)
+  -keep class com.google.android.gms.cast.** { *; }
+  -keep interface com.google.android.gms.cast.** { *; }
+
+  # Picasso (artwork)
+  -dontwarn com.squareup.picasso.**
+  ```
+- [ ] Verificare build `release`:
+  `cd android && ./gradlew :app:assembleRelease --no-daemon`.
+- [ ] Verificare APK size delta con `apkanalyzer` (target ±2 MB).
+
+#### Step 7 — Smoke matrix Android (0.7 g, **gate di rilascio**)
+
+> **Bloccante:** richiede device fisico o emulatore API 26+ con JDK 17
+> completo (cfr. nota P2.2 in §5). Comparare ogni cella con baseline
+> Step 0-bis.
+
+**Codec video:**
+- [ ] **H.264** Baseline/Main/High (Live HLS + VOD MP4): play, pausa,
+  seek, resize FIT/FILL/ZOOM.
+- [ ] **H.265/HEVC** Main10 4K HDR10 (se provider/device disponibile):
+  decoder HW preferito, fallback SW solo se OEM ha decoder buggy.
+- [ ] **VP9** (WebM, raro su IPTV): play + seek.
+- [ ] **AV1** (DASH, raro): play su API 31+. Su API < 31 verificare
+  fallback graceful (errore esplicito, non crash).
+- [ ] **MPEG-2** (DVB-T over IP): play.
+- [ ] **MPEG-4 Part 2** (file vecchi 3GP/AVI): play.
+
+**Codec audio:**
+- [ ] **AAC-LC** stereo (canale standard): play, volume, mute.
+- [ ] **HE-AAC / HE-AACv2** (canali low-bitrate): play.
+- [ ] **MP3** (radio streams): play.
+- [ ] **AC-3 / E-AC-3** (Dolby Digital + DD+) 5.1: passthrough su HDMI
+  TV box se supportato. Verificare canale audio corretto in MediaCodec.
+- [ ] **AC-4** (Atmos via passthrough): test su device compatibile,
+  fallback graceful altrove.
+- [ ] **Opus / Vorbis** (WebM): play.
+- [ ] **FLAC** (raro su IPTV ma supportato): play.
+
+**Container & protocolli:**
+- [ ] **HLS Live** (`.m3u8`): play / pausa / seek a -30s / cambio canale,
+  TTFF < 3 s, no buffering ricorrente.
+- [ ] **HLS VOD** (`.m3u8`): seek puntuale, EXT-X-MAP fMP4, multi-audio.
+- [ ] **DASH** (`.mpd`): manifest live + VOD, multi-bitrate adattivo.
+- [ ] **SmoothStreaming** (`.ism`): se disponibile.
+- [ ] **MP4 progressivo** (`.mp4`/`.m4v`/`.mov`): seek + URL.5xx retry.
+- [ ] **MPEG-TS over HTTP** (`.ts` o Xtream extensionless live): play < 3 s,
+  decode hardware H.264 visibile in logcat `MediaCodec`.
+- [ ] **WebM** (`.webm`): play VP9 + Opus.
+- [ ] **MKV** (`.mkv`): play H.264+AAC; H.265+AC-3 se OEM lo permette.
+- [ ] **3GP / FLV / OGV**: smoke veloce, no crash.
+
+**Sottotitoli:**
+- [ ] Sideload `.vtt`: caricamento + toggle visibilità + reset al cambio
+  canale + styling (foreground/background/font size dalle
+  `subtitleOptions`).
+- [ ] Sideload `.srt`: idem.
+- [ ] Sideload `.ssa` / `.ass`: rendering + styling preservato.
+- [ ] Sideload `.ttml` / `.dfxp` / `.xml`: rendering corretto.
+- [ ] **WebVTT embed in HLS** (`#EXT-X-MEDIA TYPE=SUBTITLES`):
+  selezione lingua via `setPreferredTextLanguage`.
+- [ ] **CEA-608 / 708** embed in MPEG-TS o HLS H.264 fMP4:
+  visibili e toggle-abili.
+
+**Feature trasversali:**
+- [ ] **PiP**: ingresso da Home button + da `pipBtn` interno, ripristino,
+  aspect ratio corretto, blocco doppio enter, no crash uscita.
+- [ ] **MediaSession**: lock screen play/pause/skip; controllo Bluetooth
+  (cuffie con multimedia keys); notifica persistente (se attiva).
+- [ ] **Chromecast** (fallback Media3): toccare `MediaRouteButton` →
+  device list → start cast → `castPlayer.setMediaItem` → ripristino su
+  session ended.
+- [ ] **Resize mode** ciclico: pulsante `resizeBtn` toggla
+  FIT→FILL→ZOOM→FIT.
+- [ ] **Headers HTTP** custom: passare User-Agent + Authorization,
+  verificare in logcat `OkHttp`/`DefaultHttpDataSource` che siano
+  applicati.
+- [ ] **Speed/Rate**: `setRate(0.5/1/1.5/2)` se esposto.
+- [ ] **Retry**: simulare 5xx tramite proxy; verificare che
+  `useNativePlayerEngine.scheduleRetry` venga chiamato e che
+  `MAX_PLAYBACK_RETRIES` sia rispettato.
+
+**Performance:**
+- [ ] Cold-start fullscreen < 1.5 s su API 30, no jank a 60 fps su TV
+  box (Mi Box, Fire TV stick 4K).
+- [ ] RAM a regime < 350 MB su 1 live HLS HEVC 1080p.
+- [ ] Battery drain (1 h playback Wi-Fi): variazione baseline ≤ +5%.
+- [ ] No regressioni rotazione (sensorLandscape lock).
+
+#### Step 8 — Cleanup & deprecazione npm `capacitor-video-player` (0.2 g) ✅ (gate fisico residuo: gradle deps)
+
+- [x] Verificato (`npm run check:media3`, 2026-05-16) grep ricorsivo
+  `com.google.android.exoplayer2` su `android/plugins/` e `android/app/src/`
+  → **zero match**.
+- [ ] Verificare `./gradlew :capacitor-video-player:dependencies | grep exoplayer`
+  → zero match (richiede JDK 17 completo, gate fisico).
+- [x] CI guard `scripts/check-media3-migration.mjs` integrata in
+  `npm run check` (script `check:media3`) → fallisce su match di
+  `exoplayer2` / `MediaSessionCompat` / `MediaSessionConnector` /
+  `StyledPlayerView` / `DefaultDataSourceFactory` (commenti esclusi).
+- [x] `rm -rf node_modules/capacitor-video-player && npm install
+  --legacy-peer-deps` → npm crea il symlink `node_modules/capacitor-video-player
+  → ../android/plugins/capacitor-video-player` con `dist/plugin.cjs.js`
+  + `dist/esm/index.js` esposti correttamente (verificato 2026-05-16).
+  `npm ci` invece installa come copia: entrambi gli scenari sono validi
+  per la build Capacitor (`cap sync` usa `dist/`).
+
+### 4-bis.7 Criteri di accettazione
+
+**Tecnici (oggettivi):**
+- [x] Nessun riferimento residuo a `com.google.android.exoplayer2` in
+  `android/plugins/` e `android/app/src/` (CI guard
+  `scripts/check-media3-migration.mjs` verde 2026-05-16).
+- [x] Nessun riferimento residuo a `MediaSessionConnector` o
+  `MediaSessionCompat` al di fuori dei commenti (sostituiti da
+  `androidx.media3.session.MediaSession`).
+- [x] `androidx.media3:*` pinnato a `1.10.1` in
+  `android/variables.gradle` (`media3Version`) e usato uniformemente nel
+  plugin vendorato.
+- [x] `services/nativeVideoPlayer.ts` **byte-per-byte** identico (la
+  migrazione vive solo lato Java/XML/Gradle, l'API JS è invariata).
+- [x] `npm run check` (typecheck + test:run + check:media3 + build)
+  verde — 208/208 test, build Vite OK, guard OK.
+- [x] Job CI guard (`npm run check:media3`) blocca regressioni
+  (grep mirato su `exoplayer2`, `MediaSessionCompat`,
+  `MediaSessionConnector`, `StyledPlayerView`, `DefaultDataSourceFactory`).
+- [ ] **Gate fisico:** `./gradlew :app:assembleDebug` e
+  `:app:assembleRelease` verdi (richiede JDK 17 completo, vedi nota P2.2).
+- [ ] **Gate fisico:** APK release size delta entro **±2 MB** rispetto
+  alla baseline (`apkanalyzer`).
+
+**Funzionali (smoke matrix Step 7):**
+- [ ] Tutte le celle codec/container/protocollo verdi (vedi
+  §4-bis.11) — richiede device API 26+.
+- [ ] Tutte le celle sottotitoli verdi.
+- [ ] Tutte le celle feature trasversali verdi.
+- [ ] Performance: nessuna metrica peggiore di -5% rispetto baseline.
+
+**Documentali:**
+- [x] `AGENTS.md` aggiornato: "Mobile Runtime: Capacitor 7 +
+  AndroidX Media3 1.10.1".
+- [x] `.github/copilot-instructions.md` aggiornato (idem + nota
+  vendor in §"Important Gotchas").
+- [x] `README.md` aggiornato (stack runtime Android).
+- [x] `android/plugins/capacitor-video-player/README.md` creato con
+  rationale fork + lista patch + versioni pinnate.
+
+### 4-bis.8 Rischi e mitigazioni
+
+| Rischio | Probabilità | Impatto | Mitigazione |
+| ------- | ----------- | ------- | ----------- |
+| `MediaSessionConnector` → `MediaSession` introduce bug sui controlli BT/lock screen | Media | Medio | Step 7 smoke dedicato; in caso di problemi, MediaSession minimal con solo `play/pause/seek` |
+| `@UnstableApi` warning a tappeto bloccano CI lint | Alta | Basso | Opt-in mirato a livello classe (`@UnstableApi` su `FullscreenExoPlayerFragment`); evitare opt-in globale per non perdere segnale |
+| `DefaultDataSourceFactory` ridenominato → compilazione spezzata residua | Media | Basso | Sostituzione manuale nello Step 2; grep esplicito post-sed |
+| Layout XML attributi cambiati silenziosamente in Media3 | Bassa | Medio | Verifica visiva nello smoke Step 7 + screenshot diff con baseline |
+| Cast Media3 richiede `play-services-cast-framework` ≥ 21.4 → conflitti con altri plugin Capacitor | Bassa | Medio | Pinning unico in `variables.gradle`, verifica `./gradlew :app:dependencies` |
+| **HEVC/HDR funzionano "per accidente" su Exo 2** → regressione fix dopo migrazione | Bassa | Alto | `setEnableDecoderFallback(true)` + smoke HEVC su almeno 2 device OEM diversi (es. Mi Box, Samsung tablet) |
+| **AV1 SW assente** → device senza decoder HW falliscono in silenzio | Bassa | Medio | Errore esplicito tramite `Player.Listener.onPlayerError(PlaybackException)` + classificazione `category: 'codec'` lato JS; opzione `media3-decoder-av1` da abilitare se incidenza > 5% |
+| **AC-3 / E-AC-3 / AC-4 passthrough** non funziona su TV box | Bassa | Medio | Verificare `AudioCapabilities` runtime + log; mantenere fallback PCM downmix automatico (default Media3) |
+| **MKV/Matroska** non rilevato dal detection JS | Media | Basso | Estendere `playerUtils.detectStreamSource` per `.mkv` → engine `native` su Android (passa al plugin) |
+| **CEA-608/708 closed captions** non visualizzate dopo migrazione | Bassa | Basso | `PlayerView.setShowSubtitleButton(true)` + verifica `Tracks.Group` con `C.TRACK_TYPE_TEXT` |
+| `capacitor-video-player` upstream pubblica una versione Media3 dopo il nostro fork | Bassa | Basso | Documentare il fork in `android/plugins/capacitor-video-player/README.md`; possibile re-merge futuro tramite cherry-pick |
+| Bump Media3 minor (`1.10` → `1.11`) introduce breaking change ai listener | Media | Basso | Pin esplicito `1.10.x`, bump minor solo con nuova smoke matrix |
+
+### 4-bis.9 Stima totale
+
+| Step | Descrizione | Stima |
+| ---- | ----------- | ----- |
+| 0 | Decisione strategia + vendor plugin | 0.3 g |
+| 0-bis | Snapshot funzionale baseline | 0.3 g |
+| 1 | Bump dipendenze Gradle | 0.2 g |
+| 2 | Porting import Java + XML | 1.0 g |
+| 3 | Riscrittura MediaSession (breaking) | 1.0 g |
+| 3-bis | Codec/renderer fallback + buffer tuning | 0.5 g |
+| 3-ter | Container & sottotitoli (parità + MKV bonus) | 0.3 g |
+| 4 | Cast extension Media3 | 0.5 g |
+| 5 | PiP, layout, attributi UI | 0.3 g |
+| 6 | ProGuard / R8 / opt-in | 0.2 g |
+| 7 | Smoke matrix Android (gate fisico) | 0.7 g |
+| 8 | Cleanup + deprecazione npm | 0.2 g |
+| | **Totale dev** | **~5.5 g** |
+| | **+ verifica fisica device** | **~0.7 g** |
+
+### 4-bis.10 Aggiornamenti documentali richiesti dopo merge
+
+- **`.github/copilot-instructions.md`:**
+  - Cambiare "Native Android player using **ExoPlayer**" →
+    "Native Android player using **AndroidX Media3 1.10.1**
+    (`androidx.media3:media3-exoplayer:1.10.1`)".
+  - Aggiungere a "Important Gotchas":
+    > "**Android player plugin (vendor):** `capacitor-video-player` è
+    > vendorato in `android/plugins/capacitor-video-player/` per
+    > scollegarsi dall'upstream orfano. Patch e bump Media3 vanno fatti
+    > lì; `node_modules/capacitor-video-player` non esiste più come
+    > pacchetto GitHub."
+- **`AGENTS.md`:**
+  - In "Tech Stack → Mobile Runtime": stessa nota.
+  - Nella sezione "Player Android": aggiungere riferimento a
+    `androidx.media3.session.MediaSession`, `androidx.media3.cast.CastPlayer`,
+    `DefaultRenderersFactory.setEnableDecoderFallback(true)`.
+- **`README.md`:**
+  - Sezione "Tech Stack": "Native Android player: AndroidX Media3 1.10.1".
+  - Verificare che minSdk consigliato resti 24 (Media3 1.10 richiede
+    minSdk 21+ → OK, nessun bump richiesto).
+- **`docs/IMPROVEMENT_PLAN.md`** (questo documento):
+  - Spuntare le checkbox di MED-1 in §1 e §5 P2.4.
+  - Aggiornare hotspot complessità in §1 se cambia il count del plugin
+    vendorato.
+
+### 4-bis.11 Matrice codec/protocolli/sottotitoli (before → after)
+
+Tabella di **parità funzionale completa**. Ogni riga deve passare
+nello smoke Step 7. Indica il **comportamento atteso post-migrazione**.
+
+#### Codec video
+
+| Codec | Profilo | Container | Exo 2.19 | Media3 1.10.1 | Note |
+| ----- | ------- | --------- | -------- | ------------- | ---- |
+| H.264/AVC | Baseline/Main/High | MP4, MKV, TS, HLS, DASH | ✅ HW | ✅ HW | Decoder OEM, fallback OMX |
+| H.265/HEVC | Main, Main10 | MP4, MKV, TS, HLS, DASH | ✅ HW | ✅ HW + fallback | `setEnableDecoderFallback(true)` |
+| HDR10 / HDR10+ | — | HEVC/AV1 | ⚠ best-effort | ✅ con `Format.colorInfo` | Tunneling abilitato |
+| Dolby Vision | Profile 5/7/8 | MP4/HEVC | ⚠ device-dependent | ✅ device-dependent | Nessun degrado |
+| VP8 | — | WebM, MKV | ✅ | ✅ | Stack OEM |
+| VP9 | Profile 0, Profile 2 (HDR) | WebM, MKV, DASH | ✅ | ✅ | |
+| AV1 | Main | MP4, MKV, WebM, DASH | ✅ HW (API 31+) | ✅ HW + opzionale SW `media3-decoder-av1` | Fallback graceful |
+| MPEG-2 Video | — | TS, MP4 | ✅ | ✅ | DVB legacy |
+| MPEG-4 Part 2 | — | MP4, 3GP, AVI | ✅ | ✅ | File legacy |
+| H.263 | — | 3GP | ✅ | ✅ | Legacy mobile |
+
+#### Codec audio
+
+| Codec | Profilo | Container | Exo 2.19 | Media3 1.10.1 | Note |
+| ----- | ------- | --------- | -------- | ------------- | ---- |
+| AAC | LC, HE, HEv2, ELD | MP4, MKV, TS, HLS, DASH, ADTS | ✅ | ✅ | Default IPTV |
+| MP3 | — | MP3, MP4, MKV | ✅ | ✅ | Radio streams |
+| Vorbis | — | OGG, WebM, MKV | ✅ | ✅ | |
+| Opus | — | OGG, WebM, MKV | ✅ | ✅ | |
+| FLAC | — | FLAC, MKV, MP4 | ✅ | ✅ | Lossless |
+| AC-3 (Dolby Digital) | — | MP4, MKV, TS | ✅ passthrough | ✅ passthrough + PCM downmix | `AudioCapabilities` runtime |
+| E-AC-3 (DD+) | — | MP4, MKV, TS, DASH | ✅ passthrough | ✅ passthrough + PCM downmix | |
+| AC-4 (Atmos) | — | MP4, DASH | ✅ device-dependent | ✅ device-dependent | Nessun degrado |
+| DTS / DTS-HD / DTS-Express | — | MKV, TS | ⚠ passthrough only | ⚠ passthrough only | Nessun decoder SW (limite Android) |
+| PCM | — | WAV, MP4, MKV | ✅ | ✅ | |
+| AMR-NB / AMR-WB | — | 3GP, AMR | ✅ | ✅ | Legacy voice |
+
+#### Container & protocolli
+
+| Container/Protocollo | Estensioni | Exo 2.19 | Media3 1.10.1 | Engine MediaSource |
+| -------------------- | ---------- | -------- | ------------- | ------------------- |
+| MP4 / MOV / M4V | `.mp4`, `.m4v`, `.mov` | ✅ | ✅ | `ProgressiveMediaSource` (`Mp4Extractor`) |
+| Matroska / WebM | `.mkv`, `.webm` | ✅ (via extractor default) | ✅ | `ProgressiveMediaSource` (`MatroskaExtractor`) — **da aggiungere a `supportedFormat`** |
+| OGG / OGV | `.ogv`, `.ogg` | ✅ | ✅ | `ProgressiveMediaSource` (`OggExtractor`) |
+| 3GP | `.3gp` | ✅ | ✅ | `ProgressiveMediaSource` (`Mp4Extractor`) |
+| FLV | `.flv` | ✅ | ✅ | `ProgressiveMediaSource` (`FlvExtractor`) |
+| MPEG-TS (progressive) | `.ts`, `.mpeg`, `.mpg` | ✅ | ✅ | `ProgressiveMediaSource` (`TsExtractor`) |
+| HLS | `.m3u8` | ✅ | ✅ + `setAllowChunklessPreparation(true)` | `HlsMediaSource` |
+| DASH | `.mpd` | ✅ | ✅ | `DashMediaSource` |
+| SmoothStreaming | `.ism`, `.isml` | ✅ | ✅ | `SsMediaSource` |
+| MP3 | `.mp3` | ✅ | ✅ | `ProgressiveMediaSource` (`Mp3Extractor`) |
+| FLAC | `.flac` | ✅ | ✅ | `ProgressiveMediaSource` (`FlacExtractor`) |
+| WAV | `.wav` | ✅ | ✅ | `ProgressiveMediaSource` (`WavExtractor`) |
+| ADTS / AAC | `.aac` | ✅ | ✅ | `ProgressiveMediaSource` (`AdtsExtractor`) |
+
+#### Sottotitoli
+
+| Formato | Estensione | MIME | Sideload | HLS embed | DASH embed | Note |
+| ------- | ---------- | ---- | -------- | --------- | ---------- | ---- |
+| WebVTT | `.vtt` | `MimeTypes.TEXT_VTT` | ✅ | ✅ | ✅ | Standard HLS/DASH |
+| SubRip | `.srt` | `MimeTypes.APPLICATION_SUBRIP` | ✅ | n/a | n/a | Sideload only |
+| SSA/ASS | `.ssa`, `.ass` | `MimeTypes.TEXT_SSA` | ✅ | n/a | n/a | Styling parziale |
+| TTML | `.ttml`, `.dfxp`, `.xml` | `MimeTypes.APPLICATION_TTML` | ✅ | ✅ | ✅ | EBU-TT supportato |
+| CEA-608 | embed | `MimeTypes.APPLICATION_CEA608` | n/a | ✅ | n/a | Closed captions analogiche |
+| CEA-708 | embed | `MimeTypes.APPLICATION_CEA708` | n/a | ✅ | n/a | Closed captions digitali |
+| PGS (Bluray) | embed | `MimeTypes.APPLICATION_PGS` | n/a | n/a | n/a | Solo MKV → graceful skip |
+| DVB Subtitle | embed | `MimeTypes.APPLICATION_DVBSUBS` | n/a | n/a | n/a | Solo TS → graceful skip |
+
+#### Feature trasversali (must-preserve)
+
+| Feature | Implementazione attuale | Media3 1.10.1 | Note |
+| ------- | ----------------------- | ------------- | ---- |
+| Picture-in-Picture | `PictureInPictureParams.Builder` + `Rational(width, height)` da `player.getVideoFormat()` | ✅ invariato | Android API, non Media3 |
+| MediaSession lock screen | `MediaSessionCompat` + `MediaSessionConnector` | ✅ `androidx.media3.session.MediaSession` | Auto-bind al Player |
+| Bluetooth media keys | via MediaSessionConnector | ✅ via MediaSession | |
+| Chromecast | `CastContext` + `CastPlayer` + `MediaRouteButton` | ✅ `androidx.media3.cast.CastPlayer` | API 1:1 |
+| HTTP headers custom | `DefaultHttpDataSource.Factory.setDefaultRequestProperties` | ✅ invariato | |
+| Resize mode (FIT/FILL/ZOOM) | `AspectRatioFrameLayout.RESIZE_MODE_*` | ✅ invariato | `PlayerView.setResizeMode(...)` |
+| Caption styling | `CaptionStyleCompat` (foreground/background/font size) | ✅ invariato | |
+| Autoplay / Loop / Poster | parametri plugin | ✅ invariato | |
+| Live edge / TTFF | HLS `setAllowChunklessPreparation` (NEW) | ✅ migliorato | -300ms tipici |
+| Seek (preview / fastSeek) | `player.seekTo(positionMs)` | ✅ invariato | |
+| Volume / Mute / Rate | `player.setVolume(f)` / `setPlaybackParameters` | ✅ invariato | |
+| Buffer tuning IPTV | default ExoPlayer 2 | ✅ esplicito tramite `DefaultLoadControl.Builder` | minBuffer 15s/maxBuffer 50s |
+| Retry esponenziale (lato JS) | `useNativePlayerEngine.scheduleRetry` + `classifyPlaybackError` | ✅ invariato | Solo lato JS, plugin pubblica `jeepCapVideoPlayerError` |
+| OSD overlay (lato JS) | `usePlayerOsd` | ✅ invariato | Indipendente dal plugin nativo |
+| Auto-next episodio | `useAutoNextEpisode` | ✅ invariato | Lato JS |
+| Sleep timer | `useSleepTimer` | ✅ invariato | Lato JS |
+| MediaRouter button (UI cast) | `androidx.mediarouter:mediarouter:1.7.0` | ✅ invariato | AndroidX, non Media3 |
+| Subtitle View | `SubtitleView` di `PlayerView` (Media3) | ✅ invariato | Auto-styled via `CaptionStyleCompat` |
+
+---
+
 ## 5. Roadmap prioritaria P0-P8
 
 ### P0 — Sicurezza e stabilità immediata
@@ -507,6 +1429,53 @@ Tutti i componenti chiave migrati a DS v1:
 - [x] Fallback HLS.js / Video.js / mpegts.
 - [x] Messaggio specifico HEVC/H.265 non supportato.
 - [x] Popup info stream con codec HLS / MPEG-TS PAT/PMT.
+
+#### P2.4 Migrazione ExoPlayer 2 → AndroidX Media3 🚧 codice pronto (dettaglio in §4-bis MED-1)
+
+- [x] Vendor del plugin `capacitor-video-player` in
+  `android/plugins/capacitor-video-player/`.
+- [x] Upgrade dipendenze da `com.google.android.exoplayer:*:2.19.0` →
+  `androidx.media3:media3-*:1.10.1` (pin 2026-05-15, fallback minimo `1.4.1`).
+- [ ] **Snapshot funzionale baseline** (codec usati, TTFF, screenshot
+  resize, lock screen) per regression test (§4-bis.6 Step 0-bis) —
+  richiede device fisico.
+- [x] Porting Java + XML layout (mapping in §4-bis.4 + script sed §4-bis.6 Step 2).
+- [x] Riscrittura `MediaSessionConnector` → `androidx.media3.session.MediaSession`.
+- [x] **`DefaultRenderersFactory.setEnableDecoderFallback(true)`** +
+  `setExtensionRendererMode(PREFER)` per garantire fallback codec
+  HEVC/AV1 su OEM con decoder buggy.
+- [x] **`DefaultTrackSelector`** con `setTunnelingEnabled(true)` per
+  HDR/4K + multi-lingua audio/text (`setPreferredAudioLanguage`,
+  `setPreferredTextLanguage`, `setSelectUndeterminedTextLanguage(true)`).
+- [x] **`HlsMediaSource.Factory.setAllowChunklessPreparation(true)`**
+  per ridurre TTFF di ~300 ms su provider Xtream.
+- [x] **`DefaultLoadControl.Builder`** con buffer IPTV-friendly
+  (min 15 s / max 50 s / playback 1.5 s / rebuffer 5 s) +
+  `setPrioritizeTimeOverSizeThresholds(true)`.
+- [x] Estensione `supportedFormat` con `mkv`/`matroska` già applicata
+  nel plugin vendorato (`FullscreenExoPlayerFragment.java:137` + branch
+  `buildHttpMediaSource()` linee 972-973 → `ProgressiveMediaSource` via
+  `MatroskaExtractor` di default in Media3).
+- [x] Cast extension Media3 (`androidx.media3.cast.CastPlayer`, API 1:1).
+- [x] ProGuard rules per `androidx.media3.*` + `com.google.android.gms.cast.*`
+  + `com.jeep.plugin.capacitor.capacitorvideoplayer.*`.
+- [ ] **Smoke matrix completa** (§4-bis.11) device fisico:
+  - 10 codec **video** (H.264, HEVC + HDR10+/Dolby Vision, VP8/9 HDR,
+    AV1, MPEG-2, MPEG-4 Part 2, H.263).
+  - 11 codec **audio** (AAC LC/HE/HEv2/ELD, MP3, Vorbis, Opus, FLAC,
+    AC-3, E-AC-3 passthrough, AC-4 Atmos, PCM, AMR-NB/WB).
+  - 13 container/protocolli (MP4, MKV, WebM, OGG, 3GP, FLV, TS, HLS,
+    DASH, SmoothStreaming, MP3, FLAC, WAV).
+  - 8 formati sottotitoli (VTT, SRT, SSA/ASS, TTML/DFXP, CEA-608/708
+    embed, HLS WebVTT embed).
+  - Feature trasversali (PiP + Rational aspect, MediaSession lock
+    screen + BT, Cast, HTTP headers, resize FIT/FILL/ZOOM, retry,
+    caption styling).
+- [x] **CI guard** `scripts/check-media3-migration.mjs` integrata in
+  `npm run check` — fallisce se `grep -r "com\.google\.android\.exoplayer2"
+  android/plugins/ android/app/src/` (skip commenti) trova match.
+- [x] Aggiornati `AGENTS.md`, `copilot-instructions.md`, `README.md` +
+  creato `android/plugins/capacitor-video-player/README.md`.
 
 ### P3 — Casting, discovery e rete locale
 
@@ -1101,6 +2070,11 @@ Lista isolata per PR rapidi (≤ 1 giorno).
 
 - E.1 manualChunks tuning, E.2 audit memo, E.5 SW PWA.
 - E.7 riuso Video.js, E.8 Android specifico.
+- **MED-1 Migrazione ExoPlayer → AndroidX Media3 1.10.1** (§4-bis, ~5.5 g
+  dev + 0.7 g verifica fisica device). Si inserisce qui perché tocca
+  solo Android e trae giovamento dalle ottimizzazioni E.8. La smoke
+  matrix copre **10 codec video + 11 codec audio + 13 container +
+  8 formati sub** per parità funzionale completa.
 
 ### Settimane 11-12 — Reliability + integrazioni
 

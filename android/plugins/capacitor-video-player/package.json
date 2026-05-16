@@ -1,0 +1,89 @@
+{
+  "name": "@brylsherbert/capacitor-video-player",
+  "version": "7.0.32",
+  "description": "custom Native Capacitor plugin to play a video",
+  "main": "dist/plugin.cjs.js",
+  "module": "dist/esm/index.js",
+  "type": "module",
+  "types": "dist/esm/index.d.ts",
+  "unpkg": "dist/plugin.js",
+  "files": [
+    "android/src/main/",
+    "android/build.gradle",
+    "dist/",
+    "ios/Plugin/",
+    "BrylsherbertCapacitorVideoPlayer.podspec"
+  ],
+  "author": "Jean Pierre Quéau",
+  "license": "MIT",
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/harmonwood/capacitor-video-player.git"
+  },
+  "bugs": {
+    "url": "https://github.com/harmonwood/capacitor-video-player/issues"
+  },
+  "homepage": "https://www.capacitorvideoplayer.com",
+  "keywords": [
+    "capacitor",
+    "plugin",
+    "native"
+  ],
+  "scripts": {
+    "verify": "npm run verify:ios && npm run verify:android && npm run verify:web",
+    "verify:ios": "cd ios && pod install && xcodebuild -workspace Plugin.xcworkspace -scheme Plugin -destination generic/platform=iOS && cd ..",
+    "verify:android": "cd android && ./gradlew clean build test && cd ..",
+    "verify:web": "npm run build",
+    "lint": "npm run eslint && npm run prettier -- --check && npm run swiftlint -- lint",
+    "fmt": "npm run eslint -- --fix && npm run prettier -- --write && npm run swiftlint -- autocorrect --format",
+    "eslint": "eslint . --ext ts",
+    "prettier": "prettier \"**/*.{css,html,ts,js,java}\"",
+    "swiftlint": "node-swiftlint",
+    "docgen": "docgen --api CapacitorVideoPlayerPlugin  --output-readme docs/API.md --output-json dist/docs.json",
+    "build": "npm run clean && ./node_modules/.bin/tsc && ./node_modules/.bin/rollup -c rollup.config.js",
+    "clean": "rimraf ./dist",
+    "watch": "tsc --watch",
+    "test": "echo \"No test specified\"",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^7.4.1",
+    "@capacitor/core": "^7.4.1",
+    "@capacitor/docgen": "^0.3.0",
+    "@capacitor/ios": "^7.4.1",
+    "@ionic/eslint-config": "^0.4.0",
+    "@ionic/prettier-config": "^4.0.0",
+    "@ionic/swiftlint-config": "^2.0.0",
+    "@rollup/plugin-commonjs": "^28.0.6",
+    "@rollup/plugin-node-resolve": "^16.0.1",
+    "@types/node": "^22.10.2",
+    "eslint": "^8.57.1",
+    "hls.js": "^1.5.18",
+    "prettier": "~3.4.2",
+    "prettier-plugin-java": "~2.6.5",
+    "rimraf": "^6.0.1",
+    "rollup": "^4.46.4",
+    "swiftlint": "^2.0.0",
+    "typescript": "~5.7.2"
+  },
+  "peerDependencies": {
+    "@capacitor/core": "^7.0.0",
+    "hls.js": "^1.4.0"
+  },
+  "prettier": "@ionic/prettier-config",
+  "swiftlint": "@ionic/swiftlint-config",
+  "eslintConfig": {
+    "extends": "@ionic/eslint-config/recommended"
+  },
+  "capacitor": {
+    "ios": {
+      "src": "ios"
+    },
+    "android": {
+      "src": "android"
+    }
+  }
+}

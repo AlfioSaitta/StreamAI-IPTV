@@ -12,7 +12,11 @@ Questo file serve come guida e contesto per gli agenti AI che collaborano allo s
 - **Styling:** Tailwind CSS
 - **Video Player:** 
   - *Web/Desktop:* Video.js (con OSD custom e Timeline interattiva)
-  - *Android:* Capacitor Video Player (ExoPlayer nativo)
+  - *Android:* Capacitor Video Player (player nativo basato su **AndroidX
+    Media3 1.10.1** — `androidx.media3:media3-exoplayer:1.10.1`,
+    pin 2026-05-15; plugin vendorato in
+    `android/plugins/capacitor-video-player/`, vedi MED-1 in
+    `docs/IMPROVEMENT_PLAN.md` §4-bis)
 - **AI:** Google Gemini API (@google/genai)
 - **Networking:** 
   - *Discovery:* Scansione attiva subnet /24 (HTTP, WebSocket)
@@ -134,12 +138,13 @@ Queste funzionalità definiscono l'identità di StreamAI e devono essere preserv
 
 ## ⚠️ Punti Critici e "Gotchas"
 1.  **Codec HEVC:** Su Electron, usiamo una build custom di FFmpeg scaricata via `scripts/patch-ffmpeg.js`. Non modificare questo script senza cautela.
-2.  **Player Android:** Su Android, il tag `<video>` HTML5 ha performance scarse per IPTV. Usare sempre il player nativo tramite `nativeVideoPlayer.ts` quando `platformService.isNative` è true.
-3.  **Mixed Content:** L'app deve poter riprodurre stream HTTP (non sicuri) anche se l'app è servita in contesto sicuro. Questo è configurato in `electron/main.js` e `android/app/src/main/AndroidManifest.xml` (usesCleartextTraffic).
-4.  **Electron Build:** Assicurarsi che la cartella `services` sia inclusa in `package.json` -> `build.files` affinché `advertisingService.js` sia disponibile nella build di produzione (ASAR).
-5.  **Ordine gruppi Live:** Non riordinare alfabeticamente le categorie `live` in `xtream.ts → processContent()`. L'utente si aspetta lo stesso ordine del server. L'ordinamento alfabetico va applicato solo a `movie`/`series`.
-6.  **AI hint dismiss:** Quando si modifica `AiUnavailableHint` in `App.tsx`, preservare le due dimensioni di stato: `aiHintSessionDismissed` (in-memory, reset al cambio profilo) **e** `ProfilePreferences.hideAiUnavailableHint` (persistente, gestito dalla checkbox "Non mostrare più").
-7.  **Profilo M3U:** Se `Profile.playlistUrl` è valorizzato, all'attivazione del profilo `App.tsx` carica e fa parsing della playlist via `parseM3UAsync` (worker se >256 kB) **prima** di mostrare il catalogo. Non bypassare questo step.
+2.  **Player Android:** Su Android, il tag `<video>` HTML5 ha performance scarse per IPTV. Usare sempre il player nativo tramite `nativeVideoPlayer.ts` quando `platformService.isNative` è true. Il player nativo è basato su **AndroidX Media3 1.10.1** (`androidx.media3.exoplayer.ExoPlayer` + `androidx.media3.session.MediaSession` + `androidx.media3.cast.CastPlayer`), con `DefaultRenderersFactory.setEnableDecoderFallback(true)` per fallback codec HEVC/AV1 graceful, `DefaultTrackSelector.setTunnelingEnabled(true)` per HDR/4K, `HlsMediaSource.Factory.setAllowChunklessPreparation(true)` per TTFF ridotto, e buffer IPTV-friendly (min 15s / max 50s / playback 1.5s / rebuffer 5s).
+3.  **Plugin Android vendorato (MED-1):** Il plugin `capacitor-video-player` è vendorato in `android/plugins/capacitor-video-player/` per scollegarsi dall'upstream orfano (`@brylsherbert/capacitor-video-player@7.0.32` su ExoPlayer 2.19.0 EOL). `package.json` usa `"capacitor-video-player": "file:android/plugins/capacitor-video-player"`. Patch e bump Media3 vanno fatti lì. Vedi `android/plugins/capacitor-video-player/README.md` per dettagli. Una CI guard `scripts/check-media3-migration.mjs` (invocata da `npm run check`) impedisce regressioni a `com.google.android.exoplayer2.*`.
+4.  **Mixed Content:** L'app deve poter riprodurre stream HTTP (non sicuri) anche se l'app è servita in contesto sicuro. Questo è configurato in `electron/main.js` e `android/app/src/main/AndroidManifest.xml` (usesCleartextTraffic).
+5.  **Electron Build:** Assicurarsi che la cartella `services` sia inclusa in `package.json` -> `build.files` affinché `advertisingService.js` sia disponibile nella build di produzione (ASAR).
+6.  **Ordine gruppi Live:** Non riordinare alfabeticamente le categorie `live` in `xtream.ts → processContent()`. L'utente si aspetta lo stesso ordine del server. L'ordinamento alfabetico va applicato solo a `movie`/`series`.
+7.  **AI hint dismiss:** Quando si modifica `AiUnavailableHint` in `App.tsx`, preservare le due dimensioni di stato: `aiHintSessionDismissed` (in-memory, reset al cambio profilo) **e** `ProfilePreferences.hideAiUnavailableHint` (persistente, gestito dalla checkbox "Non mostrare più").
+8.  **Profilo M3U:** Se `Profile.playlistUrl` è valorizzato, all'attivazione del profilo `App.tsx` carica e fa parsing della playlist via `parseM3UAsync` (worker se >256 kB) **prima** di mostrare il catalogo. Non bypassare questo step.
 
 ## 🚀 Comandi Utili
 - `npm run dev`: Avvio sviluppo Electron.

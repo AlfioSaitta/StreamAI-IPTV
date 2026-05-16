@@ -4,7 +4,7 @@
 import type { ReactNode } from 'react';
 
 export type PlayerEngine = 'videojs' | 'hlsjs' | 'mpegts' | 'native';
-export type StreamProtocol = 'hls' | 'mpegts' | 'dash' | 'mp4' | 'webm' | 'unknown';
+export type StreamProtocol = 'hls' | 'mpegts' | 'dash' | 'mp4' | 'webm' | 'mkv' | 'unknown';
 
 export interface StreamSourceInfo {
   protocol: StreamProtocol;
