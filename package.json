@@ -16,6 +16,7 @@
     "check": "npm run typecheck && npm run test:run && npm run check:media3 && npm run build",
     "icons:generate": "node scripts/generate-icons.mjs",
     "gpg:setup": "bash scripts/setup-gpg-key.sh",
+    "gpg:upload": "bash scripts/upload-gpg-secrets.sh",
     "dist:linux": "bash scripts/build-linux.sh",
     "dist:linux:deb": "bash scripts/build-linux.sh --deb",
     "dist:linux:rpm": "bash scripts/build-linux.sh --rpm",

@@ -38,6 +38,24 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
+      - name: Verify signing secrets are present
+        env:
+          KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          PASS: ${{ secrets.GPG_PASSPHRASE }}
+          KID: ${{ secrets.GPG_KEY_ID }}
+        run: |
+          missing=()
+          [[ -z "$KEY"  ]] && missing+=(GPG_PRIVATE_KEY)
+          [[ -z "$PASS" ]] && missing+=(GPG_PASSPHRASE)
+          [[ -z "$KID"  ]] && missing+=(GPG_KEY_ID)
+          if (( ${#missing[@]} )); then
+            echo "::error::Missing required secrets: ${missing[*]}."
+            echo "::error::Configure them locally with:"
+            echo "::error::  npm run gpg:upload"
+            echo "::error::or in Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
       - name: Import GPG signing key
         uses: crazy-max/ghaction-import-gpg@v6
         with:

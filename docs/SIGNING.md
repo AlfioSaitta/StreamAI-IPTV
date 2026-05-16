@@ -82,6 +82,25 @@ Dopo aver generato la chiave, configura sul repository:
 > primaria non deve mai lasciare il backup offline: la CI ne userà solo la
 > capability di firma.
 
+### Upload automatizzato (raccomandato)
+
+Per evitare di copiare manualmente materiale crittografico nell'interfaccia
+web di GitHub, usa lo script che decifra il backup locale e carica i secret
+via API:
+
+```bash
+gh auth login            # una tantum
+npm run gpg:upload       # chiede backup passphrase + signing passphrase
+```
+
+I secret vengono trasmessi cifrati a libsodium-sealed-box, archiviati in
+forma encrypted lato GitHub e mai stampati nei log di CI. Per puntare a un
+altro repository:
+
+```bash
+REPO="owner/repo" npm run gpg:upload
+```
+
 ## Rotazione / revoca
 
 1. Genera una nuova chiave con `npm run gpg:setup` (cambia `MAINTAINER_EMAIL`
