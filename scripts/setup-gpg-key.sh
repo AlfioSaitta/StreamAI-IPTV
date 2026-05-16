@@ -128,13 +128,16 @@ gpg --batch --yes --pinentry-mode loopback --passphrase "$GPG_BACKUP_PASSPHRASE"
   --output "$KEYS_DIR/streamai-signing.key.asc.gpg" "$SUBKEY_ARMOR"
 
 # ---- Revocation certificate (GITIGNORED) ----------------------------------
-gpg --batch --pinentry-mode loopback --passphrase "$GPG_KEY_PASSPHRASE" \
-  --output "$KEYS_DIR/streamai-revoke.asc" --gen-revoke "$FPR" <<< "y
-0
-StreamAI maintainer revocation certificate
-
-y
-"
+# Since GPG 2.1, `--generate-key` writes a revocation cert automatically to
+# $GNUPGHOME/openpgp-revocs.d/<FPR>.rev — we just copy it, since `--gen-revoke`
+# cannot run in `--batch` mode on GPG 2.4+ (always requires interactive prompts).
+AUTO_REVOKE="${GNUPGHOME}/openpgp-revocs.d/${FPR}.rev"
+if [[ -f "$AUTO_REVOKE" ]]; then
+  cp "$AUTO_REVOKE" "$KEYS_DIR/streamai-revoke.asc"
+else
+  echo "⚠ Auto-generated revocation certificate not found at $AUTO_REVOKE" >&2
+  echo "  Generate one manually with: gpg --gen-revoke $FPR > $KEYS_DIR/streamai-revoke.asc" >&2
+fi
 
 chmod 600 "$KEYS_DIR"/*.gpg "$KEYS_DIR"/streamai-revoke.asc 2>/dev/null || true
 
