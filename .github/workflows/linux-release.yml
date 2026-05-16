@@ -62,11 +62,17 @@ jobs:
           GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
         run: bash scripts/import-gpg-key.sh
 
-      - name: Build all Linux packages (per-distro)
+      - name: Build per-distro Linux packages
         env:
           GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-        run: bash scripts/build-linux.sh --all
+        # Build only the native per-distro packages (opensuse, fedora, rhel,
+        # debian, ubuntu, arch). Generic SONAME-based and portable targets
+        # (AppImage, tar.xz) are intentionally NOT produced in CI.
+        run: |
+          bash scripts/build-linux.sh \
+            --opensuse --fedora --rhel \
+            --debian --ubuntu --arch
 
       - name: Verify signatures
         env:
@@ -78,7 +84,6 @@ jobs:
           for f in *.rpm;          do rpm --checksig "$f"; done
           for f in *.deb;          do debsigs --verify "$f" || true; done
           for f in *.pkg.tar.zst;  do gpg --verify "${f}.sig" "$f"; done
-          for f in *.AppImage *.tar.xz; do gpg --verify "${f}.asc" "$f"; done
           gpg --verify SHA256SUMS.asc SHA256SUMS
 
       - name: Extract version
@@ -92,8 +97,6 @@ jobs:
             dist/*.deb
             dist/*.rpm
             dist/*.pkg.tar.zst
-            dist/*.AppImage
-            dist/*.tar.xz
             dist/SHA256SUMS
 
       - name: Upload artefacts (workflow)
@@ -104,8 +107,6 @@ jobs:
             dist/*.deb
             dist/*.rpm
             dist/*.pkg.tar.zst
-            dist/*.AppImage
-            dist/*.tar.xz
             dist/*.asc
             dist/*.sig
             dist/SHA256SUMS*
@@ -118,8 +119,6 @@ jobs:
             dist/*.deb
             dist/*.rpm
             dist/*.pkg.tar.zst
-            dist/*.AppImage
-            dist/*.tar.xz
             dist/*.asc
             dist/*.sig
             dist/SHA256SUMS

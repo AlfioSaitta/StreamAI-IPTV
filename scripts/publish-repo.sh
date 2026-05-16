@@ -37,7 +37,7 @@ fi
 
 FPR="$(cat "$KEYS/streamai-fingerprint.txt" 2>/dev/null || echo "$GPG_KEY_ID")"
 
-mkdir -p "$OUT"/{apt/debian,apt/ubuntu,rpm/opensuse,rpm/fedora,rpm/rhel,arch,appimage,tar}
+mkdir -p "$OUT"/{apt/debian,apt/ubuntu,rpm/opensuse,rpm/fedora,rpm/rhel,arch}
 cp -f "$KEYS/streamai-pubkey.asc" "$OUT/pubkey.asc"
 
 build_apt_channel() {
@@ -112,14 +112,42 @@ if compgen -G "$DIST/*-arch.*.pkg.tar.zst" >/dev/null; then
              repo-add streamai.db.tar.zst *.pkg.tar.zst"
 fi
 
+HAS_APPIMAGE=0
+HAS_TAR=0
 for f in "$DIST"/*.AppImage "$DIST"/*.AppImage.asc; do
-  [[ -e "$f" ]] && cp "$f" "$OUT/appimage/"
+  if [[ -e "$f" ]]; then
+    mkdir -p "$OUT/appimage"
+    cp "$f" "$OUT/appimage/"
+    HAS_APPIMAGE=1
+  fi
 done
 for f in "$DIST"/*.tar.xz "$DIST"/*.tar.xz.asc; do
-  [[ -e "$f" ]] && cp "$f" "$OUT/tar/"
+  if [[ -e "$f" ]]; then
+    mkdir -p "$OUT/tar"
+    cp "$f" "$OUT/tar/"
+    HAS_TAR=1
+  fi
 done
 [[ -e "$DIST/SHA256SUMS"     ]] && cp "$DIST/SHA256SUMS"     "$OUT/"
 [[ -e "$DIST/SHA256SUMS.asc" ]] && cp "$DIST/SHA256SUMS.asc" "$OUT/"
+
+PORTABLE_HTML=""
+if (( HAS_APPIMAGE || HAS_TAR )); then
+  PORTABLE_HTML="<h2>Portable</h2>
+<ul>"
+  (( HAS_APPIMAGE )) && PORTABLE_HTML+="
+  <li><a href=\"appimage/\">AppImage</a> (universal, no install required)</li>"
+  (( HAS_TAR )) && PORTABLE_HTML+="
+  <li><a href=\"tar/\">tar.xz</a> (extract anywhere)</li>"
+  PORTABLE_HTML+="
+</ul>"
+fi
+
+INTRO="Signed native packages for Debian, Ubuntu, openSUSE, Fedora, RHEL/Rocky/AlmaLinux and Arch"
+if (( HAS_APPIMAGE || HAS_TAR )); then
+  INTRO+=", plus portable AppImage / tar.xz builds"
+fi
+INTRO+="."
 
 cat > "$OUT/index.html" <<EOF
 <!DOCTYPE html>
@@ -136,7 +164,7 @@ cat > "$OUT/index.html" <<EOF
 </head>
 <body>
 <h1>StreamAI IPTV — Linux Repository</h1>
-<p>Signed native packages for Debian, Ubuntu, openSUSE, Fedora, RHEL/Rocky/AlmaLinux and Arch, plus portable AppImage / tar.xz builds.</p>
+<p>${INTRO}</p>
 <p><strong>GPG fingerprint:</strong> <code>${FPR}</code><br>
 <a href="pubkey.asc">Download public key</a></p>
 
@@ -179,11 +207,7 @@ Server = ${REPO_BASE_URL}/arch
 REPO
 sudo pacman -Sy streamai</pre>
 
-<h2>Portable</h2>
-<ul>
-  <li><a href="appimage/">AppImage</a> (universal, no install required)</li>
-  <li><a href="tar/">tar.xz</a> (extract anywhere)</li>
-</ul>
+${PORTABLE_HTML}
 </body>
 </html>
 EOF
