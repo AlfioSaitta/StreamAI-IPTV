@@ -57,11 +57,10 @@ jobs:
           fi
 
       - name: Import GPG signing key
-        uses: crazy-max/ghaction-import-gpg@v6
-        with:
-          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
-          passphrase: ${{ secrets.GPG_PASSPHRASE }}
-          trust_level: 5
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+        run: bash scripts/import-gpg-key.sh
 
       - name: Build all Linux packages
         env:
@@ -153,11 +152,10 @@ jobs:
           path: dist/
 
       - name: Import GPG signing key
-        uses: crazy-max/ghaction-import-gpg@v6
-        with:
-          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
-          passphrase: ${{ secrets.GPG_PASSPHRASE }}
-          trust_level: 5
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+        run: bash scripts/import-gpg-key.sh
 
       - name: Assemble public-repo (apt + rpm + arch via Docker)
         env:
