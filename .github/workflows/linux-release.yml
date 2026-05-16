@@ -32,7 +32,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            rpm fakeroot debsigs reprepro createrepo-c \
+            rpm fakeroot dpkg-sig debsigs reprepro createrepo-c \
             libarchive-tools zstd gnupg2
 
       - name: Install npm dependencies
@@ -77,14 +77,79 @@ jobs:
       - name: Verify signatures
         env:
           GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+        # Fail the pipeline if any artefact is unsigned or its signature does
+        # not validate against the maintainer key.
         run: |
-          set -e
+          set -euo pipefail
           cd dist
           shopt -s nullglob
-          for f in *.rpm;          do rpm --checksig "$f"; done
-          for f in *.deb;          do debsigs --verify "$f" || true; done
-          for f in *.pkg.tar.zst;  do gpg --verify "${f}.sig" "$f"; done
-          gpg --verify SHA256SUMS.asc SHA256SUMS
+
+          fail=0
+
+          # ---- RPM: rpm --checksig exits 0 even on unsigned packages
+          # (digests still validate), so we must parse the summary line and
+          # require that the word "signatures" appears in the OK report.
+          for f in *.rpm; do
+            out="$(rpm --checksig "$f" 2>&1)"
+            echo "$out"
+            if ! grep -qE 'signatures.*OK|OK.*signatures|pgp.*OK' <<<"$out"; then
+              echo "::error::RPM $f is unsigned (rpm --checksig: ${out})" >&2
+              fail=1
+            fi
+          done
+
+          # ---- DEB: dpkg-sig --verify (preferred, validates _gpgbuilder
+          # signature) with fallback to debsigs --verify.
+          for f in *.deb; do
+            if command -v dpkg-sig >/dev/null 2>&1; then
+              if ! dpkg-sig --verify "$f"; then
+                echo "::error::DEB $f signature verification failed" >&2
+                fail=1
+              fi
+            else
+              if ! debsigs --verify "$f"; then
+                echo "::error::DEB $f signature verification failed" >&2
+                fail=1
+              fi
+            fi
+          done
+
+          # ---- Arch: detached .sig produced by gpg --detach-sign.
+          for f in *.pkg.tar.zst; do
+            if [[ ! -f "${f}.sig" ]]; then
+              echo "::error::Missing detached signature ${f}.sig" >&2
+              fail=1
+              continue
+            fi
+            if ! gpg --verify "${f}.sig" "$f"; then
+              echo "::error::Signature ${f}.sig does not validate" >&2
+              fail=1
+            fi
+          done
+
+          # ---- Checksums manifest.
+          if [[ ! -f SHA256SUMS || ! -f SHA256SUMS.asc ]]; then
+            echo "::error::SHA256SUMS / SHA256SUMS.asc missing" >&2
+            fail=1
+          else
+            gpg --verify SHA256SUMS.asc SHA256SUMS
+            sha256sum --check SHA256SUMS
+          fi
+
+          # ---- Cross-check: assert at least one artefact per expected distro.
+          for distro in opensuse fedora rhel debian ubuntu arch; do
+            case "$distro" in
+              opensuse|fedora|rhel) pat="*-${distro}.*.rpm" ;;
+              debian|ubuntu)        pat="*-${distro}.*.deb" ;;
+              arch)                 pat="*-arch.*.pkg.tar.zst" ;;
+            esac
+            if ! compgen -G "$pat" >/dev/null; then
+              echo "::error::No artefact produced for distro=${distro} (pattern: $pat)" >&2
+              fail=1
+            fi
+          done
+
+          exit "$fail"
 
       - name: Extract version
         id: meta

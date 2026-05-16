@@ -42,7 +42,9 @@ for f in *.deb; do
   elif command -v debsigs >/dev/null 2>&1; then
     debsigs --sign=origin -k "$GPG_KEY_ID" "$f"
   else
-    echo "  ⚠ Neither dpkg-sig nor debsigs available — skipping .deb signing." >&2
+    echo "✗ Neither dpkg-sig nor debsigs is installed — cannot sign $f." >&2
+    echo "  Install one of them (apt-get install dpkg-sig debsigs) and retry." >&2
+    exit 6
   fi
 done
 
