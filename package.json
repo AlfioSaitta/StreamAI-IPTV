@@ -140,12 +140,13 @@
     },
     "rpm": {
       "depends": [
-        "libnotify",
-        "libXScrnSaver",
-        "libsecret",
-        "mesa-libgbm",
-        "libdrm",
-        "alsa-lib"
+        "xdg-utils",
+        "libnotify.so.4()(64bit)",
+        "libXScrnSaver.so.1()(64bit)",
+        "libsecret-1.so.0()(64bit)",
+        "libgbm.so.1()(64bit)",
+        "libdrm.so.2()(64bit)",
+        "libasound.so.2()(64bit)"
       ]
     },
     "pacman": {
