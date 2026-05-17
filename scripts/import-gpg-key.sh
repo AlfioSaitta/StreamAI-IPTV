@@ -28,8 +28,9 @@ EOF
 
 cat > "$GNUPGHOME/gpg-agent.conf" <<EOF
 allow-loopback-pinentry
-default-cache-ttl 3600
-max-cache-ttl 7200
+allow-preset-passphrase
+default-cache-ttl 21600
+max-cache-ttl 43200
 EOF
 
 # Pick up the new agent config.
@@ -49,4 +50,39 @@ fi
 
 echo "✓ GPG key imported:"
 gpg --list-secret-keys --keyid-format LONG "$GPG_KEY_ID"
+
+# ---------------------------------------------------------------------------
+# Pre-cache the passphrase in gpg-agent so that downstream signing tools
+# which invoke `gpg` *without* being able to pass --passphrase
+# (debsigs, rpm --addsign via %__gpg_sign_cmd in unexpected env, etc.)
+# don't try to open /dev/tty and fail.
+# ---------------------------------------------------------------------------
+if [[ -n "${GPG_PASSPHRASE:-}" ]]; then
+  PRESET_BIN=""
+  for cand in \
+      /usr/lib/gnupg/gpg-preset-passphrase \
+      /usr/lib/gnupg2/gpg-preset-passphrase \
+      /usr/libexec/gpg-preset-passphrase; do
+    [[ -x "$cand" ]] && PRESET_BIN="$cand" && break
+  done
+  if [[ -z "$PRESET_BIN" ]]; then
+    echo "⚠ gpg-preset-passphrase not found — debsigs may prompt for passphrase." >&2
+  else
+    # Collect every keygrip belonging to the maintainer key (primary + subkeys),
+    # so signing with any subkey works without a TTY.
+    mapfile -t GRIPS < <(
+      gpg --list-secret-keys --with-keygrip --with-colons "$GPG_KEY_ID" \
+        | awk -F: '$1=="grp"{print $10}'
+    )
+    if (( ${#GRIPS[@]} == 0 )); then
+      echo "✗ Could not extract keygrips for $GPG_KEY_ID" >&2
+      exit 2
+    fi
+    for grip in "${GRIPS[@]}"; do
+      printf '%s' "$GPG_PASSPHRASE" \
+        | "$PRESET_BIN" --preset "$grip"
+    done
+    echo "✓ Passphrase pre-cached in gpg-agent for ${#GRIPS[@]} keygrip(s)."
+  fi
+fi
 
