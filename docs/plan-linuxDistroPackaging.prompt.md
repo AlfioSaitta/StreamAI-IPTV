@@ -69,7 +69,7 @@ Da [`package.json`](../package.json) `build.files`: payload minimale (`dist/**`,
 
 1. Lo script `setup-gpg-key.sh` chiede in batch nome/email maintainer: vuoi che li parametrizzi via env (`MAINTAINER_NAME`, `MAINTAINER_EMAIL`) o tramite prompt interattivo? Consiglio: entrambi, env prioritari, fallback a prompt.
 2. Backup chiave primaria: lo script salva `docs/keys/streamai-master.key.asc.gpg` cifrata simmetricamente AES-256 (gitignored) + revocation cert `streamai-revoke.asc` (anch'esso gitignored). La passphrase di backup è distinta da quella di firma e custodita offline dal maintainer.
-3. Ritenzione storica `gh-pages`: il deploy avviene via API Pages ufficiale (`actions/deploy-pages@v4`), non più via `git push`. La storia dei pacchetti è preservata da `actions/cache` (`pages-history-v1-*`) con il branch `gh-pages` come backup freddo (mirror best-effort). Questo elimina sia la crescita della pack-history sia gli HTTP 500 server-side che colpivano i deploy via `peaceiris/actions-gh-pages` man mano che l'archivio cresceva.
+3. Ritenzione storica `gh-pages`: il deploy avviene via API Pages ufficiale (`actions/deploy-pages@v4`), non più via `git push`. La storia dei pacchetti è preservata da `actions/cache` (`pages-history-v1-*`) con fallback `gh release download` quando la cache scade. Il branch `gh-pages` è stato abbandonato: anche come backup mirror best-effort generava HTTP 500 sui push grandi.
 
 ### Esecuzione & evoluzione (post v5)
 
@@ -120,12 +120,18 @@ e per evitare regressioni:
    (`actions/configure-pages@v5` + `actions/upload-pages-artifact@v3`
    + `actions/deploy-pages@v4`, environment `github-pages`), che
    carica un tarball via API artifact (limite 10 GB, nessun pack
-   git). La storia dei pacchetti pubblicati è preservata da
-   `actions/cache` (key `pages-history-v1-*`, restore prima di
-   `publish-repo.sh`, save a fine job) con il branch `gh-pages`
-   mantenuto come backup freddo (mirror best-effort con
-   `continue-on-error: true`). **Requisito repo:** Settings → Pages
-   → Source: "GitHub Actions" (non "Deploy from a branch").
+   git). **Requisito repo:** Settings → Pages → Source:
+   "GitHub Actions" (non "Deploy from a branch").
+10. **Fallback storia su GitHub Releases (sostituisce `gh-pages`
+    mirror)** — la prima iterazione del fallback (mirror best-effort
+    sul branch `gh-pages` con `force_orphan: true`) continuava a
+    colpire HTTP 500 anche solo come backup, generando rumore in CI.
+    Soluzione: rimosso completamente il mirror su `gh-pages` e
+    sostituito con un fallback `gh release download` — se la cache
+    `pages-history-v1-*` è scaduta, il job scarica tutti i
+    `.deb`/`.rpm`/`.pkg.tar.zst`/`.sig`/`.asc` dalle Release passate
+    e li mette in `dist/` prima di `publish-repo.sh`. Le Release sono
+    storage permanente di GitHub, niente pack git, niente HTTP 500.
 
 #### File risultanti (canonici)
 

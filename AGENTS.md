@@ -177,19 +177,18 @@ si attiva su tag `v*` e `workflow_dispatch`. Esegue:
 5. GitHub Release con i 6 pacchetti + `*.asc` + `*.sig` + `SHA256SUMS{,.asc}`.
 6. Job `pages`: tenta di ripristinare la storia in `public-repo/` da
    `actions/cache` (key `pages-history-v1-*`); se la cache è scaduta
-   fa fallback al branch `gh-pages` esistente in `gh-pages-prev/`
-   (rsync `--exclude='.git'`) per preservare i pacchetti già
-   pubblicati. `publish-repo.sh` assembla
-   `public-repo/{apt,rpm}/<distro>/` + `public-repo/arch/`. Il deploy
-   **canonico** avviene via API ufficiale GitHub Pages
-   (`actions/configure-pages@v5` + `actions/upload-pages-artifact@v3`
-   + `actions/deploy-pages@v4`, environment `github-pages`), che
-   evita `git push` e i suoi limiti di pack-size (l'errore HTTP 500
-   visto con `peaceiris/actions-gh-pages` quando l'archivio
-   accumulato supera certe soglie). La cache `pages-history-v1`
-   viene salvata a fine job; un mirror best-effort sul branch
-   `gh-pages` (`force_orphan: true`, `continue-on-error: true`)
-   resta come backup freddo per il seed quando la cache scade.
+   (7 giorni di inattività) fa fallback al **download dei pacchetti
+   firmati dai GitHub Release passati** (`gh release download` di
+   tutti i `.deb`/`.rpm`/`.pkg.tar.zst`/`.sig`/`.asc` non già presenti
+   in `dist/`). I metadati di repo (`reprepro` / `createrepo_c` /
+   `repo-add`) vengono ricostruiti da `publish-repo.sh` sull'unione
+   pacchetti vecchi + nuovi. Il deploy avviene via API ufficiale
+   GitHub Pages (`actions/configure-pages@v5` +
+   `actions/upload-pages-artifact@v3` + `actions/deploy-pages@v4`,
+   environment `github-pages`): zero `git push`, zero limiti di
+   pack-size. La cache `pages-history-v1` viene salvata a fine job.
+   Il branch `gh-pages` non è più usato (gli HTTP 500 persistenti
+   sui push grossi lo rendevano inaffidabile anche come backup).
 
 **Caching workflow (4 layer):** `~/.cache/electron`, `~/.cache/electron-builder`,
 APT toolchain (`awalsh128/cache-apt-pkgs-action`), Docker images

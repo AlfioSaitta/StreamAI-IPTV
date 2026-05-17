@@ -159,12 +159,13 @@ che:
 5. Pubblica la **GitHub Release** con i 6 pacchetti + `*.asc` + `*.sig` +
    `SHA256SUMS{,.asc}`.
 6. In un job separato ripristina la storia dei pacchetti già pubblicati
-   da `actions/cache` (fallback: branch `gh-pages`), assembla i repo
-   APT/RPM/Arch in `public-repo/` e deploya tramite la **GitHub Pages
-   API ufficiale** (`actions/deploy-pages@v4`). Niente `git push`
-   sul branch `gh-pages`: evita gli HTTP 500 server-side quando
-   l'archivio cumulato cresce. Il branch `gh-pages` viene mantenuto
-   come backup freddo (mirror best-effort).
+   da `actions/cache` (fallback: download dei `.deb`/`.rpm`/`.pkg.tar.zst`
+   firmati dalle GitHub Release passate via `gh release download`),
+   assembla i repo APT/RPM/Arch in `public-repo/` e deploya tramite la
+   **GitHub Pages API ufficiale** (`actions/deploy-pages@v4`). Niente
+   `git push` sul branch `gh-pages`: evita gli HTTP 500 server-side
+   sulle pack grandi che colpivano i deploy via
+   `peaceiris/actions-gh-pages`.
 
 Per ridurre i tempi della pipeline (cold ~14 min → warm ~5 min) il
 workflow riusa quattro cache: Electron, electron-builder, APT toolchain e
