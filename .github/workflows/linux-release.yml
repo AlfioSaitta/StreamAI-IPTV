@@ -273,6 +273,14 @@ jobs:
     name: Publish APT/RPM/Arch repository on GitHub Pages
     needs: build
     runs-on: ubuntu-latest
+    # Use the official GitHub Pages deployment environment so the
+    # actions/deploy-pages@v4 step can publish via the Pages API (no
+    # git push, no pack-size limits — bypasses the recurring HTTP 500
+    # we saw with peaceiris/actions-gh-pages@v4 once the accumulated
+    # repo grew large).
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -302,15 +310,25 @@ jobs:
           name: linux-packages
           path: dist/
 
-      # Seed public-repo/ with the *current* contents of the gh-pages
-      # branch so reprepro / createrepo_c / repo-add can rebuild the repo
-      # metadata over the union of old + new packages. This replaces the
-      # old `keep_files: true` strategy: instead of letting the gh-pages
-      # branch accumulate git history (which eventually causes
-      # `git push` to fail with HTTP 500 once the pack exceeds GitHub's
-      # server-side limit), we deploy each release as a fresh orphan
-      # commit while preserving every previously published artefact.
-      - name: Seed public-repo from existing gh-pages
+      # Seed public-repo/ with the historical content of the previously
+      # deployed Pages site (so reprepro / createrepo_c / repo-add can
+      # rebuild metadata over the union of old + new packages).
+      #
+      # Primary source: actions/cache (keyed by `pages-history-v1`).
+      # Fallback: the `gh-pages` branch — kept around in case the
+      # cache entry is evicted (7 days unused) so we never lose the
+      # accumulated archive.
+      - name: Restore cached Pages history
+        id: pages-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: public-repo
+          key: pages-history-v1-${{ github.run_id }}
+          restore-keys: |
+            pages-history-v1-
+
+      - name: Seed public-repo from existing gh-pages (fallback)
+        if: steps.pages-cache.outputs.cache-matched-key == ''
         uses: actions/checkout@v4
         with:
           ref: gh-pages
@@ -318,16 +336,15 @@ jobs:
         continue-on-error: true
 
       - name: Copy previous gh-pages contents into public-repo/
+        if: steps.pages-cache.outputs.cache-matched-key == ''
         run: |
           mkdir -p public-repo
           if [[ -d gh-pages-prev ]]; then
-            # rsync everything except git metadata; reprepro keeps its
-            # own state under conf/ + db/ which must be preserved verbatim.
             rsync -a --exclude='.git' gh-pages-prev/ public-repo/
             rm -rf gh-pages-prev
             echo "✓ Seeded public-repo/ from gh-pages branch"
           else
-            echo "ℹ gh-pages branch not present yet — starting fresh"
+            echo "ℹ No previous Pages history found — starting fresh"
           fi
 
       - name: Import GPG signing key
@@ -344,19 +361,44 @@ jobs:
           REPO_BASE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
         run: bash scripts/publish-repo.sh
 
-      - name: Deploy to gh-pages
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public-repo
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      # Persist the assembled public-repo/ as a workflow cache so the
+      # next release can rebuild metadata over previously-published
+      # packages without depending on the gh-pages branch (which is no
+      # longer the deploy target). Cache eviction (7 days unused) is
+      # mitigated by the gh-pages-branch fallback in the seed step.
+      - name: Save Pages history cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: public-repo
+          key: pages-history-v1-${{ github.run_id }}
+
+      # Mirror the assembled repo to the `gh-pages` branch as a cold
+      # backup. This is best-effort (`continue-on-error: true`) — if the
+      # push fails (HTTP 500 on large packs) the deployment is still
+      # successful because the canonical publish path is the Pages API
+      # above. The branch is kept only so the seed step has a fallback
+      # when the workflow cache is evicted.
+      - name: Mirror to gh-pages branch (cold backup, best-effort)
+        if: always() && steps.deployment.outcome == 'success'
+        continue-on-error: true
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: public-repo
           publish_branch: gh-pages
-          # Publish as a single orphan commit. Without this, the gh-pages
-          # branch accumulates pack-history release after release (deb /
-          # rpm payloads + reprepro/createrepo metadata churn) until
-          # `git push` is rejected by GitHub with HTTP 500. The repo
-          # contents themselves are preserved because the previous
-          # gh-pages tree is re-seeded into public-repo/ before
-          # publish-repo.sh runs.
           force_orphan: true
-          commit_message: "chore(release): publish ${{ needs.build.outputs.version }}"
+          commit_message: "chore(release): mirror ${{ needs.build.outputs.version }}"
 

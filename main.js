@@ -306,7 +306,7 @@ function createWindow() {
     callback({ responseHeaders });
   });
 
-  mainWindow.loadFile(path.join(__dirname, 'dist', 'index.html'));
+  mainWindow.loadFile(path.join(__dirname, 'dist/renderer/index.html'));
   
   // Avvia il listener per lo stato di rete
   setupNetworkStatusListener();

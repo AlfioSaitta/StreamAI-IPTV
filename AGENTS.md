@@ -175,14 +175,21 @@ si attiva su tag `v*` e `workflow_dispatch`. Esegue:
    - Cross-check: almeno un artefatto per ognuna delle 6 distro attese.
 4. SLSA build provenance (`actions/attest-build-provenance@v2`).
 5. GitHub Release con i 6 pacchetti + `*.asc` + `*.sig` + `SHA256SUMS{,.asc}`.
-6. Job `pages`: checkout del branch `gh-pages` esistente (se presente)
-   in `gh-pages-prev/`, rsync (escluso `.git`) in `public-repo/` per
-   preservare i pacchetti già pubblicati, poi `publish-repo.sh`
-   assembla `public-repo/{apt,rpm}/<distro>/` + `public-repo/arch/` e
-   `peaceiris/actions-gh-pages@v4` deploya con `force_orphan: true`
-   (single-commit branch). Questo evita la crescita illimitata della
-   pack-history di `gh-pages` che dopo qualche release veniva
-   rifiutata da GitHub con HTTP 500 al `git push`.
+6. Job `pages`: tenta di ripristinare la storia in `public-repo/` da
+   `actions/cache` (key `pages-history-v1-*`); se la cache è scaduta
+   fa fallback al branch `gh-pages` esistente in `gh-pages-prev/`
+   (rsync `--exclude='.git'`) per preservare i pacchetti già
+   pubblicati. `publish-repo.sh` assembla
+   `public-repo/{apt,rpm}/<distro>/` + `public-repo/arch/`. Il deploy
+   **canonico** avviene via API ufficiale GitHub Pages
+   (`actions/configure-pages@v5` + `actions/upload-pages-artifact@v3`
+   + `actions/deploy-pages@v4`, environment `github-pages`), che
+   evita `git push` e i suoi limiti di pack-size (l'errore HTTP 500
+   visto con `peaceiris/actions-gh-pages` quando l'archivio
+   accumulato supera certe soglie). La cache `pages-history-v1`
+   viene salvata a fine job; un mirror best-effort sul branch
+   `gh-pages` (`force_orphan: true`, `continue-on-error: true`)
+   resta come backup freddo per il seed quando la cache scade.
 
 **Caching workflow (4 layer):** `~/.cache/electron`, `~/.cache/electron-builder`,
 APT toolchain (`awalsh128/cache-apt-pkgs-action`), Docker images

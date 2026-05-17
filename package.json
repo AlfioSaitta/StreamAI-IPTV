@@ -4,8 +4,8 @@
   "description": "StreamAI IPTV Player Client",
   "main": "main.js",
   "scripts": {
-    "start": "vite build && electron .",
-    "start:quiet": "vite build && electron . 2>/dev/null",
+    "start": "npm run build && electron .",
+    "start:quiet": "npm run build && electron . 2>/dev/null",
     "dev": "electron .",
     "dev:quiet": "electron . 2>/dev/null",
     "build": "vite build",
@@ -88,6 +88,9 @@
     "executableName": "streamai",
     "asar": true,
     "compression": "maximum",
+    "directories": {
+      "output": "release"
+    },
     "electronDist": "node_modules/electron/dist",
     "buildDependenciesFromSource": false,
     "removePackageScripts": true,
@@ -97,9 +100,9 @@
     ],
     "files": [
       "dist/**/*",
-      "!dist/**/*.map",
       "main.js",
-      "services/advertisingService.js",
+      "preload.js",
+      "services/**/*",
       "icon.png",
       "package.json"
     ],

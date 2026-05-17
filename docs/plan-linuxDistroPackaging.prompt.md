@@ -69,7 +69,7 @@ Da [`package.json`](../package.json) `build.files`: payload minimale (`dist/**`,
 
 1. Lo script `setup-gpg-key.sh` chiede in batch nome/email maintainer: vuoi che li parametrizzi via env (`MAINTAINER_NAME`, `MAINTAINER_EMAIL`) o tramite prompt interattivo? Consiglio: entrambi, env prioritari, fallback a prompt.
 2. Backup chiave primaria: lo script salva `docs/keys/streamai-master.key.asc.gpg` cifrata simmetricamente AES-256 (gitignored) + revocation cert `streamai-revoke.asc` (anch'esso gitignored). La passphrase di backup è distinta da quella di firma e custodita offline dal maintainer.
-3. Ritenzione storica `gh-pages`: la pipeline ora deploya con `force_orphan: true` (single-commit branch), pre-seedando `public-repo/` dal contenuto attuale del branch. Questo elimina la crescita illimitata della pack-history che dopo qualche release veniva rifiutata da GitHub con HTTP 500 al `git push`, pur preservando tutti i pacchetti già pubblicati.
+3. Ritenzione storica `gh-pages`: il deploy avviene via API Pages ufficiale (`actions/deploy-pages@v4`), non più via `git push`. La storia dei pacchetti è preservata da `actions/cache` (`pages-history-v1-*`) con il branch `gh-pages` come backup freddo (mirror best-effort). Questo elimina sia la crescita della pack-history sia gli HTTP 500 server-side che colpivano i deploy via `peaceiris/actions-gh-pages` man mano che l'archivio cresceva.
 
 ### Esecuzione & evoluzione (post v5)
 
@@ -107,13 +107,25 @@ e per evitare regressioni:
 8. **`gh-pages` deploy come orphan + seed (post `d8bb292`)** — la
    strategia `keep_files: true` su `peaceiris/actions-gh-pages@v3`
    faceva crescere indefinitamente la pack-history del branch finché
-   `git push` non veniva rifiutato da GitHub con `HTTP 500`. Soluzione:
-   bump ad `actions-gh-pages@v4` con `force_orphan: true` (ogni
-   release diventa un singolo commit) e checkout preventivo del branch
-   `gh-pages` in `gh-pages-prev/` con rsync `--exclude='.git'` dentro
-   `public-repo/` prima di `publish-repo.sh`, così reprepro /
-   createrepo_c / repo-add ricostruiscono i metadati sull'unione
-   pacchetti vecchi + nuovi senza perdere nessuna release storica.
+   `git push` non veniva rifiutato da GitHub con `HTTP 500`. Prima
+   iterazione: bump ad `actions-gh-pages@v4` con `force_orphan: true`
+   (ogni release diventa un singolo commit) e checkout preventivo del
+   branch `gh-pages` in `gh-pages-prev/` con rsync `--exclude='.git'`
+   dentro `public-repo/` prima di `publish-repo.sh`.
+9. **Pages API ufficiale (`actions/deploy-pages`)** — anche con un
+   singolo commit orphan, il pack risultante può superare i limiti
+   server-side di `git push` quando `public-repo/` accumula molti
+   pacchetti (HTTP 500 persistente). Soluzione definitiva: il deploy
+   avviene tramite l'API Pages ufficiale
+   (`actions/configure-pages@v5` + `actions/upload-pages-artifact@v3`
+   + `actions/deploy-pages@v4`, environment `github-pages`), che
+   carica un tarball via API artifact (limite 10 GB, nessun pack
+   git). La storia dei pacchetti pubblicati è preservata da
+   `actions/cache` (key `pages-history-v1-*`, restore prima di
+   `publish-repo.sh`, save a fine job) con il branch `gh-pages`
+   mantenuto come backup freddo (mirror best-effort con
+   `continue-on-error: true`). **Requisito repo:** Settings → Pages
+   → Source: "GitHub Actions" (non "Deploy from a branch").
 
 #### File risultanti (canonici)
 
