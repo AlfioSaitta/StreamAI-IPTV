@@ -66,6 +66,20 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
+      # Single source of truth for the version number lives in /.version.
+      # In CI we additionally export $COMMIT_SHA so every per-distro
+      # artefact embeds the short commit SHA in its filename, e.g.
+      #   streamai-iptv_1.0.0_276ee32_debian_amd64.deb
+      # build-linux.sh forwards $COMMIT_SHA to make-distro-config.mjs.
+      - name: Sync version metadata
+        run: |
+          COMMIT_SHORT="${GITHUB_SHA::7}"
+          echo "COMMIT_SHA=${COMMIT_SHORT}" >> "$GITHUB_ENV"
+          node scripts/sync-version.mjs
+          FULL_VERSION="$(COMMIT_SHA=${COMMIT_SHORT} node scripts/sync-version.mjs --print-full)"
+          echo "FULL_VERSION=${FULL_VERSION}" >> "$GITHUB_ENV"
+          echo "▶ Build version: ${FULL_VERSION}"
+
       - name: Verify signing secrets are present
         env:
           KEY: ${{ secrets.GPG_PRIVATE_KEY }}
@@ -218,9 +232,9 @@ jobs:
           # ---- Cross-check: assert at least one artefact per expected distro.
           for distro in opensuse fedora rhel debian ubuntu arch; do
             case "$distro" in
-              opensuse|fedora|rhel) pat="*-${distro}.*.rpm" ;;
-              debian|ubuntu)        pat="*-${distro}.*.deb" ;;
-              arch)                 pat="*-arch.*.pkg.tar.zst" ;;
+              opensuse|fedora|rhel) pat="*_${distro}_*.rpm" ;;
+              debian|ubuntu)        pat="*_${distro}_*.deb" ;;
+              arch)                 pat="*_arch_*.pkg.tar.zst" ;;
             esac
             if ! compgen -G "$pat" >/dev/null; then
               echo "::error::No artefact produced for distro=${distro} (pattern: $pat)" >&2

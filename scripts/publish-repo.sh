@@ -43,7 +43,7 @@ cp -f "$KEYS/streamai-pubkey.asc" "$OUT/pubkey.asc"
 build_apt_channel() {
   local distro="$1"
   local channel_dir="$OUT/apt/$distro"
-  local pattern="$DIST/*-${distro}.*.deb"
+  local pattern="$DIST/*_${distro}_*.deb"
   if ! compgen -G "$pattern" >/dev/null; then
     echo "ℹ No .deb matching '${pattern##*/}' — skipping apt/${distro}"
     return 0
@@ -88,7 +88,7 @@ EOF
 build_rpm_channel() {
   local distro="$1"
   local channel_dir="$OUT/rpm/$distro"
-  local pattern="$DIST/*-${distro}.*.rpm"
+  local pattern="$DIST/*_${distro}_*.rpm"
   if ! compgen -G "$pattern" >/dev/null; then
     echo "ℹ No .rpm matching '${pattern##*/}' — skipping rpm/${distro}"
     return 0
@@ -121,12 +121,12 @@ build_rpm_channel opensuse
 build_rpm_channel fedora
 build_rpm_channel rhel
 
-if compgen -G "$DIST/*-arch.*.pkg.tar.zst" >/dev/null; then
+if compgen -G "$DIST/*_arch_*.pkg.tar.zst" >/dev/null; then
   echo "▶ Building Arch repo (via archlinux:latest container)"
   # Overwrite existing same-named packages from a previous cached run.
-  cp -f "$DIST"/*-arch.*.pkg.tar.zst "$OUT/arch/"
-  compgen -G "$DIST/*-arch.*.pkg.tar.zst.sig" >/dev/null && \
-    cp -f "$DIST"/*-arch.*.pkg.tar.zst.sig "$OUT/arch/" || true
+  cp -f "$DIST"/*_arch_*.pkg.tar.zst "$OUT/arch/"
+  compgen -G "$DIST/*_arch_*.pkg.tar.zst.sig" >/dev/null && \
+    cp -f "$DIST"/*_arch_*.pkg.tar.zst.sig "$OUT/arch/" || true
   if ! command -v docker >/dev/null 2>&1; then
     echo "  ✗ docker required for repo-add" >&2; exit 5
   fi

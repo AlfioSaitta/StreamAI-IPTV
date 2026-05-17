@@ -126,10 +126,21 @@ npm run dist:linux:tar       # tar.xz portatile (on-demand)
 npm run dist:linux:all       # tutti i formati sopra
 ```
 
-Gli artefatti finiscono in `dist/` con il tag distro nel nome (es.
-`streamai-1.0.0-opensuse.x86_64.rpm`). Se `GPG_KEY_ID` è impostato in
-ambiente, ogni pacchetto viene firmato automaticamente (vedi
-[`docs/SIGNING.md`](docs/SIGNING.md)).
+Gli artefatti finiscono in `dist/` con tag distro + (in CI) hash del
+commit corrente nel nome — pattern underscore-separated coerente con la
+convenzione Debian:
+
+```
+streamai-iptv_${version}_${distro}_${arch}.${ext}             # locale
+streamai-iptv_${version}_${commit}_${distro}_${arch}.${ext}   # CI
+```
+
+Esempio CI: `streamai-iptv_1.0.0_276ee32_debian_amd64.deb`. La versione
+proviene dal file `.version` (singola fonte di verità) ed è propagata in
+`package.json` e `android/app/build.gradle` da `npm run version:sync`.
+
+Se `GPG_KEY_ID` è impostato in ambiente, ogni pacchetto viene firmato
+automaticamente (vedi [`docs/SIGNING.md`](docs/SIGNING.md)).
 
 > **Prerequisiti host:** `rpm`, `fakeroot`, `debsigs`, `gnupg2`,
 > `libarchive-tools` (per `bsdtar`), e `docker` se vuoi pubblicare il repo

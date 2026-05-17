@@ -145,12 +145,14 @@ Queste funzionalità definiscono l'identità di StreamAI e devono essere preserv
 6.  **Ordine gruppi Live:** Non riordinare alfabeticamente le categorie `live` in `xtream.ts → processContent()`. L'utente si aspetta lo stesso ordine del server. L'ordinamento alfabetico va applicato solo a `movie`/`series`.
 7.  **AI hint dismiss:** Quando si modifica `AiUnavailableHint` in `App.tsx`, preservare le due dimensioni di stato: `aiHintSessionDismissed` (in-memory, reset al cambio profilo) **e** `ProfilePreferences.hideAiUnavailableHint` (persistente, gestito dalla checkbox "Non mostrare più").
 8.  **Profilo M3U:** Se `Profile.playlistUrl` è valorizzato, all'attivazione del profilo `App.tsx` carica e fa parsing della playlist via `parseM3UAsync` (worker se >256 kB) **prima** di mostrare il catalogo. Non bypassare questo step.
+9.  **Versione applicazione:** la fonte di verità è il file `/.version` (semver `x.y.z`, una sola riga). `scripts/sync-version.mjs` propaga la versione in `package.json` e `android/app/build.gradle` (`versionName` + `versionCode = maj*10000 + min*100 + pat`). Non modificare a mano `package.json` `"version"`: aggiorna `.version` e lancia `npm run version:sync`. In CI il workflow esporta `COMMIT_SHA=${GITHUB_SHA::7}` e `build-linux.sh` lo passa a `make-distro-config.mjs --commit`, che lo embedda nel nome dell'artefatto: `streamai-iptv_${version}_${commit}_${distro}_${arch}.${ext}`. Localmente (senza commit) il pattern collassa a `streamai-iptv_${version}_${distro}_${arch}.${ext}`. Tutti gli script (`publish-repo.sh`, verify step CI) usano glob underscore-separated (`*_${distro}_*`).
 
 ## 🚀 Comandi Utili
 - `npm run dev`: Avvio sviluppo Electron.
 - `npm run android:run`: Build, Sync e Run su dispositivo Android.
 - `npm run dist:linux`: Build pacchetto Linux per la distro host (auto-detect via `/etc/os-release`).
-- `npm run dist:linux:{opensuse,fedora,rhel,debian,ubuntu,arch}`: Build per-distro con nomi pacchetto nativi (da `build/depends/<distro>.json`). Gli artefatti includono il tag distro nel nome (es. `streamai-1.0.0-opensuse.x86_64.rpm`).
+- `npm run dist:linux:{opensuse,fedora,rhel,debian,ubuntu,arch}`: Build per-distro con nomi pacchetto nativi (da `build/depends/<distro>.json`). Gli artefatti seguono il pattern underscore-separated `streamai-iptv_${version}_${distro}_${arch}.${ext}` (locale) o `streamai-iptv_${version}_${commit}_${distro}_${arch}.${ext}` (CI, dove `${commit}` è il SHA breve da `$COMMIT_SHA`/`$GITHUB_SHA`).
+- `npm run version:sync` / `version:print` / `version:full`: gestione della versione. La fonte di verità è il file `/.version` (es. `1.0.0`); `sync-version.mjs` la propaga a `package.json` e `android/app/build.gradle` (versionName + versionCode). `--print-full` aggiunge `_<sha7>` se in contesto git/CI.
 - `npm run dist:linux:{deb,rpm,pacman,appimage,tar,all}`: Target generici (SONAME-based) e portable.
 - `npm run gpg:setup`: Genera la chiave GPG maintainer (vedi `docs/SIGNING.md`).
 - `npm run gpg:upload`: Carica `GPG_PRIVATE_KEY` / `GPG_PASSPHRASE` / `GPG_KEY_ID` come Actions secrets via `gh` CLI (libsodium sealed box).

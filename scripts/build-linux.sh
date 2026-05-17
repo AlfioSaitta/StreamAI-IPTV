@@ -147,6 +147,24 @@ fi
 
 echo "▶ Build jobs: ${JOBS[*]}"
 
+# ---- Version sync (.version is the single source of truth) ----------------
+# Propagates the base version from .version into package.json + android
+# gradle, and prints the *effective* build version (base[_<sha>]) so the
+# log makes the artefact naming convention obvious.
+if [[ -x "$(command -v node)" ]]; then
+  node "$SCRIPT_DIR/sync-version.mjs"
+fi
+
+# Resolve the short commit SHA passed down to make-distro-config so each
+# per-distro artefact carries the build provenance in its filename, e.g.
+# streamai-iptv_1.0.0_276ee32_debian_amd64.deb. The CI workflow sets
+# COMMIT_SHA explicitly; locally we derive it from git when available.
+COMMIT_SHORT="${COMMIT_SHA:-${GITHUB_SHA:-}}"
+if [[ -z "$COMMIT_SHORT" ]] && command -v git >/dev/null 2>&1; then
+  COMMIT_SHORT="$(git -C "$ROOT" rev-parse --short=7 HEAD 2>/dev/null || true)"
+fi
+COMMIT_SHORT="${COMMIT_SHORT:0:7}"
+
 # ---- Vite build (skippable when iterating on packaging only) ---------------
 if [[ "${SKIP_BUILD:-0}" != "1" ]]; then
   if [[ -d "$ROOT/dist" ]] && find "$ROOT/dist" -maxdepth 3 -not -user "$(id -un)" -print -quit 2>/dev/null | grep -q .; then
@@ -249,7 +267,9 @@ for job in "${JOBS[@]}"; do
     run_eb "$target" || FAILED+=("$job")
   else
     config_file="$ROOT/dist/.eb-config-${distro}.json"
-    node "$SCRIPT_DIR/make-distro-config.mjs" "$distro" "$target" > "$config_file"
+    mkc_args=("$distro" "$target")
+    [[ -n "$COMMIT_SHORT" ]] && mkc_args+=(--commit "$COMMIT_SHORT")
+    node "$SCRIPT_DIR/make-distro-config.mjs" "${mkc_args[@]}" > "$config_file"
     run_eb "$target" "$config_file" || FAILED+=("$job")
   fi
 done
