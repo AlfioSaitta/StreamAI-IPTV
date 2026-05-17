@@ -115,14 +115,32 @@ jobs:
 
           fail=0
 
-          # ---- RPM: rpm --checksig exits 0 even on unsigned packages
-          # (digests still validate), so we must parse the summary line and
-          # require that the word "signatures" appears in the OK report.
+          # Import the maintainer public key into the rpm keyring; without
+          # this, `rpm --checksig` reports the signature as NOKEY (and may
+          # even exit non-zero on newer rpm versions), preventing us from
+          # distinguishing a missing signature from a missing trust anchor.
+          PUBKEY="$(mktemp --suffix=.asc)"
+          gpg --export --armor "$GPG_KEY_ID" > "$PUBKEY"
+          if compgen -G '*.rpm' >/dev/null; then
+            sudo rpm --import "$PUBKEY"
+          fi
+
+          # ---- RPM: with the pubkey imported, a signed package reports
+          # "digests signatures OK"; an unsigned one reports "digests OK"
+          # (no 'signatures' token). NOKEY would still contain 'NOKEY'.
           for f in *.rpm; do
-            out="$(rpm --checksig "$f" 2>&1)"
+            if ! out="$(rpm --checksig -v "$f" 2>&1)"; then
+              echo "$out"
+              echo "::error::RPM $f failed rpm --checksig (exit non-zero)" >&2
+              fail=1
+              continue
+            fi
             echo "$out"
-            if ! grep -qE 'signatures.*OK|OK.*signatures|pgp.*OK' <<<"$out"; then
-              echo "::error::RPM $f is unsigned (rpm --checksig: ${out})" >&2
+            if grep -qi 'NOKEY' <<<"$out"; then
+              echo "::error::RPM $f signed by an untrusted key (NOKEY)" >&2
+              fail=1
+            elif ! grep -qiE '(signatures|pgp|rsa|dsa|eddsa).*OK' <<<"$out"; then
+              echo "::error::RPM $f appears to be unsigned" >&2
               fail=1
             fi
           done
