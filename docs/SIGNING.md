@@ -24,12 +24,23 @@ curl -fsSL https://<user>.github.io/StreamAI-IPTV/pubkey.asc \
 
 | Formato            | Comando                                                  |
 |--------------------|----------------------------------------------------------|
-| `.deb`             | `debsigs --verify streamai_*.deb`                        |
-| `.rpm`             | `rpm --checksig streamai-*.rpm`                          |
+| `.deb`             | `debsigs --verify streamai_*.deb` (richiede policy in `/etc/debsig/policies/<FPR>/`) — oppure verifica manuale: `ar x file.deb && gpg --verify _gpgorigin <blob>` |
+| `.rpm`             | `rpm --checksig streamai-*.rpm` (dopo `rpm --import` della pubkey) |
 | `.pkg.tar.zst`     | `gpg --verify streamai-*.pkg.tar.zst.sig`                |
 | `.AppImage`        | `gpg --verify StreamAI-*.AppImage.asc`                   |
 | `.tar.xz`          | `gpg --verify streamai-*.tar.xz.asc`                     |
 | `SHA256SUMS`       | `gpg --verify SHA256SUMS.asc && sha256sum -c SHA256SUMS` |
+
+> **Nota CI:** la verifica automatica nel workflow
+> [`.github/workflows/linux-release.yml`](../.github/workflows/linux-release.yml)
+> evita il sistema di policy di `debsigs` (che richiederebbe boilerplate in
+> `/etc/debsig/policies/`) estraendo manualmente il membro `_gpgorigin` dal
+> `.deb` e validandolo con `gpg --verify` contro un blob ricostruito
+> **nell'ordine reale dei membri `ar`** (l'ordine canonico hardcoded non
+> funziona: `debsigs` firma i byte nell'ordine effettivo di compressione
+> control/data, che varia per distro). Per gli RPM, la pubblica viene
+> importata in un **rpmdb dedicato** via `rpm --dbpath` per evitare il
+> mismatch utente/root che produce `NOKEY`.
 
 ## SLSA Build Provenance
 

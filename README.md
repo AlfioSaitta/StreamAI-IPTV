@@ -109,24 +109,71 @@ npm run check
 # Build + pacchetto Linux (auto-detect distro host)
 npm run dist:linux
 
-# …oppure target espliciti:
-npm run dist:linux:deb       # Debian / Ubuntu / Mint / Pop!_OS
-npm run dist:linux:rpm       # Fedora / openSUSE / RHEL / Rocky
-npm run dist:linux:pacman    # Arch / Manjaro / EndeavourOS
+# …oppure scegli la distro target con nomi pacchetto nativi:
+npm run dist:linux:opensuse  # openSUSE Tumbleweed / Leap
+npm run dist:linux:fedora    # Fedora
+npm run dist:linux:rhel      # RHEL / Rocky / AlmaLinux
+npm run dist:linux:debian    # Debian
+npm run dist:linux:ubuntu    # Ubuntu / Mint / Pop!_OS
+npm run dist:linux:arch      # Arch / Manjaro / EndeavourOS
+
+# …o i target generici SONAME-based (utili per test locali):
+npm run dist:linux:deb       # .deb generico
+npm run dist:linux:rpm       # .rpm generico
+npm run dist:linux:pacman    # .pkg.tar.zst generico
 npm run dist:linux:appimage  # AppImage universale (on-demand)
 npm run dist:linux:tar       # tar.xz portatile (on-demand)
 npm run dist:linux:all       # tutti i formati sopra
 ```
 
-Gli artefatti finiscono in `dist/`. Se `GPG_KEY_ID` è impostato in ambiente,
-ogni pacchetto viene firmato automaticamente (vedi [`docs/SIGNING.md`](docs/SIGNING.md)).
+Gli artefatti finiscono in `dist/` con il tag distro nel nome (es.
+`streamai-1.0.0-opensuse.x86_64.rpm`). Se `GPG_KEY_ID` è impostato in
+ambiente, ogni pacchetto viene firmato automaticamente (vedi
+[`docs/SIGNING.md`](docs/SIGNING.md)).
 
-> **Prerequisiti host:** `rpm`, `fakeroot`, `dpkg-sig`, `gnupg2`,
+> **Prerequisiti host:** `rpm`, `fakeroot`, `debsigs`, `gnupg2`,
 > `libarchive-tools` (per `bsdtar`), e `docker` se vuoi pubblicare il repo
-> Arch via `npm run repo:publish`.
+> Arch via `npm run repo:publish` o se il tuo `rpmbuild` è incompatibile con
+> `fpm` (rpmbuild ≥ 4.20 ⇒ build automatica in container
+> `electronuserland/builder`). Nota: `dpkg-sig` non è più richiesto — dal
+> rilascio di Ubuntu 24.04 è stato rimpiazzato da `debsigs --sign=origin`.
 
 Per le istruzioni di installazione lato utente finale (repo APT/RPM/Arch
 ospitati su GitHub Pages) consulta [`docs/INSTALL.md`](docs/INSTALL.md).
+
+### Release automatiche (GitHub Actions)
+
+Un push di tag `v*` (es. `git tag v1.0.1 && git push --tags`) attiva il
+workflow [`.github/workflows/linux-release.yml`](.github/workflows/linux-release.yml)
+che:
+
+1. Costruisce i **6 pacchetti per-distribuzione** (`opensuse`, `fedora`,
+   `rhel`, `debian`, `ubuntu`, `arch`) con nomi dipendenze nativi.
+2. Li **firma** con la chiave GPG del maintainer (subkey Ed25519, cachata
+   in `gpg-agent` via `gpg-preset-passphrase` per essere headless).
+3. **Verifica** ogni firma in modalità strict: `.rpm` con un rpmdb
+   dedicato (`rpm --dbpath`), `.deb` ricostruendo il blob firmato
+   nell'ordine reale di `ar t`, `.pkg.tar.zst` via `gpg --verify`,
+   `SHA256SUMS` + `.asc` + `sha256sum -c`.
+4. Genera **SLSA build provenance** (`actions/attest-build-provenance@v2`).
+5. Pubblica la **GitHub Release** con i 6 pacchetti + `*.asc` + `*.sig` +
+   `SHA256SUMS{,.asc}`.
+6. In un job separato assembla i repo APT/RPM/Arch in `public-repo/` e li
+   deploya su `gh-pages` (`peaceiris/actions-gh-pages@v3`).
+
+Per ridurre i tempi della pipeline (cold ~14 min → warm ~5 min) il
+workflow riusa quattro cache: Electron, electron-builder, APT toolchain e
+le immagini Docker `electronuserland/builder` + `archlinux:latest`. Vedi
+i dettagli in [`docs/plan-linuxDistroPackaging.prompt.md`](docs/plan-linuxDistroPackaging.prompt.md)
+§ "Esecuzione & evoluzione (post v5)".
+
+Per provisionare i secret GPG sul repository (`GPG_PRIVATE_KEY`,
+`GPG_PASSPHRASE`, `GPG_KEY_ID`) usa lo helper:
+
+```bash
+npm run gpg:setup    # solo la prima volta: genera la chiave + backup AES-256
+npm run gpg:upload   # invia i secret cifrati via `gh` CLI (libsodium)
+```
 
 ---
 

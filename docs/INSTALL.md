@@ -86,6 +86,11 @@ sudo pacman -Sy streamai
 
 ## AppImage (universale)
 
+> **Nota:** AppImage e tar.xz **non** sono pubblicati dalla CI ufficiale
+> (il workflow CI produce solo i 6 pacchetti nativi per-distribuzione).
+> Sono disponibili solo se il maintainer ha eseguito localmente
+> `npm run dist:linux:all` e ha caricato manualmente gli artefatti.
+
 ```bash
 curl -fsSLO https://<user>.github.io/StreamAI-IPTV/appimage/StreamAI-x.y.z.AppImage
 curl -fsSLO https://<user>.github.io/StreamAI-IPTV/appimage/StreamAI-x.y.z.AppImage.asc

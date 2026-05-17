@@ -153,4 +153,37 @@ Queste funzionalità definiscono l'identità di StreamAI e devono essere preserv
 - `npm run dist:linux:{opensuse,fedora,rhel,debian,ubuntu,arch}`: Build per-distro con nomi pacchetto nativi (da `build/depends/<distro>.json`). Gli artefatti includono il tag distro nel nome (es. `streamai-1.0.0-opensuse.x86_64.rpm`).
 - `npm run dist:linux:{deb,rpm,pacman,appimage,tar,all}`: Target generici (SONAME-based) e portable.
 - `npm run gpg:setup`: Genera la chiave GPG maintainer (vedi `docs/SIGNING.md`).
+- `npm run gpg:upload`: Carica `GPG_PRIVATE_KEY` / `GPG_PASSPHRASE` / `GPG_KEY_ID` come Actions secrets via `gh` CLI (libsodium sealed box).
 - `npm run repo:publish`: Assembla `public-repo/` per GitHub Pages.
+
+## 📦 Pipeline Linux Release (CI)
+Il workflow [`.github/workflows/linux-release.yml`](.github/workflows/linux-release.yml)
+si attiva su tag `v*` e `workflow_dispatch`. Esegue:
+
+1. Build dei **6 pacchetti per-distro** (no AppImage / tar.xz / target SONAME generici).
+2. Firma GPG (Ed25519 subkey, passphrase pre-cachata in `gpg-agent`):
+   - `.deb` → `debsigs --sign=origin` (membro `_gpgorigin`); `dpkg-sig`
+     non è più disponibile in Ubuntu 24.04.
+   - `.rpm` → `rpm --addsign` con macro `%__gpg_sign_cmd` SHA-256.
+   - `.pkg.tar.zst` → `gpg --detach-sign` (`.sig` binario).
+   - `SHA256SUMS` + `SHA256SUMS.asc`.
+3. Verifica **strict** (`set -euo pipefail`, niente `|| true`):
+   - RPM: pubkey importata in **rpmdb dedicato** (`rpm --dbpath` +
+     `--initdb` + `--import`); fallisce su `NOKEY`.
+   - DEB: blob firmato ricostruito **nell'ordine reale di `ar t`** (non
+     canonico) ⇒ `gpg --verify` contro `_gpgorigin` / `_gpgbuilder`.
+   - Cross-check: almeno un artefatto per ognuna delle 6 distro attese.
+4. SLSA build provenance (`actions/attest-build-provenance@v2`).
+5. GitHub Release con i 6 pacchetti + `*.asc` + `*.sig` + `SHA256SUMS{,.asc}`.
+6. Job `pages`: `publish-repo.sh` assembla `public-repo/{apt,rpm}/<distro>/`
+   + `public-repo/arch/`; deploy su `gh-pages` con `keep_files: true`.
+
+**Caching workflow (4 layer):** `~/.cache/electron`, `~/.cache/electron-builder`,
+APT toolchain (`awalsh128/cache-apt-pkgs-action`), Docker images
+`electronuserland/builder` e `archlinux:latest` (`ScribeMD/docker-cache`).
+Riduzione cold→warm: ~14 min → ~5 min.
+
+Storia completa delle iterazioni in
+[`docs/plan-linuxDistroPackaging.prompt.md`](docs/plan-linuxDistroPackaging.prompt.md)
+§ "Esecuzione & evoluzione (post v5)".
+
