@@ -30,6 +30,22 @@ cd "$DIST"
 
 shopt -s nullglob
 
+# ---- Sanity check: refuse to sign an empty dist/ -------------------------
+# Without this, `sha256sum` with nullglob expansion to zero args silently
+# reads from stdin and produces a manifest with a single `-` entry,
+# which then passes signature/checksum verification while no actual
+# package was built. That hides upstream build failures (e.g. an
+# electron-builder `directories.output` override pointing elsewhere)
+# until the cross-check loop at the end of the workflow.
+mapfile -t _pkgs < <(printf '%s\n' *.deb *.rpm *.pkg.tar.zst *.AppImage *.tar.xz *.tar.gz)
+if (( ${#_pkgs[@]} == 0 )); then
+  echo "::error::No packages found in $DIST — nothing to sign." >&2
+  echo "::error::Check that electron-builder wrote its output to dist/" >&2
+  echo "::error::(no 'directories.output' override in package.json.build)." >&2
+  exit 7
+fi
+echo "▶ Found ${#_pkgs[@]} package(s) to sign: ${_pkgs[*]}"
+
 # ---- .deb ------------------------------------------------------------------
 for f in *.deb; do
   echo "▶ Signing $f (deb)"

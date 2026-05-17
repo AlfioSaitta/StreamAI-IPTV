@@ -88,9 +88,6 @@
     "executableName": "streamai",
     "asar": true,
     "compression": "maximum",
-    "directories": {
-      "output": "release"
-    },
     "electronDist": "node_modules/electron/dist",
     "buildDependenciesFromSource": false,
     "removePackageScripts": true,

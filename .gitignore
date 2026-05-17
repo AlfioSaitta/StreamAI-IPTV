@@ -58,3 +58,6 @@ docs/keys/*.secret.asc
 public-repo/
 build/icons/
 
+
+# electron-builder per-distro output (when directories.output is set locally)
+/release/
