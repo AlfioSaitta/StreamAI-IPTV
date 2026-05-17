@@ -63,6 +63,23 @@ EOF
   (
     cd "$channel_dir"
     for deb in $pattern; do
+      # When the cache (or Releases fallback) restored a previous build
+      # of the *same* package name+version, reprepro refuses to overwrite
+      # the pool file because its hashes/size differ (timestamps embedded
+      # in the .deb). Drop the existing entry from the distribution
+      # first, then include the new one.
+      pkg_name="$(dpkg-deb -f "$deb" Package)"
+      reprepro -b . removepackage stable "$pkg_name" 2>/dev/null || true
+      # Also wipe the pool file itself: removepackage only drops the
+      # index entry, the orphan .deb in pool/ can still clash on the
+      # next includedeb. `_listconfidentfiles` / `_forget` are reprepro
+      # internals we don't want to touch, so just rm any stale pool
+      # entry with the canonical name.
+      pkg_ver="$(dpkg-deb -f "$deb" Version)"
+      pkg_arch="$(dpkg-deb -f "$deb" Architecture)"
+      letter="${pkg_name:0:1}"
+      pool_file="pool/main/${letter}/${pkg_name}/${pkg_name}_${pkg_ver}_${pkg_arch}.deb"
+      [[ -e "$pool_file" ]] && rm -f "$pool_file"
       reprepro --ignore=wrongdistribution -b . includedeb stable "$deb"
     done
   )
@@ -77,9 +94,14 @@ build_rpm_channel() {
     return 0
   fi
   echo "▶ Building RPM channel: ${distro}"
-  cp $pattern "$channel_dir/"
-  createrepo_c "$channel_dir"
-  gpg "${GPG_ARGS[@]}" --armor --detach-sign \
+  # If a previously-cached build dropped an .rpm with the *same*
+  # filename here, replace it: createrepo_c regenerates the metadata
+  # from whatever is in the directory.
+  for rpm in $pattern; do
+    cp -f "$rpm" "$channel_dir/$(basename "$rpm")"
+  done
+  createrepo_c --update "$channel_dir" 2>/dev/null || createrepo_c "$channel_dir"
+  gpg "${GPG_ARGS[@]}" --armor --detach-sign --yes \
     --output "$channel_dir/repodata/repomd.xml.asc" \
     "$channel_dir/repodata/repomd.xml"
   cat > "$channel_dir/streamai.repo" <<EOF
@@ -101,15 +123,18 @@ build_rpm_channel rhel
 
 if compgen -G "$DIST/*-arch.*.pkg.tar.zst" >/dev/null; then
   echo "▶ Building Arch repo (via archlinux:latest container)"
-  cp "$DIST"/*-arch.*.pkg.tar.zst "$OUT/arch/"
+  # Overwrite existing same-named packages from a previous cached run.
+  cp -f "$DIST"/*-arch.*.pkg.tar.zst "$OUT/arch/"
   compgen -G "$DIST/*-arch.*.pkg.tar.zst.sig" >/dev/null && \
-    cp "$DIST"/*-arch.*.pkg.tar.zst.sig "$OUT/arch/" || true
+    cp -f "$DIST"/*-arch.*.pkg.tar.zst.sig "$OUT/arch/" || true
   if ! command -v docker >/dev/null 2>&1; then
     echo "  ✗ docker required for repo-add" >&2; exit 5
   fi
+  # repo-add is idempotent: it replaces an existing entry of the same
+  # (name, version) with the new file from arguments.
   docker run --rm -v "$OUT/arch":/w -w /w archlinux:latest \
     bash -c "pacman -Sy --noconfirm --needed pacman-contrib && \
-             repo-add streamai.db.tar.zst *.pkg.tar.zst"
+             repo-add -R streamai.db.tar.zst *.pkg.tar.zst"
 fi
 
 HAS_APPIMAGE=0
