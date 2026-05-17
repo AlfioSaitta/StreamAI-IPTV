@@ -302,6 +302,34 @@ jobs:
           name: linux-packages
           path: dist/
 
+      # Seed public-repo/ with the *current* contents of the gh-pages
+      # branch so reprepro / createrepo_c / repo-add can rebuild the repo
+      # metadata over the union of old + new packages. This replaces the
+      # old `keep_files: true` strategy: instead of letting the gh-pages
+      # branch accumulate git history (which eventually causes
+      # `git push` to fail with HTTP 500 once the pack exceeds GitHub's
+      # server-side limit), we deploy each release as a fresh orphan
+      # commit while preserving every previously published artefact.
+      - name: Seed public-repo from existing gh-pages
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: gh-pages-prev
+        continue-on-error: true
+
+      - name: Copy previous gh-pages contents into public-repo/
+        run: |
+          mkdir -p public-repo
+          if [[ -d gh-pages-prev ]]; then
+            # rsync everything except git metadata; reprepro keeps its
+            # own state under conf/ + db/ which must be preserved verbatim.
+            rsync -a --exclude='.git' gh-pages-prev/ public-repo/
+            rm -rf gh-pages-prev
+            echo "✓ Seeded public-repo/ from gh-pages branch"
+          else
+            echo "ℹ gh-pages branch not present yet — starting fresh"
+          fi
+
       - name: Import GPG signing key
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
@@ -317,11 +345,18 @@ jobs:
         run: bash scripts/publish-repo.sh
 
       - name: Deploy to gh-pages
-        uses: peaceiris/actions-gh-pages@v3
+        uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: public-repo
           publish_branch: gh-pages
-          keep_files: true
+          # Publish as a single orphan commit. Without this, the gh-pages
+          # branch accumulates pack-history release after release (deb /
+          # rpm payloads + reprepro/createrepo metadata churn) until
+          # `git push` is rejected by GitHub with HTTP 500. The repo
+          # contents themselves are preserved because the previous
+          # gh-pages tree is re-seeded into public-repo/ before
+          # publish-repo.sh runs.
+          force_orphan: true
           commit_message: "chore(release): publish ${{ needs.build.outputs.version }}"
 

@@ -98,7 +98,10 @@ A `git tag v*` push triggers `.github/workflows/linux-release.yml` which:
   `--dbpath`; deb is verified by reconstructing the signed blob in the
   *actual* `ar t` member order)
 - emits SLSA build provenance, publishes a GitHub Release, and deploys
-  the APT/RPM/Arch repos to `gh-pages`
+  the APT/RPM/Arch repos to `gh-pages` as a **single orphan commit**
+  (`peaceiris/actions-gh-pages@v4` + `force_orphan: true`), re-seeding
+  `public-repo/` from the previous `gh-pages` tree first so existing
+  release artefacts are preserved
 - reuses 4 caches (Electron, electron-builder, APT toolchain, Docker
   images electronuserland/builder + archlinux:latest) ⇒ cold ~14 min,
   warm ~5 min
@@ -189,6 +192,7 @@ These features define StreamAI's identity and must be preserved:
 9. **Per-type Continue Watching:** `ChannelList` filters the "Continue Watching" rail using `ProfilePreferences.continueWatchingMoviesEnabled` (default `false`) and `continueWatchingSeriesEnabled` (default `true`). Keep both toggles wired through `App.tsx` and `ProfileSettings.tsx`.
 10. **CI signing (`.deb` / `.rpm`):** Ubuntu 24.04 noble has **dropped `dpkg-sig`** — `.deb` packages are now signed with `debsigs --sign=origin` (embeds an OpenPGP detached sig as the `_gpgorigin` ar member). The CI verification step must NOT assume a canonical `ar` member order: `debsigs` signs the bytes in the **actual** archive order, which depends on control/data compression. Always rebuild the signed blob from `ar t` output. For `.rpm`, import the maintainer pubkey into a **dedicated rpmdb** via `rpm --dbpath` + `--initdb` + `--import` before `rpm --checksig`; `sudo rpm --import` writes to root's rpmdb, invisible to the runner user.
 11. **CI GPG headless:** `scripts/import-gpg-key.sh` enables `allow-preset-passphrase` in `gpg-agent.conf` and calls `gpg-preset-passphrase` for every keygrip (primary + subkeys) so `debsigs`/`rpm --addsign`/`gpg --detach-sign` never need to open `/dev/tty`. Both jobs (`build`, `pages`) must export `GPG_PASSPHRASE` to that step.
+12. **`gh-pages` deploy = orphan + seed:** The `pages` job checks out the existing `gh-pages` branch into `gh-pages-prev/`, `rsync`s its contents (excluding `.git`) into `public-repo/` **before** running `publish-repo.sh`, then deploys via `peaceiris/actions-gh-pages@v4` with `force_orphan: true`. Never switch back to `keep_files: true` — the pack history grows release-after-release until `git push` is rejected by GitHub with HTTP 500. The orphan strategy preserves every published package (via the pre-seed) while keeping the branch a single commit.
 
 ## Additional Context
 

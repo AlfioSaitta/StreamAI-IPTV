@@ -175,8 +175,14 @@ si attiva su tag `v*` e `workflow_dispatch`. Esegue:
    - Cross-check: almeno un artefatto per ognuna delle 6 distro attese.
 4. SLSA build provenance (`actions/attest-build-provenance@v2`).
 5. GitHub Release con i 6 pacchetti + `*.asc` + `*.sig` + `SHA256SUMS{,.asc}`.
-6. Job `pages`: `publish-repo.sh` assembla `public-repo/{apt,rpm}/<distro>/`
-   + `public-repo/arch/`; deploy su `gh-pages` con `keep_files: true`.
+6. Job `pages`: checkout del branch `gh-pages` esistente (se presente)
+   in `gh-pages-prev/`, rsync (escluso `.git`) in `public-repo/` per
+   preservare i pacchetti già pubblicati, poi `publish-repo.sh`
+   assembla `public-repo/{apt,rpm}/<distro>/` + `public-repo/arch/` e
+   `peaceiris/actions-gh-pages@v4` deploya con `force_orphan: true`
+   (single-commit branch). Questo evita la crescita illimitata della
+   pack-history di `gh-pages` che dopo qualche release veniva
+   rifiutata da GitHub con HTTP 500 al `git push`.
 
 **Caching workflow (4 layer):** `~/.cache/electron`, `~/.cache/electron-builder`,
 APT toolchain (`awalsh128/cache-apt-pkgs-action`), Docker images

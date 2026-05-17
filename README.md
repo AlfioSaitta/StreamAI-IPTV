@@ -158,8 +158,11 @@ che:
 4. Genera **SLSA build provenance** (`actions/attest-build-provenance@v2`).
 5. Pubblica la **GitHub Release** con i 6 pacchetti + `*.asc` + `*.sig` +
    `SHA256SUMS{,.asc}`.
-6. In un job separato assembla i repo APT/RPM/Arch in `public-repo/` e li
-   deploya su `gh-pages` (`peaceiris/actions-gh-pages@v3`).
+6. In un job separato re-seeda `public-repo/` dal contenuto attuale di
+   `gh-pages` (preserva i pacchetti delle release precedenti), assembla
+   i repo APT/RPM/Arch e ridepoloya come **commit orphan**
+   (`peaceiris/actions-gh-pages@v4`, `force_orphan: true`) per evitare
+   la crescita illimitata della pack-history.
 
 Per ridurre i tempi della pipeline (cold ~14 min → warm ~5 min) il
 workflow riusa quattro cache: Electron, electron-builder, APT toolchain e

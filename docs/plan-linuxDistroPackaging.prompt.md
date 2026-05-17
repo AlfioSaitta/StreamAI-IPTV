@@ -69,7 +69,7 @@ Da [`package.json`](../package.json) `build.files`: payload minimale (`dist/**`,
 
 1. Lo script `setup-gpg-key.sh` chiede in batch nome/email maintainer: vuoi che li parametrizzi via env (`MAINTAINER_NAME`, `MAINTAINER_EMAIL`) o tramite prompt interattivo? Consiglio: entrambi, env prioritari, fallback a prompt.
 2. Backup chiave primaria: lo script salva `docs/keys/streamai-master.key.asc.gpg` cifrata simmetricamente AES-256 (gitignored) + revocation cert `streamai-revoke.asc` (anch'esso gitignored). La passphrase di backup è distinta da quella di firma e custodita offline dal maintainer.
-3. Ritenzione storica `gh-pages`: `keep_files: true` farà crescere il branch; rotazione futura (mantenere N release) da pianificare quando supera ~1 GB.
+3. Ritenzione storica `gh-pages`: la pipeline ora deploya con `force_orphan: true` (single-commit branch), pre-seedando `public-repo/` dal contenuto attuale del branch. Questo elimina la crescita illimitata della pack-history che dopo qualche release veniva rifiutata da GitHub con HTTP 500 al `git push`, pur preservando tutti i pacchetti già pubblicati.
 
 ### Esecuzione & evoluzione (post v5)
 
@@ -104,6 +104,16 @@ e per evitare regressioni:
    firmato viene ricostruito seguendo l'output di `ar t`, non un ordine
    canonico hardcoded, perché `debsigs` firma i byte nell'ordine
    effettivo dei membri ar (varia con compressione control/data).
+8. **`gh-pages` deploy come orphan + seed (post `d8bb292`)** — la
+   strategia `keep_files: true` su `peaceiris/actions-gh-pages@v3`
+   faceva crescere indefinitamente la pack-history del branch finché
+   `git push` non veniva rifiutato da GitHub con `HTTP 500`. Soluzione:
+   bump ad `actions-gh-pages@v4` con `force_orphan: true` (ogni
+   release diventa un singolo commit) e checkout preventivo del branch
+   `gh-pages` in `gh-pages-prev/` con rsync `--exclude='.git'` dentro
+   `public-repo/` prima di `publish-repo.sh`, così reprepro /
+   createrepo_c / repo-add ricostruiscono i metadati sull'unione
+   pacchetti vecchi + nuovi senza perdere nessuna release storica.
 
 #### File risultanti (canonici)
 
