@@ -49,6 +49,50 @@ build_apt_channel() {
     return 0
   fi
   echo "▶ Building APT channel: ${distro}/stable"
+
+  # Strategy: rebuild the entire reprepro state from scratch on every
+  # run. The persistent `db/` it produces is brittle — a cached run of
+  # the *same* version with different byte content (timestamps embedded
+  # in the .deb) makes reprepro reject `includedeb` with a hash
+  # mismatch (`Already existing files can only be included again, if
+  # they are the same`), and the surgical
+  # `removepackage` + `rm pool/...` workaround does not always cover
+  # the orphan rows in `db/packages.db`. Nuking + replaying is fast
+  # (~1 s per .deb) and guaranteed deterministic.
+  local staging
+  staging="$(mktemp -d)"
+
+  # Phase 1: new builds from $DIST (winners on NVRA conflict). They
+  # live in $DIST under their CI filename (with _<sha>_) — reprepro
+  # only cares about the .deb's internal Package/Version/Arch fields.
+  declare -A seen_nvra
+  local deb n v a key
+  for deb in $pattern; do
+    n="$(dpkg-deb -f "$deb" Package)"
+    v="$(dpkg-deb -f "$deb" Version)"
+    a="$(dpkg-deb -f "$deb" Architecture)"
+    key="${n}|${v}|${a}"
+    cp -f "$deb" "$staging/$(basename "$deb")"
+    seen_nvra[$key]=1
+  done
+
+  # Phase 2: historical .deb files from the previous pool (cache /
+  # Releases fallback). Skip any NVRA we already included from $DIST.
+  if [[ -d "$channel_dir/pool" ]]; then
+    while IFS= read -r -d '' deb; do
+      n="$(dpkg-deb -f "$deb" Package 2>/dev/null)" || continue
+      v="$(dpkg-deb -f "$deb" Version 2>/dev/null)" || continue
+      a="$(dpkg-deb -f "$deb" Architecture 2>/dev/null)" || continue
+      key="${n}|${v}|${a}"
+      if [[ -z "${seen_nvra[$key]:-}" ]]; then
+        cp -n "$deb" "$staging/$(basename "$deb")"
+        seen_nvra[$key]=1
+      fi
+    done < <(find "$channel_dir/pool" -name '*.deb' -print0)
+  fi
+
+  # Wipe and recreate the channel.
+  rm -rf "$channel_dir"
   mkdir -p "$channel_dir/conf"
   cat > "$channel_dir/conf/distributions" <<EOF
 Origin: StreamAI
@@ -62,27 +106,11 @@ SignWith: $GPG_KEY_ID
 EOF
   (
     cd "$channel_dir"
-    for deb in $pattern; do
-      # When the cache (or Releases fallback) restored a previous build
-      # of the *same* package name+version, reprepro refuses to overwrite
-      # the pool file because its hashes/size differ (timestamps embedded
-      # in the .deb). Drop the existing entry from the distribution
-      # first, then include the new one.
-      pkg_name="$(dpkg-deb -f "$deb" Package)"
-      reprepro -b . removepackage stable "$pkg_name" 2>/dev/null || true
-      # Also wipe the pool file itself: removepackage only drops the
-      # index entry, the orphan .deb in pool/ can still clash on the
-      # next includedeb. `_listconfidentfiles` / `_forget` are reprepro
-      # internals we don't want to touch, so just rm any stale pool
-      # entry with the canonical name.
-      pkg_ver="$(dpkg-deb -f "$deb" Version)"
-      pkg_arch="$(dpkg-deb -f "$deb" Architecture)"
-      letter="${pkg_name:0:1}"
-      pool_file="pool/main/${letter}/${pkg_name}/${pkg_name}_${pkg_ver}_${pkg_arch}.deb"
-      [[ -e "$pool_file" ]] && rm -f "$pool_file"
+    for deb in "$staging"/*.deb; do
       reprepro --ignore=wrongdistribution -b . includedeb stable "$deb"
     done
   )
+  rm -rf "$staging"
 }
 
 build_rpm_channel() {
@@ -94,9 +122,30 @@ build_rpm_channel() {
     return 0
   fi
   echo "▶ Building RPM channel: ${distro}"
-  # If a previously-cached build dropped an .rpm with the *same*
-  # filename here, replace it: createrepo_c regenerates the metadata
-  # from whatever is in the directory.
+  mkdir -p "$channel_dir"
+
+  # NVRA dedup: in CI new .rpm filenames embed the short commit SHA
+  # (`streamai-iptv_1.0.0_<sha>_fedora_amd64.rpm`) while previously
+  # cached ones might not — they'd end up as two different files in
+  # the channel dir with identical Name-Version-Release-Arch.
+  # createrepo_c would index both and dnf would pick non-deterministically.
+  # Remove any old .rpm whose NVRA matches a new one.
+  declare -A new_nvra
+  local rpm nvra
+  for rpm in $pattern; do
+    nvra="$(rpm -qp --queryformat '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}' "$rpm" 2>/dev/null)" || continue
+    new_nvra[$nvra]=1
+  done
+  if [[ -d "$channel_dir" ]]; then
+    for rpm in "$channel_dir"/*.rpm; do
+      [[ -e "$rpm" ]] || continue
+      nvra="$(rpm -qp --queryformat '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}' "$rpm" 2>/dev/null)" || continue
+      if [[ -n "${new_nvra[$nvra]:-}" ]]; then
+        rm -f "$rpm"
+      fi
+    done
+  fi
+
   for rpm in $pattern; do
     cp -f "$rpm" "$channel_dir/$(basename "$rpm")"
   done
@@ -123,15 +172,44 @@ build_rpm_channel rhel
 
 if compgen -G "$DIST/*_arch_*.pkg.tar.zst" >/dev/null; then
   echo "▶ Building Arch repo (via archlinux:latest container)"
-  # Overwrite existing same-named packages from a previous cached run.
+
+  # NVRA dedup (same rationale as RPM channel): strip any cached
+  # .pkg.tar.zst whose pkgname-pkgver-pkgrel-arch matches a new build.
+  # We read pkgname/pkgver from the .PKGINFO embedded in the archive.
+  pkg_id() {
+    bsdtar -xOf "$1" .PKGINFO 2>/dev/null | \
+      awk -F' = ' '
+        $1=="pkgname"{n=$2}
+        $1=="pkgver"{v=$2}
+        $1=="arch"{a=$2}
+        END{print n"-"v"."a}'
+  }
+  declare -A new_arch_nvra
+  for pkg in "$DIST"/*_arch_*.pkg.tar.zst; do
+    id="$(pkg_id "$pkg")"
+    [[ -n "$id" ]] && new_arch_nvra[$id]=1
+  done
+  if [[ -d "$OUT/arch" ]]; then
+    for pkg in "$OUT/arch"/*.pkg.tar.zst; do
+      [[ -e "$pkg" ]] || continue
+      id="$(pkg_id "$pkg")"
+      if [[ -n "$id" && -n "${new_arch_nvra[$id]:-}" ]]; then
+        rm -f "$pkg" "${pkg}.sig"
+      fi
+    done
+  fi
+
+  # Overwrite any remaining same-filename packages from cache.
   cp -f "$DIST"/*_arch_*.pkg.tar.zst "$OUT/arch/"
   compgen -G "$DIST/*_arch_*.pkg.tar.zst.sig" >/dev/null && \
     cp -f "$DIST"/*_arch_*.pkg.tar.zst.sig "$OUT/arch/" || true
   if ! command -v docker >/dev/null 2>&1; then
     echo "  ✗ docker required for repo-add" >&2; exit 5
   fi
-  # repo-add is idempotent: it replaces an existing entry of the same
-  # (name, version) with the new file from arguments.
+  # repo-add -R replaces an existing entry of the same (name, version)
+  # with the new file; rebuilding from scratch (rm streamai.db*) keeps
+  # the index honest in case cached entries reference now-deleted files.
+  rm -f "$OUT/arch/streamai.db"* "$OUT/arch/streamai.files"*
   docker run --rm -v "$OUT/arch":/w -w /w archlinux:latest \
     bash -c "pacman -Sy --noconfirm --needed pacman-contrib && \
              repo-add -R streamai.db.tar.zst *.pkg.tar.zst"
