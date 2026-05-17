@@ -115,21 +115,23 @@ jobs:
 
           fail=0
 
-          # Import the maintainer public key into the rpm keyring; without
-          # this, `rpm --checksig` reports the signature as NOKEY (and may
-          # even exit non-zero on newer rpm versions), preventing us from
-          # distinguishing a missing signature from a missing trust anchor.
+          # Import the maintainer public key into a *dedicated* rpm keyring;
+          # using `sudo rpm --import` would write into root's rpmdb while
+          # `rpm --checksig` (run as the runner user) reads from ~/.rpmdb,
+          # so the key would be invisible to verification → NOKEY.
           PUBKEY="$(mktemp --suffix=.asc)"
           gpg --export --armor "$GPG_KEY_ID" > "$PUBKEY"
+          RPMDB="$(mktemp -d)"
           if compgen -G '*.rpm' >/dev/null; then
-            sudo rpm --import "$PUBKEY"
+            rpm --dbpath "$RPMDB" --initdb
+            rpm --dbpath "$RPMDB" --import "$PUBKEY"
           fi
 
           # ---- RPM: with the pubkey imported, a signed package reports
           # "digests signatures OK"; an unsigned one reports "digests OK"
           # (no 'signatures' token). NOKEY would still contain 'NOKEY'.
           for f in *.rpm; do
-            if ! out="$(rpm --checksig -v "$f" 2>&1)"; then
+            if ! out="$(rpm --dbpath "$RPMDB" --checksig -v "$f" 2>&1)"; then
               echo "$out"
               echo "::error::RPM $f failed rpm --checksig (exit non-zero)" >&2
               fail=1
@@ -165,14 +167,23 @@ jobs:
             fi
             tmpdir="$(mktemp -d)"
             ( cd "$tmpdir" && ar x "$DIST_ABS/$f" )
-            # Concatenate the signed members in canonical ar order.
+            # Concatenate the signed members in the *actual* ar order
+            # (as reported by `ar t`), skipping the signature member
+            # itself. debsigs/dpkg-sig sign the byte-for-byte
+            # concatenation of the remaining members in archive order;
+            # any deviation produces a BAD signature.
             signed_blob="$tmpdir/.signed"
             : > "$signed_blob"
-            for m in debian-binary control.tar.* data.tar.*; do
-              for path in "$tmpdir"/$m; do
-                [[ -f "$path" ]] && cat "$path" >> "$signed_blob"
-              done
-            done
+            while IFS= read -r m; do
+              case "$m" in
+                ''|_gpgorigin|_gpgbuilder) continue ;;
+              esac
+              if [[ -f "$tmpdir/$m" ]]; then
+                cat "$tmpdir/$m" >> "$signed_blob"
+              else
+                echo "::warning::DEB $f: ar lists '$m' but the extracted file is missing" >&2
+              fi
+            done <<<"$members"
             if gpg --verify "$tmpdir/$sig_member" "$signed_blob" 2>&1; then
               echo "  ✓ $f ($sig_member) OK"
             else
