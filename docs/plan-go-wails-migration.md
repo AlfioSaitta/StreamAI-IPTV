@@ -28,6 +28,10 @@
 >    da `P` o pulsante UI, sia per H.264/AAC sia per HEVC/AV1.
 > 3. **HEVC/AV1 con HW acceleration** universale (VAAPI/NVDEC su Linux,
 >    D3D11VA su Windows, VideoToolbox su macOS), via libmpv.
+> 4. **Qualità di riproduzione 4K (3840×2160) fluida** (dropped frame
+>    ≤ 0.5% in HEVC 10-bit / AV1 a 60 fps su HW consumer moderno).
+> 5. **Sincronia A/V impeccabile**: drift |Δ| ≤ 40 ms a regime, nessun
+>    sync re-snap visibile/udibile su sessioni di 1+ ora. Vedi §4.8.
 
 ---
 
@@ -100,8 +104,13 @@ Da raccogliere come "baseline KPI" su una macchina Linux x86_64 di riferimento:
 - Dimensione installata (oggi: ~250 MB)
 - RAM idle a finestra aperta (oggi: ~280–350 MB)
 - RAM con stream HLS 1080p in playback (oggi: ~450–600 MB)
+- RAM con stream HLS HEVC 4K (oggi: ~700–900 MB)
 - Tempo di avvio cold-start (oggi: ~2.5–3.5 s)
 - Tempo TTFF stream HLS (oggi: ~1.2–1.8 s)
+- **Dropped frame % su HEVC 10-bit 4K@60** (HW decode) ← baseline da catturare
+- **Dropped frame % su AV1 4K@60** ← baseline da catturare
+- **AV-sync drift medio / peak su HLS live HEVC 4K, sessione 1h** ← baseline da catturare
+- CPU% medio durante playback HEVC 4K HW (oggi: ~15–25%)
 - Supporto codec verificato: H.264, HEVC/H.265, AV1, AAC, AC3, EAC3, Opus
 
 → vedi §11 *Criteri di accettazione*.
@@ -505,6 +514,127 @@ Con libmpv in backend D, **tutti** disponibili senza patch FFmpeg:
 
 → Risolve il "vero scoglio" della rev1 senza più dipendere da `patch-ffmpeg.js`.
 
+### 4.8 Qualità di riproduzione: 4K fluido + AV sync (vincolo)
+
+> **Vincolo aggiuntivo (rev. 5):** il player deve riprodurre **contenuti 4K
+> (3840×2160, fino a 60 fps, HEVC 10-bit / AV1)** in modo fluido e con
+> sincronia audio/video impeccabile su HW di fascia consumer moderna
+> (Intel UHD Graphics 770+ / AMD RDNA2+ / NVIDIA Maxwell+ / Apple Silicon /
+> Intel ≥ 11ª gen iGPU). Drift AV ≤ ±40 ms su qualsiasi sessione di 1h.
+
+#### 4.8.1 Pipeline a 4K, decisioni chiave
+
+A 4K@60 il throughput nominale di un frame RGBA8 unpacked è ~500 MB/s:
+inaccettabile da copiare due volte (libmpv → shm → WebGL upload). Per
+preservare la fluidità si adottano queste decisioni:
+
+1. **HW decode obbligatorio a 4K**: `hwdec=auto-safe` ⇒ VAAPI/NVDEC/D3D11VA/
+   VideoToolbox. Se HW decode non disponibile, libmpv tenta SW ma il player
+   emette warning UI ("Decoding software a 4K può scattare") via
+   `StreamDiagnostics.tsx`.
+2. **Surface output in formato nativo del decoder** (NV12 / P010 / DRM PRIME
+   FD), **non** RGBA. La conversione di colorspace e la YUV→RGB **avviene
+   nello shader WebGL2 sul frontend**, non in `glReadPixels`. Riduzione
+   bandwidth: ~250 MB/s (NV12 8-bit) o ~330 MB/s (P010 10-bit) invece di
+   ~500 MB/s, e niente costo CPU per la conversione.
+3. **Transport shm a doppio ring buffer** (NV12 plane Y + plane UV
+   contigui), allineato a 4096 byte; il frontend lega le due planes a
+   due `gl.TEXTURE_2D` con `gl.LUMINANCE` (Y) e `gl.LUMINANCE_ALPHA` (UV)
+   o `gl.RG8` (WebGL2 core) per shader BT.709/BT.2020 → sRGB matrix.
+4. **Zero-copy DRM-PRIME su Linux (fast path)**: quando libmpv decodifica
+   con VAAPI/NVDEC, esporta un file descriptor DRM-PRIME del frame. Il
+   frontend riceve l'FD via Wails plugin custom, lo importa come
+   `EGLImage` → `glEGLImageTargetTexture2DOES`. Latenza ~0 ms, nessuna
+   copia in RAM CPU. Implementazione opzionale (SPIKE-5 dedicato, vedi
+   §6.0); se non disponibile, fallback a path #2.
+5. **Cap di throughput dinamico**: se 4 frame consecutivi superano
+   l'sla di render (16.6 ms a 60 fps), libmpv viene messo in
+   `framedrop=vo` per evitare slow-mo. Visualizzato come "frame dropped:
+   N" in StreamDiagnostics.
+
+#### 4.8.2 Sincronia audio/video — strategia
+
+La sincronia AV è la metrica più critica e ha tre fonti di errore:
+
+| Sorgente di drift | Tipico su Electron | Strategia in backend D |
+|---|---|---|
+| Audio device latency reporting incorretta | ~80–150 ms (PulseAudio) | libmpv usa `--audio-channels=auto-safe` e `--audio-buffer=0.2`; legge la latenza vera dal device (`ao-` properties) |
+| Render canvas non vsync-locked | ~16–32 ms (browser RAF) | WebGL `gl.flush()` + `requestAnimationFrame` sincronizzato; libmpv `video-sync=display-resample` quando il refresh-rate è noto |
+| Audio/video clock disallineati su HLS live | ~50–200 ms (drift cumulativo) | libmpv è A/V master clock di default; usa `audio` come master (`video-sync=audio`) per stream con PTS audio affidabile |
+
+**Configurazione libmpv adottata** (in `internal/services/player/profile.go`):
+
+```go
+opts := map[string]string{
+    "hwdec":              "auto-safe",
+    "video-sync":         "audio",       // audio = master clock
+    "audio-buffer":       "0.2",         // 200 ms buffer per ridurre underruns
+    "audio-stream-silence": "yes",       // riempi i gap audio invece di skippare
+    "framedrop":          "vo",          // drop frame video, mai audio
+    "demuxer-max-bytes":  "150MiB",      // ample buffer per HLS/DASH 4K
+    "demuxer-max-back-bytes": "75MiB",
+    "cache":              "yes",
+    "cache-secs":         "10",
+    "cache-pause":        "yes",         // pausa playback se buffer empty
+    "cache-pause-wait":   "2",
+    "interpolation":      "no",          // disable interpolation a 4K (CPU)
+    "video-latency-hacks": "yes",        // riduce latenza display
+    "stream-buffer-size": "8MiB",        // buffer di rete adeguato a 4K
+}
+```
+
+Per IPTV live (latency-critical) gli override sono in `profile_live.go`:
+`audio-buffer=0.5`, `cache-secs=4`, `demuxer-readahead-secs=2` — bilancia
+zapping rapido vs stabilità.
+
+#### 4.8.3 Adaptive Bitrate (ABR) e selezione qualità a 4K
+
+- HLS / DASH: libmpv usa la sua logica ABR built-in basata su throughput
+  reale del demuxer + buffer health. Esposta al frontend come property
+  `track-list` filtrabile per `hls-bitrate`.
+- Override utente: dropdown "Qualità → Auto / 4K / 1080p / 720p / Audio
+  only" nell'OSD, già esistente in `VideoPlayerNew.tsx`, ricollegata al
+  metodo `(*PlayerService).SetMaxBitrate(kbps int) error`.
+- Su connessioni instabili, la UI segnala downscale automatico ("Bitrate
+  ridotto a 1080p per buffer stabilità") via evento `quality-change`.
+
+#### 4.8.4 Refresh rate matching (display sync)
+
+Il drift dovuto a mismatch refresh rate (es. contenuto 24p su display 60Hz
+= judder) è risolto tramite:
+
+- **Linux/macOS:** libmpv `display-fps-override=<rate>` esposto come setting;
+  reale display refresh letto via X11/Wayland/CGDisplayCopyDisplayMode.
+- **Windows:** `--display-fps-override` + lettura via `EnumDisplaySettings`.
+- **Auto-switch su HDR/4K@60:** se il contenuto è 23.976/24/25/30 fps,
+  libmpv usa `video-sync=display-resample` (rallenta/accelera audio in
+  modo impercettibile per matchare il display). Toggle utente:
+  "Preferenze → Player → Refresh rate matching".
+
+#### 4.8.5 Misura, monitoraggio e diagnostica
+
+`components/player/StreamDiagnostics.tsx` viene esteso per mostrare in
+tempo reale (debug build sempre, prod build con `?diag=1`):
+
+- Frame dropped (vo / decoder)
+- AV-sync delta corrente (ms, +/- = video in anticipo/ritardo)
+- AV-sync drift media ultimi 60s
+- Buffer health (cache-buffering-state / demuxer-cache-duration)
+- Bitrate corrente / target / max disponibile
+- Codec, profile, level, color space, HDR transfer
+- HW decoder attivo (vaapi-copy, nvdec, d3d11va, videotoolbox)
+- Resolution + fps reali del frame decodificato
+- Render time medio dello shader WebGL2 (`gl.getQueryParameter` con
+  `EXT_disjoint_timer_query_webgl2`)
+
+Su build CI, un job notturno esegue `tests/playback/4k-soak.sh` che
+riproduce 10 minuti di stream 4K HDR HEVC + 4K AV1 su VM con HW decode
+attivo e verifica:
+- Drop frame ≤ 0.5% del totale
+- AV drift |Δ| ≤ 40 ms a regime
+- CPU < 60% medio
+- RAM ≤ baseline +200 MB
+
 ---
 
 ## 5. Packaging & distribuzione
@@ -702,21 +832,26 @@ singolo binario fat. Pipeline CI `macos-release.yml`:
 - ☐ Sostituisce in `App.tsx` la dipendenza dai webRequest interceptor di
   Electron (Wails non li espone nativamente)
 
-### Fase 6 — Player video integrato + PiP (≈9 gg) ⚠️ rischio alto, gating
+### Fase 6 — Player video integrato + PiP + 4K/AV-sync (≈11 gg) ⚠️ rischio alto, gating
 
-Questa fase è il **gate critico** della migrazione. Si parte con tre spike
-*tecnici di fattibilità* su tutti e 3 gli OS: se uno fallisce, si rivede
-la roadmap prima di continuare con il porting delle altre feature.
+Questa fase è il **gate critico** della migrazione. Si parte con cinque
+spike *tecnici di fattibilità* su tutti e 3 gli OS: se uno fallisce, si
+rivede la roadmap prima di continuare con il porting delle altre feature.
 
-#### 6.0 Spike obbligatori (preflight, 3 gg) — Linux + Windows + macOS
-- ☐ **SPIKE-1: libmpv render-API → texture GL → canvas WebGL2**
+#### 6.0 Spike obbligatori (preflight, 5 gg) — Linux + Windows + macOS
+- ☐ **SPIKE-1: libmpv render-API → texture GL → canvas WebGL2 a 4K@60**
   - PoC Go: aprire `mpv_render_context` MPV_RENDER_API_TYPE_OPENGL,
-    renderizzare HEVC 1080p su FBO, `glReadPixels`, dump 100 frame su disco.
-  - PoC TS: caricare frame raw RGBA in `<canvas>` via WebGL2 a 60 fps.
-  - **KPI:** ≤ 8 ms/frame full pipeline su Intel UHD 620 / M1 / Ryzen 5500.
+    renderizzare HEVC 10-bit 3840×2160@60 su FBO, output formato NV12 /
+    P010, dump 1000 frame.
+  - PoC TS: caricare planes NV12/P010 in due texture WebGL2 + shader
+    BT.709/BT.2020 → sRGB matrix; render a 60 fps.
+  - **KPI:**
+    - ≤ 8 ms/frame full pipeline a **1080p@60** (Intel UHD 620 / M1 / Ryzen 5500)
+    - ≤ 14 ms/frame full pipeline a **4K@60** (Intel UHD 770 / M1 Pro / NVIDIA GTX 1660+)
+    - dropped frame ≤ 0.5% su 10 minuti
   - **Verifica su:** Linux (libmpv di sistema), Windows (mpv-2.dll bundled),
     macOS (libmpv.2.dylib bundled).
-  - **Esito atteso:** ✅ go / ✋ rivedere transport.
+  - **Esito atteso:** ✅ go / ✋ rivedere transport (passare a SPIKE-5 mandatory).
 - ☐ **SPIKE-2: Document Picture-in-Picture su tutti e 3 gli OS**
   - PoC: aprire `documentPictureInPicture.requestWindow()` da Wails dev
     server, spostare un `<canvas>` animato nella PiP window, verificare
@@ -727,15 +862,39 @@ la roadmap prima di continuare con il porting delle altre feature.
   - **Esito atteso:** ✅ go / ✋ obbligo di fallback MediaStreamTrackGenerator.
 - ☐ **SPIKE-3: Shared memory zero-copy Go ↔ webview, cross-OS**
   - PoC Linux/macOS: `shm_open` + `mmap` lato Go, esporre handle a JS via
-    custom Wails binding `(*App) AcquireFrameBuffer() []byte`.
+    custom Wails v3 Plugin che restituisce `[]byte` zero-copy.
   - PoC Windows: `CreateFileMapping` + `MapViewOfFile` (no POSIX shm).
-  - **KPI:** ≥ 1 GB/s sostenuto, ≤ 0.5 ms latenza per frame 1080p, su
-    tutti e 3 gli OS.
+  - **KPI:** ≥ 1 GB/s sostenuto a 4K@60 (~620 MB/s reali per NV12 + UV),
+    ≤ 0.5 ms latenza per frame 4K, su tutti e 3 gli OS.
   - **Esito atteso:** ✅ go / ✋ scendere a transport T3 (WebCodecs).
+- ☐ **SPIKE-4: A/V sync su HLS live 4K HEVC (1h soak)**
+  - PoC: riprodurre 1h di stream HLS live 4K HEVC 10-bit con audio AC3 5.1
+    e misurare drift A/V ogni 5 s tramite property `avsync` di libmpv.
+  - PoC: ripetere con DASH live e con MPEG-TS UDP.
+  - **KPI:**
+    - drift A/V medio |Δ| ≤ 20 ms
+    - drift A/V peak |Δ| ≤ 40 ms (no sync re-snap visibile)
+    - nessun underrun audio (audio glitch counter = 0)
+  - **Verifica su:** tutti e 3 gli OS, con audio routing PipeWire/PulseAudio/
+    WASAPI/CoreAudio.
+  - **Esito atteso:** ✅ go / ✋ tunare `video-sync` / `audio-buffer` / clock master.
+- ☐ **SPIKE-5: DRM-PRIME zero-copy su Linux (fast path 4K, opzionale)**
+  - PoC: configurare libmpv con `hwdec=vaapi --vo=gpu --gpu-context=wayland`
+    (o `x11vk` Vulkan) e ottenere DRM-PRIME FD dei frame VAAPI.
+  - PoC: importare FD nel webview WebKitGTK via `EGLImage` +
+    `glEGLImageTargetTexture2DOES` (extension `OES_EGL_image_external`).
+  - **KPI:** zero `memcpy` lato CPU, render 4K@60 con CPU < 10% su Intel
+    UHD 770, RAM constant (no allocazioni per frame).
+  - **Verifica su:** Linux X11 + Wayland; Windows/macOS non applicabile
+    (DRM-PRIME è Linux-only; equivalenti: NV12 D3D11 shared handle Win,
+    IOSurface macOS — fuori scope MVP).
+  - **Esito atteso:** ✅ feature-flag opt-in / ✋ disabilitato, restiamo
+    su shm RGBA/NV12 standard.
 
-> **Gate:** se SPIKE-1 o SPIKE-2 falliscono su uno qualsiasi dei 3 OS,
-> la migrazione **non procede a v2.0.0** per quella piattaforma.
-> Re-pianificazione obbligatoria prima di proseguire.
+> **Gate (rev. 5):** se SPIKE-1, SPIKE-2 **o SPIKE-4** falliscono su uno
+> qualsiasi dei 3 OS, la migrazione **non procede a v2.0.0** per quella
+> piattaforma. SPIKE-3 fallito = degrado a transport T3 (WebCodecs, più
+> lento ma funzionante). SPIKE-5 fallito = nessun blocco, era opzionale.
 
 #### 6.1 Implementazione backend D (libmpv + canvas) (4 gg)
 - ☐ `PlayerService` v3 in `internal/services/player/service.go`
@@ -855,15 +1014,23 @@ la roadmap prima di continuare con il porting delle altre feature.
 - ☐ Verifica HEVC/AV1 (VideoToolbox) + Document PiP
 - ☐ Auto-update channel: pubblicare `latest-macos.yml` su GitHub Pages
 
-### Fase 10 — Testing & QA cross-platform (≈5 gg)
+### Fase 10 — Testing & QA cross-platform (≈6 gg)
 - ☐ Test funzionali su matrice completa:
   - **Linux:** 6 distro × 3 codec × 3 protocolli
   - **Windows:** Win10 21H2, Win11 23H2 × 3 codec × 3 protocolli
   - **macOS:** macOS 13 Ventura, macOS 14 Sonoma, macOS 15 (se disponibile) × 3 codec
   - 4 dispositivi cast (Chromecast, Android TV, Samsung Tizen, LG webOS)
   - PiP testato su tutte e 3 le piattaforme con primary + fallback path
+- ☐ **Soak test playback 4K (≥ 1h ciascuno) — vincolo §4.8:**
+  - HEVC 10-bit 4K@60 HDR10 (HLS VOD) × 3 OS
+  - AV1 4K@60 (DASH VOD) × 3 OS
+  - HLS live 4K HEVC + audio AC3 5.1 × 3 OS (focus AV-sync)
+  - MPEG-TS UDP 4K HEVC (multicast, scenario IPTV pro) × Linux
+  - Metriche raccolte automaticamente: dropped frame %, AV-sync drift
+    (media/peak), CPU%, RAM, audio underrun count
+  - Job CI notturno `tests/playback/4k-soak.sh` su VM Linux con HW decode
 - ☐ Stress test: 1000 canali M3U, 50 scan device, scrolling continuo,
-  20 cambi canale rapidi (zapping)
+  20 cambi canale rapidi (zapping), 100 transizioni 1080p ↔ 4K
 - ☐ Confronto KPI con baseline §1.3 per ogni OS — target: −60% RAM,
   −70% installato (Linux), −50% installato (Win/macOS con mpv bundled)
 - ☐ Regression: scorciatoie tastiera, OSD, timeline tooltip, sleep timer,
@@ -871,6 +1038,8 @@ la roadmap prima di continuare con il porting delle altre feature.
 - ☐ Test sicurezza: `gosec`, `staticcheck`, `govulncheck`
 - ☐ Verifica certificate chains valide (Authenticode + Apple notarization)
 - ☐ Test installazione ed esecuzione su utenti reali (≥ 5 per OS)
+- ☐ Test su HW di fascia bassa (CPU ≥ 6 anni): Intel i5-6500 + UHD 530,
+  Mac Mini 2018 — verifica graceful degradation a 1080p con UI banner
 
 ### Fase 11 — Documentazione & release (≈2 gg)
 - ☐ Aggiornare `AGENTS.md` + `.github/copilot-instructions.md` con nuovo stack
@@ -885,10 +1054,11 @@ la roadmap prima di continuare con il porting delle altre feature.
 - ☐ Tag `v2.0.0-rc.1` → CI release (Linux + Windows + macOS in parallelo)
   → beta opt-in 2 settimane → smoke test → `v2.0.0`
 
-**Totale stimato: ~47 gg-uomo** (≈ 9–10 settimane full-time, 4–5 mesi
-part-time). Distribuzione: Fase 0–7 ~31 gg (Linux-first dev), Fase 8 ~3 gg
-(packaging Linux), Fase 9 ~3 gg (Windows), Fase 9-bis ~4 gg (macOS),
-Fase 10 ~5 gg (QA tri-platform), Fase 11 ~2 gg.
+**Totale stimato: ~50 gg-uomo** (≈ 10 settimane full-time, 4–5 mesi
+part-time). Distribuzione: Fase 0–7 ~33 gg (Linux-first dev, include
+i 5 spike preflight + tuning AV-sync), Fase 8 ~3 gg (packaging Linux),
+Fase 9 ~3 gg (Windows), Fase 9-bis ~4 gg (macOS), Fase 10 ~6 gg (QA
+tri-platform inclusi soak test 4K notturni), Fase 11 ~2 gg.
 
 > **Critical path:** Fase 6 (player + PiP). Gli spike 6.0 vengono eseguiti
 > **in parallelo sui 3 OS**: se anche uno solo fallisce su una piattaforma,
@@ -921,6 +1091,11 @@ Fase 10 ~5 gg (QA tri-platform), Fase 11 ~2 gg.
 | R15 | **WebView2 evergreen update rompe Document PiP** | Bassa | Alto | Feature detection runtime + fallback automatico a MediaStreamTrackGenerator |
 | R16 | **macOS notarization fallisce per dipendenze non firmate dentro libmpv.dylib** | Media | Alto | Re-sign manuale di `libmpv.2.dylib` + sue dipendenze (`libavcodec`, `libavformat`…) prima di firmare il bundle app |
 | R17 | **Apple Silicon arm64 + Intel x86_64 in singolo universal binary**: libmpv build separati | Media | Medio | Usare `lipo -create` per mergiare 2 dylib in unica universal; testato su entrambi i runner CI |
+| R18 | **Bandwidth shm a 4K@60 satura il bus PCIe** (~620 MB/s NV12) | Bassa | Alto | SPIKE-1 misura il throughput reale; piano B: SPIKE-5 DRM-PRIME zero-copy su Linux; piano C: framedrop=vo + UI warning su HW troppo debole |
+| R19 | **AV-sync drift cumulativo su HLS live > 1h** (clock drift sorgente) | Media | Alto | SPIKE-4 dedicato; `video-sync=audio` + `audio-stream-silence`; per stream con sorgente sporca, esporre toggle "Aggressive resync" che forza reset sync ogni 30s |
+| R20 | **Audio underrun durante zapping rapido** (cambio canale Live) | Media | Medio | `audio-buffer=0.5` per profilo Live; `cache-pause=yes` previene crash audio; UI mostra spinner durante riempimento cache |
+| R21 | **WebGL2 shader YUV→RGB non bit-exact a HEVC 10-bit** (precisione FP16) | Bassa | Medio | Shader con `highp` precision + LUT BT.2020/BT.709; test pixel-diff vs reference mpv su 100 frame campione |
+| R22 | **HW decode VAAPI/NVDEC fallisce silentemente** (driver vecchi) → fallback SW imploso | Media | Alto | Probe runtime via `mpv --hwdec-list` + check supporto codec specifico; UI warning "HW decode non disponibile, riduco a 1080p" |
 
 ---
 
@@ -1022,6 +1197,8 @@ Fase 10 ~5 gg (QA tri-platform), Fase 11 ~2 gg.
 | Keyboard shortcuts | ✅ Invariato | Tutto frontend |
 | OSD/Timeline | ✅ Invariato | DOM HTML sopra canvas mpv |
 | HEVC/AV1/HDR | ✅ Migliorato | libmpv HW accel universale su 3 OS (VAAPI/NVDEC/D3D11VA/VideoToolbox) |
+| **Playback 4K fluido** | ✅ **Pieno (vincolo §4.8)** | NV12/P010 zero-copy via shm + shader WebGL2; HW decode obbligatorio; framedrop=vo + UI warning su HW debole |
+| **Sincronia A/V** | ✅ **Pieno (vincolo §4.8)** | libmpv `video-sync=audio`, audio-buffer tuned, refresh-rate matching; drift |Δ| ≤ 40 ms peak su 1h |
 | Codec audio (AC3/EAC3/TrueHD) | ✅ Migliorato | libmpv → ALSA/PipeWire/WASAPI/CoreAudio nativi |
 | Sottotitoli ASS/SRT/PGS | ✅ Migliorato | Rendering libmpv (animazioni ASS perfette, impossibili con MSE) |
 | Mixed HTTP IPTV | ✅ OK | Proxy Go header rewrite, no `webSecurity:false` |
@@ -1064,11 +1241,21 @@ Tutti devono essere ✅ prima del tag finale **su tutti e 3 gli OS**:
 - ☐ **PiP funziona (vincolo)** con scorciatoia `P` e pulsante UI, sia per
   H.264 che HEVC, su ogni OS supportato
 - ☐ **PiP fallback** automatico verificato disattivando Document PiP
-- ☐ HEVC 10-bit HW-decoded senza tearing
+- ☐ **Qualità 4K (vincolo §4.8):**
+  - HEVC 10-bit 4K@60 HW-decoded: dropped frame ≤ 0.5% su 10 min
+  - AV1 4K@60 HW-decoded (dove supportato dal SoC): dropped frame ≤ 1%
+  - Nessun tearing visibile, nessun judder su contenuti 24p/30p
+- ☐ **AV-sync (vincolo §4.8):**
+  - Drift medio |Δ| ≤ 20 ms su HLS live HEVC 4K, sessione 1h
+  - Drift peak |Δ| ≤ 40 ms, nessun re-snap udibile/visibile
+  - Zero audio underrun su switch traccia audio durante playback
+- ☐ HEVC 10-bit HW-decoded a 1080p senza tearing
 - ☐ AV1 1080p HW-decoded senza tearing
 - ☐ HDR10 tone-mapping a sRGB verificato visivamente su pannello SDR
+- ☐ Refresh rate matching: contenuto 23.976p su display 60Hz non mostra judder
 - ☐ Sottotitoli ASS animati (es. anime karaoke) renderizzati fluidi
 - ☐ Audio AC3 5.1 pass-through verificato
+- ☐ Soak test 4K notturno verde su tutti e 3 gli OS (vedi §4.8.5)
 - ☐ Tutte le scorciatoie tastiera funzionano identicamente
 - ☐ Cast a Chromecast 3rd gen completa correttamente play/pause/seek/volume
 - ☐ Discovery SSDP trova ≥ 80% dei device trovati da Electron baseline
