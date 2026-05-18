@@ -1,0 +1,115 @@
+# Taskfile per StreamAI-IPTV Wails v3 — vedi docs/plan-go-wails-migration.md §2.2.
+#
+# Eseguire i task con: `task <name>` (richiede github.com/go-task/task v3).
+# Wails3 invoca questo Taskfile automaticamente da `wails3 build`/`wails3 dev`.
+
+version: "3"
+
+# Wails v3 alpha.93 su openSUSE TW richiede il build-tag `gtk3` per usare
+# webkit2gtk-4.1 (webkitgtk-6.0 non ancora pacchettizzato). Su distro con
+# webkitgtk-6.0 disponibile (Ubuntu 24.04+, Fedora 40+, Arch) rimuovere
+# il tag: `task build TAGS=""`.
+vars:
+  TAGS: '{{.TAGS | default "gtk3"}}'
+  BIN_NAME: streamai
+  BIN_DIR: build/bin
+  VERSION:
+    sh: cat .version 2>/dev/null || echo dev
+  COMMIT_SHA:
+    sh: git rev-parse --short=7 HEAD 2>/dev/null || echo ""
+  LDFLAGS: '-s -w -X main.version={{.VERSION}} -X main.commitSHA={{.COMMIT_SHA}}'
+
+tasks:
+  default:
+    desc: Mostra l'elenco dei task disponibili.
+    cmds:
+      - task --list-all
+
+  # ---- Frontend ----
+  frontend:install:
+    desc: Installa dipendenze npm del frontend.
+    cmds:
+      - npm install
+
+  frontend:build:
+    desc: Build frontend (Vite) -> dist/ -> frontend/.
+    deps: [frontend:install]
+    cmds:
+      - npm run build
+      - rm -rf frontend && mkdir -p frontend
+      - cp -r dist/* frontend/
+
+  # ---- Backend Go ----
+  generate:bindings:
+    desc: Genera binding TypeScript dai Service Go (frontend/bindings/*).
+    cmds:
+      - wails3 generate bindings -ts -d frontend/bindings
+
+  build:
+    desc: Build completo (frontend + backend).
+    deps: [frontend:build]
+    cmds:
+      - mkdir -p {{.BIN_DIR}}
+      - go build -tags "{{.TAGS}}" -trimpath -ldflags="{{.LDFLAGS}}" -o {{.BIN_DIR}}/{{.BIN_NAME}} ./cmd/streamai
+      - echo "Built {{.BIN_DIR}}/{{.BIN_NAME}} v{{.VERSION}} ({{.COMMIT_SHA}})"
+
+  build:debug:
+    desc: Build di debug con symbol info.
+    cmds:
+      - mkdir -p {{.BIN_DIR}}
+      - go build -tags "{{.TAGS}}" -gcflags="all=-N -l" -o {{.BIN_DIR}}/{{.BIN_NAME}}-debug ./cmd/streamai
+
+  dev:
+    desc: Avvia Wails v3 in modalita' sviluppo (hot-reload Vite + Go).
+    cmds:
+      - wails3 dev -tags "{{.TAGS}}"
+
+  # ---- Quality gates ----
+  lint:
+    desc: golangci-lint + check-wails-v3 (regression guard v2).
+    cmds:
+      - golangci-lint run --build-tags "{{.TAGS}}" ./...
+      - node scripts/check-wails-v3.mjs
+
+  test:
+    desc: Test Go con race detector.
+    cmds:
+      - go test -tags "{{.TAGS}}" -race -count=1 ./...
+
+  vet:
+    desc: go vet.
+    cmds:
+      - go vet -tags "{{.TAGS}}" ./...
+
+  tidy:
+    desc: go mod tidy.
+    cmds:
+      - go mod tidy
+
+  # ---- Packaging (Linux, fase 8) ----
+  package:linux:
+    desc: |
+      Build pacchetto Linux per la distro host. Vedi docs/plan-go-wails-migration.md §5.1.
+      Usa nfpm dopo aver buildato il binario (Fase 8 del piano migrazione).
+    deps: [build]
+    cmds:
+      - echo "TODO Fase 8 — placeholder per nfpm pkg --packager deb|rpm|archlinux"
+
+  package:windows:
+    desc: |
+      Build installer Windows (NSIS Authenticode). Vedi piano §5.2 / Fase 9.
+    cmds:
+      - echo "TODO Fase 9 — placeholder windows-release"
+
+  package:darwin:
+    desc: |
+      Build DMG universal macOS notarizzato. Vedi piano §5.3 / Fase 9-bis.
+    cmds:
+      - echo "TODO Fase 9-bis — placeholder macos-release"
+
+  clean:
+    desc: Pulisce artefatti di build.
+    cmds:
+      - rm -rf build/bin dist frontend/bindings
+      - go clean -cache -testcache
+

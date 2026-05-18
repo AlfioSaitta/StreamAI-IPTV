@@ -61,3 +61,14 @@ build/icons/
 
 # electron-builder per-distro output (when directories.output is set locally)
 /release/
+# ---- Go / Wails v3 (migrazione, vedi docs/plan-go-wails-migration.md) ----
+# Binari prodotti da `task build` / `wails3 build`
+/build/bin/
+# Output Vite copiato in frontend/ (preserva solo index.html placeholder)
+/frontend/*
+!/frontend/index.html
+# Binding generati da `wails3 generate bindings`
+/frontend/bindings/
+# Debug build
+*.test
+*-debug

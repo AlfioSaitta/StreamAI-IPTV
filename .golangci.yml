@@ -1,0 +1,39 @@
+# golangci-lint v2 config per StreamAI-IPTV.
+# Vedi docs/plan-go-wails-migration.md §0 e §2.0 (lint guard Wails v3).
+
+version: "2"
+
+run:
+  build-tags:
+    - gtk3
+  timeout: 5m
+
+linters:
+  default: standard
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gosec
+    - forbidigo
+
+  settings:
+    forbidigo:
+      # Pattern proibiti: Wails v2 API non deve mai apparire nel codice Go.
+      # Lint guard parallela a scripts/check-wails-v3.mjs (che copre anche TS).
+      forbid:
+        - pattern: "github\\.com/wailsapp/wails/v2"
+          msg: "Wails v2 e' proibito. Usa github.com/wailsapp/wails/v3 (plan §2.0)."
+        - pattern: "runtime\\.EventsEmit"
+          msg: "API v2 vietata. In v3 usa app.EmitEvent(&application.CustomEvent{...})."
+        - pattern: "runtime\\.EventsOn"
+          msg: "API v2 vietata. In v3 usa app.OnEvent(name, fn)."
+        - pattern: "wails\\.Run\\("
+          msg: "API v2 vietata. In v3 usa application.New(application.Options{...}).Run()."
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
