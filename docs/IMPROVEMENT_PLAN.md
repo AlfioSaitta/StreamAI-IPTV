@@ -4,7 +4,9 @@
 > `IMPROVEMENT_PLAN.md` (P0-P8) e `IMPROVEMENT_PLAN_V2.md` (URG-1, UI-1, B-K).
 > I file separati sono stati rimossi: questo è l'unico piano valido.
 >
-> **Ultimo aggiornamento:** 2026-05-15
+> **Ultimo aggiornamento:** 2026-05-18
+> **Versione corrente (`/.version`):** **1.0.0**
+> (single source of truth, propagata via `npm run version:sync`).
 > **Baseline reale (da `package.json`):** React **19.2.6**, Vite 5,
 > Electron 37, Capacitor 7, Video.js 8.23, hls.js 1.5, mpegts.js 1.7,
 > `@google/genai` 1.34, TypeScript strict, Tailwind CSS, Vitest 3.2.
@@ -13,18 +15,59 @@
 > `components/VideoPlayerNew.tsx`, `services/xtream.ts`,
 > `services/deviceDiscovery.ts`, `services/advertisingService.js`,
 > `services/geminiService.ts`, `services/nativeVideoPlayer.ts`,
-> `services/streamInfo/`, `vite.config.ts`.
+> `services/streamInfo/`, `vite.config.ts`,
+> `.github/workflows/linux-release.yml`, `scripts/build-linux.sh`,
+> `scripts/sign-linux-packages.sh`, `scripts/publish-repo.sh`,
+> `scripts/sync-version.mjs`, `android/plugins/capacitor-video-player/`.
+>
+> ### 🆕 Cambiamenti rilevanti dall'ultimo aggiornamento (2026-05-15 → 2026-05-18)
+>
+> 1. **🐞 TEST-1 (P0, NUOVO):** la suite Vitest è **rotta**. 6 file di
+>    test che usano `@testing-library/react` non si caricano per
+>    `Cannot find module '@testing-library/dom'` (peer dep mancante in
+>    `package.json`). Stato reale: **13 file passano, 6 falliscono al
+>    setup** → 167 test eseguiti su ~207 attesi. `npm run check` di fatto
+>    non protegge più tutte le tranche `react/jsx`. Vedi §2-bis.
+> 2. **📈 Regressione B.1 — `VideoPlayerNew.tsx` 973 → 1.599 righe.** Il
+>    refactor del P1 si è gradualmente eroso (feature: error report copy,
+>    OSD aggiuntivi, native bridge, retry). Ri-applicare lo split su
+>    sotto-hook è urgente per non perdere il vantaggio di B.1.
+> 3. **📈 Crescita hotspot:** `App.tsx` 923 → **1.151**,
+>    `ChannelList.tsx` 834 → **966**, `ProfileSettings.tsx` 651 →
+>    **938**, `main.js` non era tracciato → **684**.
+>    `services/i18n.ts` invece è sceso a **262** righe (la baseline
+>    `1.559` era pre-lazy: ora il file è solo il dispatcher).
+> 4. **🚀 Pipeline Linux release completata** (commit `449b439` →
+>    `bc8ce99`): build per-distro (`opensuse|fedora|rhel|debian|ubuntu|arch`)
+>    via `scripts/build-linux.sh`, firma GPG (debsigs + rpm --addsign +
+>    gpg detach-sign), verifica strict, SLSA build provenance,
+>    pubblicazione APT/RPM/Arch su GitHub Pages via Pages API
+>    (`actions/configure-pages` + `upload-pages-artifact` + `deploy-pages`)
+>    con cache `pages-history-v1-*` + fallback `gh release download`.
+>    Documentato in §4-ter (nuova sezione). G.4 CI passa da ⏳ → 🚧
+>    parzialmente (manca solo il job di typecheck/test/build su PR).
+> 5. **🔢 Versioning centralizzato (commit `88ec542`):** `/.version` è la
+>    fonte di verità; `scripts/sync-version.mjs` propaga in
+>    `package.json` + `android/app/build.gradle` (versionName +
+>    versionCode). Artefatti CI: `streamai-iptv_${ver}_${sha7}_${distro}_${arch}.${ext}`.
+> 6. **📦 Plugin Android vendor (commit `736be6e`):** la cartella
+>    `android/plugins/capacitor-video-player/dist/` (368 kB pre-build)
+>    è ora tracciata in git per sbloccare il build Vite in CI.
+>    Chiusura MED-1 §4-bis Step 8 confermata. Resta gate fisico Gradle.
 
 ---
 
 ## 📋 Indice
 
 - [0. Convenzioni di gestione del piano](#0-convenzioni-di-gestione-del-piano)
-- [📊 1. Stato di completamento globale](#-1-stato-di-completamento-globale-2026-05-15)
+- [📊 1. Stato di completamento globale](#-1-stato-di-completamento-globale-2026-05-18)
 - [🐞 2. BUG-1: sezione "Films" sempre vuota](#-2-bug-1-sezione-films-sempre-vuota)
+- [🧪 2-bis. TEST-1: suite Vitest rotta (peer dep mancante)](#-2-bis-test-1-suite-vitest-rotta-peer-dep-mancante)
 - [🚨 3. URG-1: Seek VOD bloccante](#-3-urg-1-seek-vod-bloccante)
 - [🎨 4. UI-1: Design System v1](#-4-ui-1-design-system-v1)
 - [🎬 4-bis. MED-1: Migrazione ExoPlayer → AndroidX Media3](#-4-bis-med-1-migrazione-exoplayer--androidx-media3)
+- [📦 4-ter. PKG-1: Pipeline Linux release multi-distro firmata](#-4-ter-pkg-1-pipeline-linux-release-multi-distro-firmata)
+- [♻️ 4-quater. REF-1: Re-split hotspot post-feature creep](#%EF%B8%8F-4-quater-ref-1-re-split-hotspot-post-feature-creep)
 - [5. Roadmap prioritaria P0-P8](#5-roadmap-prioritaria-p0-p8)
 - [6. Debt tecnico ad alto impatto (B)](#6-debt-tecnico-ad-alto-impatto-b)
 - [7. UX gap residui (C)](#7-ux-gap-residui-c)
@@ -68,26 +111,30 @@ Per ogni tranche idealmente chiudere con:
 
 ---
 
-## 📊 1. Stato di completamento globale (2026-05-15)
+## 📊 1. Stato di completamento globale (2026-05-18)
 
 | Area | Stato | Note |
 | ---- | ----- | ---- |
 | 🐞 **BUG-1 Films sempre vuota** | ✅ Completato | Vedi §2 — cache hardening + retry mirato + UI feedback + 15 test |
+| 🧪 **TEST-1 Suite Vitest rotta** | ❌ **REGRESSIONE P0** | Vedi §2-bis — 6 file FAIL su `Cannot find module '@testing-library/dom'`; 167/207 test eseguiti |
 | 🚨 URG-1 Seek VOD bloccante | ✅ 3/4 livelli | Livello 4 (Range proxy Electron) opzionale |
 | 🎨 UI-1 Design System v1 | ✅ 100% | DS v1 + migrazione + accessibilità, 0 occorrenze red/purple |
-| 🎬 **MED-1 Migrazione ExoPlayer → AndroidX Media3 1.10.1** | 🚧 Codice pronto | Vedi §4-bis — vendor plugin + porting Java/XML/Gradle completato, ProGuard + CI guard verdi. Gate fisico Smoke matrix aperto (richiede device API 26+ con JDK 17 completo). |
+| 🎬 **MED-1 ExoPlayer → AndroidX Media3 1.10.1** | ✅ codice + CI guard + plugin vendor | Vedi §4-bis — `npm run check:media3` verde, `dist/` plugin committato. **Gate fisico Smoke matrix** aperto (richiede device API 26+ con JDK 17 completo). |
+| 📦 **PKG-1 Pipeline Linux release** | ✅ Completato | Vedi §4-ter — 6 pacchetti per-distro firmati, SLSA provenance, APT/RPM/Arch su GitHub Pages via Pages API |
+| ♻️ **REF-1 Re-split hotspot post-feature creep** | ⏳ NUOVO | Vedi §4-quater — `VideoPlayerNew` 1.599 (era 973), `App.tsx` 1.151, `ChannelList` 966, `ProfileSettings` 938 |
+| 🔢 Versioning centralizzato (`/.version`) | ✅ Completato | `scripts/sync-version.mjs` → `package.json` + `android/app/build.gradle`; CI embedda `${sha7}` negli artefatti |
 | P0 Sicurezza runtime | 🚧 | `npm audit` triage, hardening WS remote, IPC validation aperti |
 | P1 Bundle iniziale | ✅ | 580 → 146 kB gzip (lazy + auto split) |
-| P2 Player Desktop/Android | ✅ | Error handling, PiP native, fallback codec |
+| P2 Player Desktop/Android | ✅ | Error handling, PiP native, fallback codec, "Copia report" errore |
 | P3 Casting/discovery | ✅ codice | Verifica device fisici aperta |
 | P4 UX TV/Android | ✅ codice | Verifica telecomando/TV box reale aperta |
 | P5 AI + metadata | ✅ | Cache TTL, fuzzy match, prompt contestuali |
 | P6 Catalogo + immagini | ✅ | Indice, virtualizzazione, Cache API + LRU |
-| P7 Test automatici | 🚧 | 161/161 verdi, coverage parziale |
-| P8 Feature future | ⏳ | Companion remote, diagnostica, BYOC, parental |
-| B.1 Refactor `VideoPlayerNew` | ✅ | 1542 → 973 righe |
-| B.2 Decomposizione `streamInfoService` | ✅ | 2018 → 1313 righe |
-| B.3 i18n lazy | ✅ | 11 chunk per-lingua |
+| P7 Test automatici | ❌ regressione | Vedi TEST-1 — coverage in pausa finché la suite non riprende a girare |
+| P8 Feature future | 🚧 | P8.2 Diagnostica stream ✅; companion/BYOC/parental aperti |
+| B.1 Refactor `VideoPlayerNew` | ⚠️ **regredito** | 1542 → 973 → **1.599** (re-split richiesto in §4-quater) |
+| B.2 Decomposizione `streamInfoService` | ✅ stabile | 2018 → 1.318 righe (facade `services/streamInfo/`) |
+| B.3 i18n lazy | ✅ | `services/i18n.ts` 1.559 → **262**, 11 chunk per-lingua |
 | B.4 Routing dichiarativo (`useBackStack`) | ✅ | |
 | B.5 Upgrade React 19 | ✅ | `useActionState`, `useTransition` |
 | C.1 Cheatsheet shortcut | ✅ | overlay + onboarding al primo avvio profilo + toggle riattivazione |
@@ -102,24 +149,30 @@ Per ogni tranche idealmente chiudere con:
 | E.1 Bundle iniziale | ✅ | 580 → 146 kB gzip |
 | E.5 Cache API + gzip TMDB | ✅ | |
 | F.3 Health-check Xtream | ✅ | badge + alert 7gg |
-| G.1 vitest + test moduli puri | 🚧 | 161/161 verdi, coverage parziale |
+| G.1 vitest + test moduli puri | ❌ regressione | TEST-1 |
+| G.4 CI GitHub Actions | 🚧 | Job `linux-release` completo (PKG-1); manca job di typecheck/test/build su PR |
 | K Quick wins | 🚧 | 7/10 (mancano bonjour-service, content-visibility) |
 
-**Test suite:** 207/207 verdi (19 file), `npm run typecheck` clean,
-`npm run build` Vite 5 verde.
+**Test suite (rilevazione 2026-05-18):** **167 test passati su 207 attesi**;
+6 file di test (`useBackStack`, `cheatsheet`, `wizard`, `scrubbing`,
+`a11y-fontScale`, `shared`) **non si caricano** per `@testing-library/dom`
+mancante. Vedi §2-bis per il fix (1 riga in `package.json`).
+`npm run typecheck` clean, `npm run build` Vite 5 verde,
+`npm run check:media3` verde.
 
-### Hotspot di complessità (file > 700 righe)
+### Hotspot di complessità (file > 700 righe, 2026-05-18)
 
-| File | Righe | Rischio |
-| ---- | ----- | ------- |
-| `services/streamInfoService.ts` | 1.313 (post B.2) | Parsing HLS/TS/codec/bitrate |
-| `services/i18n.ts` | 1.559 baseline (ridotto via lazy locale) | Stringhe inline |
-| `components/VideoPlayerNew.tsx` | 973 (post B.1) | Mix Video.js + native + OSD |
-| `services/deviceDiscovery.ts` | 956 | Scansione subnet + SSDP + probe TCP |
-| `App.tsx` | 923 | Stato globale, routing manuale, refresh BG |
-| `components/ChannelList.tsx` | 834 | Virtualizzazione + ricerca + filtri |
-| `services/castService.ts` | 766 | Chromecast + DLNA + AirPlay |
-| `components/ProfileSettings.tsx` | 651 | Tab unica con molte sezioni |
+| File | Righe | Δ vs prev | Rischio |
+| ---- | ----: | --------- | ------- |
+| **`components/VideoPlayerNew.tsx`** | **1.599** | ⚠ +626 (era 973) | Regressione B.1 — vedi §4-quater REF-1 |
+| `services/streamInfoService.ts` | 1.318 | +5 (stabile) | Parsing HLS/TS/codec/bitrate |
+| **`App.tsx`** | **1.151** | ⚠ +228 | Stato globale, routing manuale, refresh BG, AI hint |
+| `components/ChannelList.tsx` | 966 | ⚠ +132 | Virtualizzazione + ricerca + filtri + Continue Watching per-tipo |
+| `services/deviceDiscovery.ts` | 956 | — | Scansione subnet + SSDP + probe TCP |
+| `components/ProfileSettings.tsx` | 938 | ⚠ +287 | Tab unica con molte sezioni (onboarding, refresh, font, toggle CW) |
+| `services/castService.ts` | 766 | — | Chromecast + DLNA + AirPlay |
+| `main.js` | 684 | tracking nuovo | Electron main + advertising + IPC + cast bridge |
+| `services/i18n.ts` | 262 | ✅ -1.297 (lazy) | Solo dispatcher, locali in `services/locales/` |
 
 ---
 
@@ -264,6 +317,75 @@ combinate**, tutte plausibili e da mitigare in parallelo:
 In `ProfileSettings → Sincronizzazione catalogo` premere **"Riscarica lista"**.
 Forza `loginXtream(creds, true)` che bypassa la cache e ripopola Films. Se
 persiste, è davvero un problema del provider (`auth=1` ma VOD disabilitato).
+
+---
+
+## 🧪 2-bis. TEST-1: suite Vitest rotta (peer dep mancante)
+
+> **Priorità: P0 — `npm run check` non protegge più tutto il codebase.**
+> Rilevato 2026-05-18. La suite gira ancora 167 test (file che NON
+> importano `@testing-library/react`), ma 6 file vanno in *Failed Suites*
+> con `Cannot find module '@testing-library/dom'`.
+
+### 2-bis.1 Cause radice
+
+- `package.json` (riga 53) dichiara solo
+  `"@testing-library/react": "16.1.0"`.
+- A partire da `@testing-library/react@^16`, **`@testing-library/dom` non
+  è più una dependency transitiva** ma una `peerDependency`. Va
+  installata esplicitamente, altrimenti l'import di
+  `node_modules/@testing-library/react/dist/pure.js:46` fallisce a runtime.
+- Le installazioni precedenti probabilmente avevano `dom` in cache npm o
+  ereditavano la dep da una versione minor diversa, mascherando il
+  problema. Un `rm -rf node_modules && npm ci` (CI / fresh checkout) lo
+  espone.
+
+### 2-bis.2 File impattati (6/19)
+
+```
+tests/hooks/useBackStack.test.tsx
+tests/onboarding/cheatsheet.test.tsx
+tests/onboarding/wizard.test.tsx
+tests/player/scrubbing.test.tsx
+tests/ui/a11y-fontScale.test.tsx
+tests/ui/shared.test.tsx
+```
+
+Totale test bloccati: **~40** (delta con il claim 207/207 precedente).
+
+### 2-bis.3 Fix (1 riga, ½ giornata smoke)
+
+- [ ] Aggiungere a `package.json → devDependencies`:
+  ```json
+  "@testing-library/dom": "^10.4.0",
+  "@testing-library/jest-dom": "^6.6.3"
+  ```
+  (`jest-dom` per i matcher `toBeInTheDocument` ecc. usati nei test
+  esistenti; verificare se già presente, altrimenti aggiungere).
+- [ ] `npm install --legacy-peer-deps` (mantieni il flag esistente del
+  progetto per React 19).
+- [ ] `npm run test:run` → atteso 207/207 verde (lo era prima della
+  regressione).
+- [ ] `npm run check` → atteso verde.
+- [ ] Aggiungere a `scripts/check-media3-migration.mjs` (o nuovo
+  `scripts/check-deps.mjs`) un assert che `@testing-library/react`
+  sia accompagnato da `@testing-library/dom` con major coerente, così
+  un futuro bump non rompe più la suite in silenzio.
+
+### 2-bis.4 Criteri di accettazione
+
+- [ ] `npm ci && npm run test:run` da clean checkout: 207/207 verdi
+  (o numero superiore se nel frattempo sono stati aggiunti test).
+- [ ] Nessun output `Cannot find module '@testing-library/dom'` su CI.
+- [ ] Aggiornare §1 (stato globale) e §13 quando chiuso.
+
+### 2-bis.5 Prevenzione regressioni
+
+- [ ] **G.4 — Job CI dedicato** (vedi §11.4): su ogni PR eseguire
+  `npm ci && npm run check` su Ubuntu 24.04 + Node 20 LTS. Senza
+  questo, ogni dipendenza con peer dep instabile può riemergere.
+- [ ] Eseguire `npm explain @testing-library/dom` periodicamente per
+  identificare deps con peer mancanti.
 
 ---
 
@@ -1341,6 +1463,192 @@ nello smoke Step 7. Indica il **comportamento atteso post-migrazione**.
 
 ---
 
+## 📦 4-ter. PKG-1: Pipeline Linux release multi-distro firmata
+
+> **Priorità: P1 — distribuzione production.** Aggiunto 2026-05-18 come
+> retrospettiva consolidata. Stato: ✅ **completato e in produzione**.
+> Storia completa delle iterazioni in
+> [`docs/plan-linuxDistroPackaging.prompt.md`](plan-linuxDistroPackaging.prompt.md).
+
+### 4-ter.1 Obiettivi raggiunti
+
+- ✅ **6 pacchetti nativi per-distro** in un'unica run CI:
+  `opensuse | fedora | rhel | debian | ubuntu | arch`. Dipendenze rese
+  con il package-name nativo di ogni distro (`build/depends/<distro>.json`),
+  niente SONAME generici per zypper/dnf/apt.
+- ✅ **Firma headless GPG** con maintainer Ed25519 + subkey
+  (`14CAF4E8751A96FE`):
+  - `.deb` → `debsigs --sign=origin` (membro `_gpgorigin`).
+    Ubuntu 24.04 noble ha rimosso `dpkg-sig`.
+  - `.rpm` → `rpm --addsign` con macro `%__gpg_sign_cmd` SHA-256.
+  - `.pkg.tar.zst` → `gpg --detach-sign` (`.sig` binario).
+  - Aggregato `SHA256SUMS{,.asc}`.
+- ✅ **Verifica strict in CI** (`set -euo pipefail`, no `|| true`):
+  - RPM: pubkey importata in **rpmdb dedicato** via `rpm --dbpath`
+    + `--initdb` + `--import`; `sudo rpm --import` scriveva la chiave
+    nella rpmdb di root, invisibile al runner user.
+  - DEB: blob firmato ricostruito **nell'ordine reale di `ar t`**
+    (control/data compression può variare l'ordine), `gpg --verify`
+    contro `_gpgorigin`/`_gpgbuilder`.
+  - Cross-check: almeno un artefatto per ognuna delle 6 distro attese,
+    glob underscore-separated `*_${distro}_*`.
+- ✅ **SLSA build provenance** (`actions/attest-build-provenance@v2`)
+  emessa per ogni asset.
+- ✅ **GPG agent passphrase pre-cache** (`scripts/import-gpg-key.sh`):
+  `allow-preset-passphrase` in `gpg-agent.conf` + `gpg-preset-passphrase`
+  per ogni keygrip (primary + subkeys). Né `debsigs`, né `rpm --addsign`,
+  né `gpg --detach-sign` toccano `/dev/tty`.
+- ✅ **GitHub Pages via Pages API** (`actions/configure-pages@v5` +
+  `upload-pages-artifact@v3` + `deploy-pages@v4`, environment
+  `github-pages`). Sostituisce il vecchio push su `gh-pages` che
+  falliva con HTTP 500 una volta cresciuto il pack.
+- ✅ **Retention pacchetti storici via cache + Release fallback:**
+  primary `actions/cache` keyed `pages-history-v1-*`; eviction fallback
+  con `gh release download` di tutti i `.deb`/`.rpm`/`.pkg.tar.zst`/`.sig`/`.asc`
+  pubblicati nelle Release passate (storage permanente). `publish-repo.sh`
+  ricostruisce metadati `reprepro`/`createrepo_c`/`repo-add` sull'unione
+  vecchi+nuovi.
+- ✅ **NVRA dedup nuke-and-rebuild** (commit `bc8ce99`): re-build dello
+  stesso semver con bytes diversi (timestamp embed) non genera più
+  conflitti `reprepro: md5 expected ... got ...`; lo stato `db/packages.db`
+  viene ricreato da zero a ogni run.
+- ✅ **Caching 4-layer** (cold ~14 min → warm ~5 min):
+  `~/.cache/electron`, `~/.cache/electron-builder`, APT toolchain
+  (`awalsh128/cache-apt-pkgs-action`), Docker images
+  `electronuserland/builder` + `archlinux:latest` (`ScribeMD/docker-cache`).
+- ✅ **Versioning centralizzato (`/.version` → `sync-version.mjs`)**:
+  CI esporta `COMMIT_SHA=${GITHUB_SHA::7}` e `build-linux.sh` lo passa
+  a `make-distro-config.mjs --commit`, embeddato nel nome:
+  `streamai-iptv_${ver}_${sha7}_${distro}_${arch}.${ext}` (CI),
+  `streamai-iptv_${ver}_${distro}_${arch}.${ext}` (locale).
+
+### 4-ter.2 Comandi utili
+
+```bash
+npm run dist:linux                    # auto-detect host via /etc/os-release
+npm run dist:linux:{opensuse,fedora,rhel,debian,ubuntu,arch}
+npm run gpg:setup                     # one-time: Ed25519 + AES-256 backup
+npm run gpg:upload                    # carica i 3 secret via gh CLI
+npm run repo:publish                  # assembla public-repo/ in locale
+npm run version:sync                  # propaga /.version
+npm run version:full                  # stampa base[_<sha7>]
+```
+
+Tag `v*` push → `.github/workflows/linux-release.yml` esegue tutto.
+
+### 4-ter.3 Gotchas operativi (vedi anche `copilot-instructions.md` §10-13)
+
+1. **Settings → Pages → Source: "GitHub Actions"** (non "Deploy from a
+   branch"). Mai reintrodurre push su `gh-pages`.
+2. **`dpkg-sig` non più disponibile** in Ubuntu 24.04 — usare `debsigs`.
+3. **`directories.output`** in `package.json` non deve essere
+   sovrascritto (vedi commit `4127c37`): Vite usa `dist/renderer` +
+   `dist/main`, electron-builder usa `dist/*.{deb,rpm}`. Senza
+   collisioni, ma se lo override va a `release/`, `sign-linux-packages.sh`
+   firmava un manifest stdin-derived vuoto (mascherava il bug).
+4. **Plugin Capacitor vendorato:** `dist/` del plugin va committato
+   (commit `736be6e`) perché Vite/Rollup resolver lo richiede al
+   `npm ci`. Eccezione mirata in `.gitignore`.
+
+### 4-ter.4 Lavoro residuo (opzionale)
+
+- [ ] **AppImage / tar.xz** in CI: oggi sono buildabili in locale
+  (`npm run dist:linux:appimage` / `:tar`) ma il workflow CI li ha
+  esclusi (commit `be8bfc5`). Riabilitare se serve un canale portable.
+- [ ] **Notarization Windows + .dmg macOS** — fuori scope corrente
+  (oggi solo Linux). Se aperto, allineare struttura `build/depends/`.
+- [ ] **Job typecheck/test/build su PR** (G.4): la pipeline `v*` testa
+  solo i tag. Aggiungere `.github/workflows/ci.yml` su `push` + `pull_request`.
+  Bloccante per chiudere TEST-1 §2-bis senza rischio di rigressioni
+  future invisibili.
+
+---
+
+## ♻️ 4-quater. REF-1: Re-split hotspot post-feature creep
+
+> **Priorità: P2 — manutenibilità.** Aggiunto 2026-05-18.
+> Dalle metriche §1: B.1 ha perso il 64% del beneficio iniziale, e nuovi
+> componenti sono cresciuti oltre soglia. Senza intervento, la prossima
+> tranche player + onboarding renderà ancora più costoso ogni refactor
+> e rallenterà la review delle PR.
+
+### 4-quater.1 Diagnosi quantitativa
+
+| File | Δ dall'ultimo split | Cause principali |
+| ---- | ------------------: | ---------------- |
+| `components/VideoPlayerNew.tsx` | **+626** (973 → 1.599) | Error report copy + `buildErrorReport()` ~100 righe; OSD feedback aggiuntivi; bridge native retry; subtitle sideload UI; diagnostica pannello |
+| `App.tsx` | +228 (923 → 1.151) | `AiUnavailableHint`, refresh BG Xtream, font scale orchestration, M3U async pipeline, onboarding cheatsheet trigger |
+| `components/ChannelList.tsx` | +132 (834 → 966) | Continue Watching per-tipo + carosello filtrato, banner health-aware, filtri avanzati Cmd+K |
+| `components/ProfileSettings.tsx` | +287 (651 → 938) | Toggle CW per-tipo, font scale select, onboarding re-trigger, health badge sezione, hide-AI-hint pref |
+
+### 4-quater.2 Refactor proposto (4 sotto-tranche)
+
+#### REF-1.a — Re-split `VideoPlayerNew.tsx` (target ≤ 1.000 righe)
+
+- [ ] Estrarre `components/player/ErrorReport.tsx` (overlay errore +
+  `buildErrorReport()` + `copyErrorReport()` con clipboard fallback).
+- [ ] Estrarre `components/player/PlayerSubtitleSideloader.tsx` (file
+  picker + parse SRT/VTT + track injection, oggi inline).
+- [ ] Hook `usePlayerErrorRing()` (ring buffer ultimi 10 errori) in
+  `hooks/` — condiviso con `StreamDiagnostics`.
+- [ ] Hook `usePlayerRetryPolicy()` (classify + exponential backoff,
+  oggi inline duplicato lato JS).
+- [ ] Test smoke: tutti gli OSD e shortcut (`P/Space`, `←/→`, `↑/↓`,
+  `M`, `F`, `C`, `L`, `S`, `T`, `G`, `Esc`) restano funzionanti dopo
+  lo split.
+
+#### REF-1.b — Decomporre `App.tsx` (target ≤ 800 righe)
+
+- [ ] Estrarre `components/AiUnavailableHint.tsx` (oggi inline ~80
+  righe, gestione dual-layer `sessionDismissed` + `hideAiUnavailableHint`).
+- [ ] Estrarre `hooks/useFontScale.ts` (mapping `'sm|md|lg|xl'` →
+  `<html>{font-size}`, oggi `useEffect` in `App.tsx`).
+- [ ] Estrarre `hooks/useXtreamRefreshOrchestrator.ts` (lock + offline
+  guard + timestamp ultimo refresh).
+- [ ] Estrarre `hooks/useM3uPlaylistLoader.ts` (worker dispatch + parse
+  + storage, vedi gotcha §8 copilot-instructions).
+
+#### REF-1.c — Splittare `ProfileSettings.tsx` in tab (target ≤ 600 righe)
+
+- [ ] Architettura `components/profileSettings/`:
+  - `TabAppearance.tsx` (tema OLED + font scale + design system preview).
+  - `TabPlayback.tsx` (CW threshold, CW per-tipo, auto-next, sleep
+    timer default, cheatsheet re-trigger).
+  - `TabCatalog.tsx` (refresh BG, health badge, sync timestamps,
+    hide-AI-hint).
+  - `TabAdvanced.tsx` (cache stats, clear cache, diagnostics export).
+- [ ] Bottom-nav o pill-tabs (DS-v1 `Chip` row).
+
+#### REF-1.d — Snellire `ChannelList.tsx` (target ≤ 750 righe)
+
+- [ ] Estrarre `components/channelList/ContinueWatchingRail.tsx`
+  (carosello dedicato + filtri per-tipo + progress overlay).
+- [ ] Estrarre `components/channelList/CatalogToolbar.tsx`
+  (search + chip filtri tipo + filtri avanzati HD/Nuovi/Genere).
+- [ ] Mantenere virtualizzazione + grid logic nel componente principale.
+
+### 4-quater.3 Criteri di accettazione
+
+- [ ] Tutti i 4 file sopra la soglia tornano sotto il target.
+- [ ] Tabella hotspot §1 aggiornata (no file > 1.000 righe).
+- [ ] **Test suite (post TEST-1)** verde 207/207 + eventuali nuovi
+  test sui sotto-componenti estratti (target +6 test).
+- [ ] Nessuna regressione su shortcut player, accessibility, focus.
+- [ ] `npm run build` bundle iniziale invariato (target < 250 kB gzip;
+  oggi 146).
+
+### 4-quater.4 Stima
+
+| Sotto-tranche | Stima | Priorità |
+| ------------- | -----:| -------- |
+| REF-1.a `VideoPlayerNew` | 1.5 g | P1 (debt produttivo) |
+| REF-1.b `App.tsx` | 1.0 g | P2 |
+| REF-1.c `ProfileSettings` | 1.0 g | P2 |
+| REF-1.d `ChannelList` | 0.7 g | P2 |
+| | **~4.2 g** | |
+
+---
+
 ## 5. Roadmap prioritaria P0-P8
 
 ### P0 — Sicurezza e stabilità immediata
@@ -1574,7 +1882,7 @@ nello smoke Step 7. Indica il **comportamento atteso post-migrazione**.
 
 ### P7 — Qualità tecnica e test
 
-#### P7.1 Test automatici 🚧
+#### P7.1 Test automatici ❌ regressione (TEST-1)
 
 - [x] `vitest` + `jsdom` installati. Script `test`, `test:run`, `check`.
 - [x] Test moduli puri: `codecParser` (13), `hlsParser` (5), `mpegtsProbe`
@@ -1582,12 +1890,15 @@ nello smoke Step 7. Indica il **comportamento atteso post-migrazione**.
   `xmltvParser` (11), `reminderService` (5), `subtitleService` (11),
   `gzipUtil` (5), `useBackStack` (6), `ui/tokens` (53), `ui/shared` (19),
   `xtream/loginXtream` (15, BUG-1 §2.3 Step 5), `workers/workers` (7, E.3),
-  `catalog/catalogIndex` (6, C.3 filtri avanzati).
-- [x] **Totale: 195/195 verdi (16 file).**
+  `catalog/catalogIndex` (6, C.3 filtri avanzati),
+  `onboarding/wizard` (4), `onboarding/cheatsheet` (5),
+  `ui/a11y-fontScale` (3). **Totale atteso: 207 test in 19 file.**
+- [ ] **❌ Suite rotta (2026-05-18):** 6 file vanno in *Failed Suites* per
+  `Cannot find module '@testing-library/dom'`. Stato attuale **167
+  passati su 207**. Fix in §2-bis (peer dep mancante, 1 riga).
 - [ ] `@testing-library/react` snapshot UI critici (`ChannelList`, `ProfileSelection`).
 - [ ] Test parser M3U, ProfileService, CacheService, i18n shape, Xtream URL helper.
 - [ ] Mock test discovery/cast service.
-- [ ] **Test BUG-1** `loginXtream` + cache poisoning (vedi §2.3 Step 5). ✅ chiuso.
 - [ ] Coverage minimo 50% su `services/`.
 
 #### P7.2 Lint e validazione CI ⏳
@@ -1980,10 +2291,12 @@ nello smoke Step 7. Indica il **comportamento atteso post-migrazione**.
 
 ## 11. Qualità del codice e DX (G)
 
-### G.1 Test automatici 🚧 (vedi P7.1)
+### G.1 Test automatici ❌ regressione TEST-1 (vedi P7.1 + §2-bis)
 
-161/161 verdi. Mancano UI snapshot, parser M3U, ProfileService, CacheService,
-i18n shape, discovery/cast mock, **test BUG-1** (loginXtream + poisoning).
+Attesi 207 test in 19 file. Stato 2026-05-18: **167 passati, 40 bloccati
+da `@testing-library/dom` mancante**. Fix in §2-bis (P0).
+Dopo il fix: mancano UI snapshot, parser M3U, ProfileService, CacheService,
+i18n shape, discovery/cast mock.
 
 ### G.2 ESLint + Prettier + Husky ⏳
 
@@ -1997,11 +2310,16 @@ i18n shape, discovery/cast mock, **test BUG-1** (loginXtream + poisoning).
 - [ ] Allineare AGENTS.md con i nuovi moduli `services/streamInfo/`.
 - [ ] Generare API doc dei service singleton con TypeDoc.
 
-### G.4 CI GitHub Actions ⏳
+### G.4 CI GitHub Actions 🚧 (1 job su 2 attivo)
 
-- [ ] `ci.yml`: typecheck + lint + test + build Vite + smoke Electron 10s.
-- [ ] `android.yml`: build APK debug su PR (artefatto).
-- [ ] Release: tag → build Linux tar.gz + Android APK firmato (secret-based).
+- [x] **`linux-release.yml`** (PKG-1, §4-ter): tag `v*` → 6 pacchetti
+  firmati + SLSA + GitHub Pages. Cold ~14 min, warm ~5 min.
+- [ ] **`ci.yml`** (NUOVO, P0 dopo TEST-1): su `push` + `pull_request`
+  eseguire `npm ci && npm run typecheck && npm run test:run &&
+  npm run check:media3 && npm run build`. Senza, una regressione come
+  TEST-1 può restare invisibile fino al prossimo tag.
+- [ ] `android.yml`: build APK debug su PR (artefatto). Bloccato finché
+  manca matrix con JDK 17 completo + emulatore (vedi MED-1 gate fisico).
 
 ### G.5 Dependency hygiene ⏳
 
@@ -2033,15 +2351,29 @@ Lista isolata per PR rapidi (≤ 1 giorno).
 
 ## 13. Roadmap consigliata (12 settimane)
 
-### Sprint 0 (urgente, ~2-3 giorni) — BUG-1 Films + URG-1 residuo
+### Sprint 0 (urgente, ~2-3 giorni) — BUG-1 Films + URG-1 + TEST-1
 
 - [x] **BUG-1 §2.3 Step 1-5** (~1.7 g): cache hardening, retry mirato,
   feedback UI, test unitari. ✅ 2026-05-14 (15/15 test).
+- [ ] **TEST-1 §2-bis (P0, ½ g):** aggiungere
+  `@testing-library/dom` + `@testing-library/jest-dom` a
+  `devDependencies`, ripristinare 207/207 test verdi, aggiungere
+  check `scripts/check-deps.mjs` per evitare future regressioni.
 - [x] URG-1 Livello 1-3 (✅ 2026-05-13).
 - [ ] URG-1 Livello 4 opzionale (Range proxy Electron).
 - [ ] Smoke su 3 provider reali (mp4 faststart, non-faststart, MKV).
 
 ### Sprint 0.5 — UI-1 DS v1 ✅ completato 2026-05-14
+
+### Sprint 0.6 — PKG-1 Linux release pipeline ✅ completato 2026-05-18
+
+Vedi §4-ter. Gate residuo: aggiungere job CI `ci.yml` su push/PR
+(typecheck + test + build) per non dipendere solo dai tag `v*`.
+
+### Sprint 0.7 — REF-1 Re-split hotspot (~4.2 g, P1+P2)
+
+Vedi §4-quater. Da pianificare nelle settimane 9-10 in parallelo con E.1/E.7,
+oppure subito dopo TEST-1 se la velocity lo consente.
 
 ### Settimane 1-2 — Foundation refactor
 
@@ -2161,11 +2493,13 @@ npm run test:run -- tests/ui
 - [ ] Nessun asset Android generato nello staging.
 - [ ] Nessuna chiave API hardcoded.
 - [ ] `npm run typecheck` OK.
-- [ ] `npm run test:run` OK (161/161 oggi).
-- [ ] `npm run check` OK.
+- [ ] `npm run test:run` OK (atteso 207/207 dopo TEST-1 §2-bis; oggi 167).
+- [ ] `npm run check` OK (include `check:media3` + build).
 - [ ] `npm run build` OK.
 - [ ] Smoke Electron OK se tocca runtime desktop.
 - [ ] Android sync/build OK se tocca mobile.
+- [ ] Se tocca packaging Linux: smoke `npm run dist:linux` host distro.
+- [ ] Se bumpa la versione: `/.version` aggiornato + `npm run version:sync`.
 - [ ] README/AGENTS/copilot-instructions aggiornati se cambia comportamento.
 
 ---
