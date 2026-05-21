@@ -105,6 +105,33 @@ tasks:
     cmds:
       - echo "TODO Fase 9-bis — placeholder macos-release"
 
+  # ---- SPIKE-1 (Fase 6.0 — libmpv → WebGL2 preflight) ----
+  spike:1:build:
+    desc: |
+      Build dell'harness Go SPIKE-1 (libmpv render → EGL surfaceless → FBO).
+      Richiede libmpv-dev + libegl1-mesa-dev + libgl1-mesa-dev (vedi
+      docs/spike1-methodology.md). Build tag 'mpv spike1' obbligatori.
+    cmds:
+      - mkdir -p {{.BIN_DIR}}
+      - go build -tags "mpv spike1 {{.TAGS}}" -trimpath -o {{.BIN_DIR}}/spike-mpv-render ./cmd/spike-mpv-render
+      - echo "Built {{.BIN_DIR}}/spike-mpv-render"
+
+  spike:1:run:
+    desc: |
+      Esegue il bench SPIKE-1 su 1080p + 4K (set SPIKE1_URL nell'env).
+      Esempio: SPIKE1_URL=https://.../bbb_4k_hevc.mkv task spike:1:run
+    deps: [spike:1:build]
+    cmds:
+      - bash scripts/spike1-bench.sh
+
+  spike:1:serve-frontend:
+    desc: |
+      Serve il PoC WebGL2 (frontend/spike/mpv-webgl2/) su :7800.
+      Da usare in parallelo all'harness Go: l'harness espone /snapshot
+      su :7799, il PoC fa fetch verso quell'endpoint.
+    cmds:
+      - npx vite --port 7800 --open frontend/spike/mpv-webgl2/
+
   clean:
     desc: Pulisce artefatti di build.
     cmds:

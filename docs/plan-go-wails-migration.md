@@ -1209,7 +1209,12 @@ singolo binario fat. Pipeline CI `macos-release.yml`:
 > video reale è la prossima dipendenza dura.
 
 #### 6.0 Spike obbligatori (preflight, 5 gg) — Linux + Windows + macOS
-- ☐ **SPIKE-1: libmpv render-API → texture GL → canvas WebGL2 a 4K@60**
+- ◐ **SPIKE-1: libmpv render-API → texture GL → canvas WebGL2 a 4K@60**
+  *(scaffolding 2026-05-21 — harness Go `cmd/spike-mpv-render/` +
+  PoC TS `frontend/spike/mpv-webgl2/` + bench
+  `scripts/spike1-bench.sh` + methodology doc
+  `docs/spike1-methodology.md`. Pending: misure reali su HW Linux,
+  porting Windows/macOS — vedi SPIKE-1-WIN / SPIKE-1-MAC.)*
   - PoC Go: aprire `mpv_render_context` MPV_RENDER_API_TYPE_OPENGL,
     renderizzare HEVC 10-bit 3840×2160@60 su FBO, output formato NV12 /
     P010, dump 1000 frame.

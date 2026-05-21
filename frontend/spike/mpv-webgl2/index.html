@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SPIKE-1 — mpv → WebGL2 PoC</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; color: #ddd; font-family: system-ui, sans-serif; }
+  #wrap { display: grid; grid-template-rows: auto 1fr auto; height: 100%; }
+  header { padding: 8px 12px; background: #141414; border-bottom: 1px solid #333; display: flex; gap: 24px; align-items: center; }
+  header h1 { font-size: 14px; margin: 0; font-weight: 600; }
+  header label { font-size: 12px; opacity: 0.8; }
+  header input[type=text] { background: #222; color: #ddd; border: 1px solid #444; padding: 4px 6px; border-radius: 4px; }
+  #stats { font-family: ui-monospace, monospace; font-size: 12px; opacity: 0.85; margin-left: auto; }
+  #stage { display: grid; place-items: center; }
+  canvas { background: #000; max-width: 100%; max-height: 100%; image-rendering: pixelated; }
+  footer { padding: 6px 12px; font-size: 11px; background: #141414; border-top: 1px solid #333; opacity: 0.7; }
+  .badge-pass { color: #4ade80; }
+  .badge-warn { color: #facc15; }
+  .badge-fail { color: #f87171; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <header>
+    <h1>SPIKE-1 — mpv → WebGL2 PoC</h1>
+    <label>Source <input id="src" type="text" value="http://127.0.0.1:7799/snapshot" size="42"></label>
+    <label>Throttle (fps) <input id="fps" type="number" value="30" min="1" max="120" style="width:60px"></label>
+    <button id="toggle">Start</button>
+    <div id="stats">— idle —</div>
+  </header>
+  <main id="stage"><canvas id="gl" width="1920" height="1080"></canvas></main>
+  <footer>SPIKE-1 PoC — fetch RGBA8 da spike-mpv-render → WebGL2 texture upload + draw. KPI: vedi <code>docs/spike1-methodology.md</code>.</footer>
+</div>
+<script type="module" src="./main.ts"></script>
+</body>
+</html>
+
