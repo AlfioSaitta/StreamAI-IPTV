@@ -6,7 +6,7 @@ const os = require('os');
 const Client = require('castv2-client').Client;
 const DefaultMediaReceiver = require('castv2-client').DefaultMediaReceiver;
 const { WebSocketServer } = require('ws');
-const { advertisingService } = require('./services/advertisingService.js'); // Importa il nuovo servizio .js
+const { advertisingService } = require('./frontend/services/advertisingService.js'); // Importa il nuovo servizio .js
 
 // Rileva il sistema operativo
 const isLinux = process.platform === 'linux';
@@ -306,8 +306,8 @@ function createWindow() {
     callback({ responseHeaders });
   });
 
-  mainWindow.loadFile(path.join(__dirname, 'dist/renderer/index.html'));
-  
+  mainWindow.loadFile(path.join(__dirname, 'frontend/dist/index.html'));
+
   // Avvia il listener per lo stato di rete
   setupNetworkStatusListener();
   // Avvia il server WebSocket

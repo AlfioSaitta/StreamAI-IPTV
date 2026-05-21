@@ -32,18 +32,16 @@ tasks:
       - npm install
 
   frontend:build:
-    desc: Build frontend (Vite) -> dist/ -> frontend/.
+    desc: Build frontend (Vite) -> frontend/dist/ (consumato da //go:embed in assets.go).
     deps: [frontend:install]
     cmds:
       - npm run build
-      - rm -rf frontend && mkdir -p frontend
-      - cp -r dist/* frontend/
 
   # ---- Backend Go ----
   generate:bindings:
     desc: Genera binding TypeScript dai Service Go (frontend/bindings/*).
     cmds:
-      - wails3 generate bindings -ts -d frontend/bindings
+      - wails3 generate bindings -ts -d frontend/bindings ./...
 
   build:
     desc: Build completo (frontend + backend).
