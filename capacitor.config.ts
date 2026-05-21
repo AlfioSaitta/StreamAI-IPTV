@@ -3,7 +3,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 const config: CapacitorConfig = {
   appId: 'com.streamai.iptv',
   appName: 'StreamAI IPTV',
-  webDir: 'dist',
+  webDir: 'frontend/dist',
   android: {
     allowMixedContent: true,
     captureInput: true,

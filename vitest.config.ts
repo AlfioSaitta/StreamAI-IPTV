@@ -5,7 +5,7 @@ import { defineConfig } from 'vitest/config';
 // environment via per-file `// @vitest-environment jsdom` annotations.
 export default defineConfig({
   test: {
-    include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
+    include: ['frontend/tests/**/*.test.ts', 'frontend/tests/**/*.test.tsx'],
     environment: 'node',
     globals: false,
     reporters: 'default',

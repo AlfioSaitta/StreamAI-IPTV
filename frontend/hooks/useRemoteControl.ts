@@ -6,6 +6,7 @@
 import { useEffect } from 'react';
 import type Player from 'video.js/dist/types/player';
 import { platformService } from '../services/platformService';
+import { host } from '../services/hostBridge';
 
 export interface RemoteControlCommand {
   action: 'play' | 'pause' | 'seek' | 'skip' | 'volume' | 'volumeUp' | 'volumeDown' | 'mute';
@@ -21,8 +22,8 @@ export interface UseRemoteControlParams {
 
 export function useRemoteControl({ playerRef, setVolume, setIsMuted, broadcastStatus }: UseRemoteControlParams) {
   useEffect(() => {
-    if (!platformService.isElectron) return;
-    const api = window.electronAPI;
+    if (!platformService.isDesktop) return;
+    const api = host;
     if (!api?.onRemoteControlCommand || !api.onRequestStatusBroadcast) return;
 
     const unsubCommand = api.onRemoteControlCommand((raw: unknown) => {

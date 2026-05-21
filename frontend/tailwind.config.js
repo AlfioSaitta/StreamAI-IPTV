@@ -1,10 +1,21 @@
 /** @type {import('tailwindcss').Config} */
+const path = require('node:path');
+// Path assoluti: Tailwind v3 risolve i glob rispetto al cwd del processo
+// Node, non al file di config; con Vite `root: 'frontend'` il cwd resta
+// la root del repo, quindi senza __dirname il content scanning fallirebbe
+// e l'output CSS conterrebbe solo il reset (~8 KB) — UI completamente
+// senza stile.
+const r = (...p) => path.resolve(__dirname, ...p);
 module.exports = {
   content: [
-    "./index.html",
-    "./*.{js,ts,jsx,tsx}",
-    "./components/**/*.{js,ts,jsx,tsx}",
-    "./services/**/*.{js,ts,jsx,tsx}",
+    r('index.html'),
+    r('App.tsx'),
+    r('index.tsx'),
+    r('types.ts'),
+    r('components/**/*.{js,ts,jsx,tsx}'),
+    r('services/**/*.{js,ts,jsx,tsx}'),
+    r('hooks/**/*.{js,ts,jsx,tsx}'),
+    r('contexts/**/*.{js,ts,jsx,tsx}'),
   ],
   theme: {
     extend: {

@@ -60,6 +60,7 @@ import { i18n } from './services/i18n.ts';
 import { Category, Channel, XtreamCredentials, StreamType, Profile, XtreamContent, ProfilePreferences } from './types.ts';
 import { Server, Wifi, Sparkles, X } from 'lucide-react';
 import { platformService } from './services/platformService.ts';
+import { host } from './services/hostBridge.ts';
 import { hasAiApiKey, isAiAvailable, isAiTemporarilySuspended } from './services/geminiService.ts';
 import { EpgReminderService, type ReminderFiredEvent } from './services/epg/reminderService.ts';
 import { useBackStack } from './hooks/useBackStack.ts';
@@ -78,8 +79,10 @@ const NetworkStatusBanner = () => {
   const timeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (platformService.isElectron && window.electronAPI?.onNetworkPlaybackStatus) {
-      const unsubscribe = window.electronAPI.onNetworkPlaybackStatus((status: { deviceId: string; channelName: string }) => {
+    // Fase 7.2: usa il bridge host (Electron o Wails). I componenti UI non
+    // devono più toccare `window.electronAPI` direttamente.
+    if (platformService.isDesktop && host?.onNetworkPlaybackStatus) {
+      const unsubscribe = host.onNetworkPlaybackStatus((status: { deviceId: string; channelName: string }) => {
         setNetworkStatus(status);
         
         // Nascondi il banner dopo 10 secondi

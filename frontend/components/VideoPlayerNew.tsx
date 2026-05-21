@@ -6,6 +6,7 @@ import 'video.js/dist/video-js.css';
 import { Channel } from '../types';
 import type { XtreamCredentials } from '../types';
 import { platformService } from '../services/platformService';
+import { host } from '../services/hostBridge';
 import { nativeVideoPlayer } from '../services/nativeVideoPlayer';
 import { streamInfoService } from '../services/streamInfoService';
 import type { VodProbeResult } from '../services/streamInfo/vodProbe';
@@ -756,8 +757,8 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
 
   // Broadcast status to remote devices
   const broadcastStatus = useCallback((force = false) => {
-    if (!platformService.isElectron || !window.electronAPI?.updatePlaybackStatus || !playerRef.current || playerRef.current.isDisposed()) return;
-    
+    if (!platformService.isDesktop || !host?.updatePlaybackStatus || !playerRef.current || playerRef.current.isDisposed()) return;
+
     // Throttle broadcast: non più di una volta ogni 500ms, a meno che non sia forzato
     const now = Date.now();
     if (!force && now - lastBroadcastRef.current < 500) return;
@@ -779,7 +780,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       }
     }
 
-    window.electronAPI.updatePlaybackStatus({
+    host.updatePlaybackStatus({
       channelName: channel?.name,
       cleanName: channel?.cleanName,
       logo: channel?.logo,

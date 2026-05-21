@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { DiscoveredDevice } from '../services/deviceDiscovery';
 import { platformService } from '../services/platformService';
+import { host } from '../services/hostBridge';
 
 interface CastStatus {
   connected: boolean;
@@ -76,9 +77,10 @@ export function useCastSession(): UseCastSessionReturn {
   const pollIntervalRef = useRef<number | null>(null);
   const isConnectedRef = useRef(false);
 
-  // Electron API check
-  const electronAPI = (window as any).electronAPI;
-  const isElectron = platformService.isElectron && !!electronAPI;
+  // Desktop bridge (Electron o Wails) — Fase 7.2: l'hook funziona su entrambi
+  // i runtime tramite l'unico accessor `host`. `isDesktop` copre Electron + Wails.
+  const hostBridge = host;
+  const isDesktop = platformService.isDesktop && !!hostBridge;
 
   const withTimeout = useCallback(async <T,>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> => {
     let timeoutId: number | null = null;
@@ -103,9 +105,9 @@ export function useCastSession(): UseCastSessionReturn {
   
   // Subscribe to status updates (Electron)
   useEffect(() => {
-    if (!isElectron) return;
+    if (!isDesktop) return;
 
-    statusUnsubscribe.current = electronAPI.onCastStatus((newStatus: CastStatus) => {
+    statusUnsubscribe.current = hostBridge!.onCastStatus((newStatus: CastStatus) => {
       setStatus(prev => ({
         ...prev,
         ...newStatus,
@@ -130,11 +132,11 @@ export function useCastSession(): UseCastSessionReturn {
         statusUnsubscribe.current();
       }
     };
-  }, [isElectron, device]);
+  }, [isDesktop, device]);
 
   // Poll for status (Electron)
   useEffect(() => {
-    if (!isElectron || !isConnected) {
+    if (!isDesktop || !isConnected) {
       if (pollIntervalRef.current) {
         window.clearInterval(pollIntervalRef.current);
         pollIntervalRef.current = null;
@@ -144,7 +146,7 @@ export function useCastSession(): UseCastSessionReturn {
 
     const fetchStatus = async () => {
       try {
-        const result = await electronAPI.castControl({ action: 'status' });
+        const result = await hostBridge!.castControl({ action: 'status' });
         if (result.status) {
           setStatus(prev => ({
             ...prev,
@@ -168,7 +170,7 @@ export function useCastSession(): UseCastSessionReturn {
         window.clearInterval(pollIntervalRef.current);
       }
     };
-  }, [isElectron, isConnected, device]);
+  }, [isDesktop, isConnected, device]);
 
   // --- ACTIONS ---
 
@@ -178,11 +180,11 @@ export function useCastSession(): UseCastSessionReturn {
     setError(null);
 
     try {
-      if (isElectron) {
+      if (isDesktop) {
         // Electron Native Cast
         console.log('[useCastSession] Connecting via Electron to:', targetDevice.ip);
         const result = await withTimeout<CastIpcResult>(
-          electronAPI.castConnect({ ip: targetDevice.ip, port: targetDevice.services?.find(s => s.protocol === 'castv2')?.port }),
+          hostBridge!.castConnect({ ip: targetDevice.ip, port: targetDevice.services?.find(s => s.protocol === 'castv2')?.port }),
           CAST_CONNECT_TIMEOUT_MS,
           `Timeout connessione a ${targetDevice.name}`
         );
@@ -218,15 +220,15 @@ export function useCastSession(): UseCastSessionReturn {
     } finally {
       setIsConnecting(false);
     }
-  }, [isElectron, withTimeout]);
+  }, [isDesktop, withTimeout]);
 
   const disconnect = useCallback(async () => {
     console.log('[useCastSession] Disconnecting...');
     isConnectedRef.current = false;
 
     try {
-      if (isElectron) {
-        await electronAPI.castDisconnect();
+      if (isDesktop) {
+        await hostBridge!.castDisconnect();
       }
     } catch {}
 
@@ -235,17 +237,17 @@ export function useCastSession(): UseCastSessionReturn {
     setStatus(initialStatus);
     setError(null);
     setConnectionState('disconnected');
-  }, [isElectron]);
+  }, [isDesktop]);
 
   const loadMedia = useCallback(async (url: string, title: string): Promise<boolean> => {
     if (!isConnectedRef.current) return false;
 
     try {
-      if (isElectron) {
+      if (isDesktop) {
         setConnectionState('buffering');
         for (let attempt = 0; attempt <= CAST_LOAD_RETRIES; attempt++) {
           const result = await withTimeout<CastIpcResult>(
-            electronAPI.castLoad({ mediaUrl: url, title }),
+            hostBridge!.castLoad({ mediaUrl: url, title }),
             CAST_LOAD_TIMEOUT_MS,
             'Timeout caricamento media sul dispositivo'
           );
@@ -268,15 +270,15 @@ export function useCastSession(): UseCastSessionReturn {
       setConnectionState('error');
       return false;
     }
-  }, [isElectron, withTimeout]);
+  }, [isDesktop, withTimeout]);
 
   const control = useCallback(async (action: string, value?: any) => {
     if (!isConnectedRef.current) return;
 
     try {
-      if (isElectron) {
+      if (isDesktop) {
         const result = await withTimeout<CastIpcResult>(
-          electronAPI.castControl({ action, value }),
+          hostBridge!.castControl({ action, value }),
           CAST_CONTROL_TIMEOUT_MS,
           `Timeout comando cast: ${action}`
         );
@@ -287,7 +289,7 @@ export function useCastSession(): UseCastSessionReturn {
     } catch (err) {
       console.error(`[useCastSession] ${action} error:`, err);
     }
-  }, [isElectron, withTimeout]);
+  }, [isDesktop, withTimeout]);
 
   // Wrappers
   const play = useCallback(() => control('play'), [control]);

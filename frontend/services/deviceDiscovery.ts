@@ -1,5 +1,9 @@
 // DLNA/UPnP Device Discovery and Media Casting Service
-// Uses Electron IPC for native network scanning when available
+// Uses the desktop host bridge (Electron or Wails) for native network
+// scanning when available — vedi services/hostBridge.ts (Fase 7.2).
+
+import { platformService } from './platformService';
+import { host } from './hostBridge';
 
 // Type for Electron API
 interface NetworkInterface {
@@ -96,10 +100,12 @@ class DeviceDiscoveryService {
   private discoveryRunId = 0;
 
   /**
-   * Check if Electron API is available
+   * Check if a desktop bridge (Electron or Wails) is available.
+   * Mantiene il nome `isElectron` per minimizzare diff sui call site; copre
+   * entrambi i runtime desktop dopo la Fase 7.2.
    */
   private get isElectron(): boolean {
-    return !!(window.electronAPI?.isElectron);
+    return platformService.isDesktop && !!host;
   }
 
   /**
@@ -274,10 +280,10 @@ class DeviceDiscoveryService {
    * Use Electron IPC for native network discovery
    */
   private async discoverViaElectron(): Promise<void> {
-    if (!window.electronAPI) return;
+    if (!host) return;
 
     // Subscribe to incremental updates
-    this.electronUnsubscribe = window.electronAPI.onDeviceFound((device) => {
+    this.electronUnsubscribe = host!.onDeviceFound((device: DiscoveredDevice) => {
       this.addOrMergeDevice(device);
       this.notify();
       console.log('[Discovery] Found via Electron:', device.name);
@@ -285,7 +291,7 @@ class DeviceDiscoveryService {
 
     // Start discovery
     try {
-      const devices = await window.electronAPI.discoverDevices();
+      const devices = (await host!.discoverDevices()) as DiscoveredDevice[];
 
       for (const device of devices) {
         this.addOrMergeDevice(device);
@@ -306,9 +312,9 @@ class DeviceDiscoveryService {
     const scannedBases = new Set<string>();
 
     // First, try to get real network interfaces from Electron
-    if (this.isElectron && window.electronAPI) {
+    if (this.isElectron && host) {
       try {
-        const localIPs = await window.electronAPI.getLocalIPs();
+        const localIPs = await host!.getLocalIPs();
         console.log('[Discovery] Got network interfaces from Electron:', localIPs);
 
         for (const netInfo of localIPs) {
@@ -514,10 +520,10 @@ class DeviceDiscoveryService {
    */
   async addManualDevice(ip: string, name?: string, port: number = 8008): Promise<DiscoveredDevice> {
     // If Electron is available, try to scan the IP first
-    if (this.isElectron && window.electronAPI) {
+    if (this.isElectron && host) {
       try {
         console.log('[Discovery] Scanning manual IP via Electron:', ip);
-        const devices = await window.electronAPI.scanIp(ip);
+        const devices = await host!.scanIp(ip);
 
         if (devices && devices.length > 0) {
           // Use the first found device
@@ -599,10 +605,10 @@ class DeviceDiscoveryService {
     }
 
     // Fallback: Try Cast V2 on port 8008 if Electron is available
-    if (this.isElectron && window.electronAPI) {
+    if (this.isElectron && host) {
       console.log('[Discovery] Fallback: trying Electron Cast V2');
       try {
-        const result = await window.electronAPI.castToDevice({
+        const result = await host!.castToDevice({
           ip: device.ip,
           port: 8008,
           mediaUrl,
@@ -629,9 +635,9 @@ class DeviceDiscoveryService {
    */
   private async probeDeviceServices(ip: string): Promise<CastService[]> {
     // If Electron is available, use native probing
-    if (this.isElectron && window.electronAPI?.probeDeviceServices) {
+    if (this.isElectron && host?.probeDeviceServices) {
       try {
-        return await window.electronAPI.probeDeviceServices(ip);
+        return await host!.probeDeviceServices(ip);
       } catch (err) {
         console.log('[Discovery] Electron probe failed:', err);
       }
@@ -684,12 +690,12 @@ class DeviceDiscoveryService {
    * Send via Cast V2 protocol (native Electron)
    */
   private async sendViaCastV2(device: DiscoveredDevice, port: number, mediaUrl: string, title: string): Promise<boolean> {
-    if (!this.isElectron || !window.electronAPI) {
+    if (!this.isElectron || !host) {
       return false;
     }
 
     try {
-      const result = await window.electronAPI.castToDevice({
+      const result = await host!.castToDevice({
         ip: device.ip,
         port,
         mediaUrl,

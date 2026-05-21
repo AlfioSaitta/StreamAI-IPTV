@@ -64,11 +64,17 @@ build/icons/
 # ---- Go / Wails v3 (migrazione, vedi docs/plan-go-wails-migration.md) ----
 # Binari prodotti da `task build` / `wails3 build`
 /build/bin/
-# Output Vite copiato in frontend/ (preserva solo index.html placeholder)
-/frontend/*
-!/frontend/index.html
+# Output Vite (compilato): la dir `frontend/dist/`  generata da
+# `vite build`. Manteniamo tracciato solo il placeholder `.gitkeep`
+# affinche' `//go:embed all:frontend/dist` (assets.go) abbia sempre
+# almeno una entry quando il binario Go viene compilato standalone.
+/frontend/dist/*
+!/frontend/dist/.gitkeep
 # Binding generati da `wails3 generate bindings`
 /frontend/bindings/
 # Debug build
 *.test
 *-debug
+
+# Wails build binary at root (task build:dev)
+/streamai

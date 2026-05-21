@@ -13,6 +13,7 @@ import { AlertTriangle } from 'lucide-react';
 
 import type { Channel } from '../types';
 import { platformService } from '../services/platformService';
+import { host } from '../services/hostBridge';
 import { streamInfoService } from '../services/streamInfoService';
 import { probeVodSource, type VodProbeResult } from '../services/streamInfo/vodProbe';
 import {
@@ -402,8 +403,8 @@ export const useWebPlayerEngine = (opts: WebPlayerEngineOptions): void => {
     videoEl.addEventListener('enterpictureinpicture', handleEnterPiP);
     videoEl.addEventListener('leavepictureinpicture', handleLeavePiP);
 
-    // Broadcast network status / monitor bandwidth (Electron only)
-    if (platformService.isElectron && (window as any).electronAPI) {
+    // Broadcast network status / monitor bandwidth (desktop: Electron o Wails)
+    if (platformService.isDesktop && host) {
       networkStatusIntervalRef.current = window.setInterval(() => {
         if (player && !player.isDisposed()) {
           const stats = (player.tech({ IWillNotUseThisInPlugins: true }) as any)?.vhs?.stats;
