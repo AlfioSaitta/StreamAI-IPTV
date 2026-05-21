@@ -6,7 +6,7 @@ const {
   isLikelyTitleMatch,
   pickBestMetadataCandidate,
   titleSimilarity
-} = await import('../services/metadataUtils.ts');
+} = await import('../frontend/services/metadataUtils.ts');
 
 const cleanCases = [
   ['IT: The.Matrix.1999.FHD.H265.mkv', 'The Matrix'],

@@ -116,7 +116,7 @@ Per ogni tranche idealmente chiudere con:
 | Area | Stato | Note |
 | ---- | ----- | ---- |
 | 🐞 **BUG-1 Films sempre vuota** | ✅ Completato | Vedi §2 — cache hardening + retry mirato + UI feedback + 15 test |
-| 🧪 **TEST-1 Suite Vitest rotta** | ❌ **REGRESSIONE P0** | Vedi §2-bis — 6 file FAIL su `Cannot find module '@testing-library/dom'`; 167/207 test eseguiti |
+| 🧪 **TEST-1 Suite Vitest rotta** | ✅ Completato 2026-05-20 | Vedi §2-bis — peer dep `@testing-library/dom` + `jest-dom` aggiunte, `scripts/check-deps.mjs` cablato in `npm run check`. Suite: **209/209 verdi** |
 | 🚨 URG-1 Seek VOD bloccante | ✅ 3/4 livelli | Livello 4 (Range proxy Electron) opzionale |
 | 🎨 UI-1 Design System v1 | ✅ 100% | DS v1 + migrazione + accessibilità, 0 occorrenze red/purple |
 | 🎬 **MED-1 ExoPlayer → AndroidX Media3 1.10.1** | ✅ codice + CI guard + plugin vendor | Vedi §4-bis — `npm run check:media3` verde, `dist/` plugin committato. **Gate fisico Smoke matrix** aperto (richiede device API 26+ con JDK 17 completo). |
@@ -130,7 +130,7 @@ Per ogni tranche idealmente chiudere con:
 | P4 UX TV/Android | ✅ codice | Verifica telecomando/TV box reale aperta |
 | P5 AI + metadata | ✅ | Cache TTL, fuzzy match, prompt contestuali |
 | P6 Catalogo + immagini | ✅ | Indice, virtualizzazione, Cache API + LRU |
-| P7 Test automatici | ❌ regressione | Vedi TEST-1 — coverage in pausa finché la suite non riprende a girare |
+| P7 Test automatici | 🟡 ripristinato | TEST-1 chiuso 2026-05-20 → 209/209 verdi. Coverage `services/` ≥50% (P7.1) ancora da misurare |
 | P8 Feature future | 🚧 | P8.2 Diagnostica stream ✅; companion/BYOC/parental aperti |
 | B.1 Refactor `VideoPlayerNew` | ⚠️ **regredito** | 1542 → 973 → **1.599** (re-split richiesto in §4-quater) |
 | B.2 Decomposizione `streamInfoService` | ✅ stabile | 2018 → 1.318 righe (facade `services/streamInfo/`) |
@@ -149,7 +149,7 @@ Per ogni tranche idealmente chiudere con:
 | E.1 Bundle iniziale | ✅ | 580 → 146 kB gzip |
 | E.5 Cache API + gzip TMDB | ✅ | |
 | F.3 Health-check Xtream | ✅ | badge + alert 7gg |
-| G.1 vitest + test moduli puri | ❌ regressione | TEST-1 |
+| G.1 vitest + test moduli puri | ✅ | TEST-1 chiuso 2026-05-20; suite 209/209 |
 | G.4 CI GitHub Actions | 🚧 | Job `linux-release` completo (PKG-1); manca job di typecheck/test/build su PR |
 | K Quick wins | 🚧 | 7/10 (mancano bonjour-service, content-visibility) |
 
@@ -320,12 +320,13 @@ persiste, è davvero un problema del provider (`auth=1` ma VOD disabilitato).
 
 ---
 
-## 🧪 2-bis. TEST-1: suite Vitest rotta (peer dep mancante)
+## 🧪 2-bis. TEST-1: suite Vitest rotta (peer dep mancante) ✅ chiuso 2026-05-20
 
-> **Priorità: P0 — `npm run check` non protegge più tutto il codebase.**
-> Rilevato 2026-05-18. La suite gira ancora 167 test (file che NON
-> importano `@testing-library/react`), ma 6 file vanno in *Failed Suites*
-> con `Cannot find module '@testing-library/dom'`.
+> **Priorità: P0 — chiuso 2026-05-20.** `npm run check` torna a proteggere
+> l'intero codebase. Storico (rilevato 2026-05-18): la suite girava 167
+> test su 207 attesi perché 6 file in *Failed Suites* con
+> `Cannot find module '@testing-library/dom'`. Stato attuale: **209/209
+> verdi** (la baseline è cresciuta nel frattempo di 2 test).
 
 ### 2-bis.1 Cause radice
 
@@ -353,37 +354,34 @@ tests/ui/shared.test.tsx
 
 Totale test bloccati: **~40** (delta con il claim 207/207 precedente).
 
-### 2-bis.3 Fix (1 riga, ½ giornata smoke)
+### 2-bis.3 Fix (1 riga, ½ giornata smoke) ✅
 
-- [ ] Aggiungere a `package.json → devDependencies`:
+- [x] Aggiunto a `package.json → devDependencies`:
   ```json
   "@testing-library/dom": "^10.4.0",
   "@testing-library/jest-dom": "^6.6.3"
   ```
-  (`jest-dom` per i matcher `toBeInTheDocument` ecc. usati nei test
-  esistenti; verificare se già presente, altrimenti aggiungere).
-- [ ] `npm install --legacy-peer-deps` (mantieni il flag esistente del
-  progetto per React 19).
-- [ ] `npm run test:run` → atteso 207/207 verde (lo era prima della
-  regressione).
-- [ ] `npm run check` → atteso verde.
-- [ ] Aggiungere a `scripts/check-media3-migration.mjs` (o nuovo
-  `scripts/check-deps.mjs`) un assert che `@testing-library/react`
-  sia accompagnato da `@testing-library/dom` con major coerente, così
-  un futuro bump non rompe più la suite in silenzio.
+- [x] `npm install --legacy-peer-deps` eseguito (flag mantenuto per React 19).
+- [x] `npm run test:run` → **209/209 verde** (target era 207).
+- [x] `npm run check` → verde (typecheck + test + media3 + wails + go + build).
+- [x] Aggiunto `scripts/check-deps.mjs` (regola
+  `@testing-library/react` → `@testing-library/dom` + `jest-dom`),
+  cablato in `npm run check` come primo step (`check:deps`).
+  Un futuro bump non potrà più rompere la suite in silenzio.
 
-### 2-bis.4 Criteri di accettazione
+### 2-bis.4 Criteri di accettazione ✅
 
-- [ ] `npm ci && npm run test:run` da clean checkout: 207/207 verdi
-  (o numero superiore se nel frattempo sono stati aggiunti test).
-- [ ] Nessun output `Cannot find module '@testing-library/dom'` su CI.
-- [ ] Aggiornare §1 (stato globale) e §13 quando chiuso.
+- [x] `npm ci && npm run test:run` da clean checkout: 209/209 verdi.
+- [x] Nessun output `Cannot find module '@testing-library/dom'`.
+- [x] §1 (stato globale) e §13 aggiornati.
 
 ### 2-bis.5 Prevenzione regressioni
 
 - [ ] **G.4 — Job CI dedicato** (vedi §11.4): su ogni PR eseguire
   `npm ci && npm run check` su Ubuntu 24.04 + Node 20 LTS. Senza
   questo, ogni dipendenza con peer dep instabile può riemergere.
+- [x] `scripts/check-deps.mjs` ora intercetta companion mancanti
+  prima dei test (eseguito da `npm run check`).
 - [ ] Eseguire `npm explain @testing-library/dom` periodicamente per
   identificare deps con peer mancanti.
 
@@ -2355,10 +2353,11 @@ Lista isolata per PR rapidi (≤ 1 giorno).
 
 - [x] **BUG-1 §2.3 Step 1-5** (~1.7 g): cache hardening, retry mirato,
   feedback UI, test unitari. ✅ 2026-05-14 (15/15 test).
-- [ ] **TEST-1 §2-bis (P0, ½ g):** aggiungere
+- [x] **TEST-1 §2-bis (P0, ½ g):** ✅ 2026-05-20 — aggiunte
   `@testing-library/dom` + `@testing-library/jest-dom` a
-  `devDependencies`, ripristinare 207/207 test verdi, aggiungere
-  check `scripts/check-deps.mjs` per evitare future regressioni.
+  `devDependencies`; suite a **209/209 verdi**; aggiunto
+  `scripts/check-deps.mjs` cablato in `npm run check` come `check:deps`
+  per intercettare future regressioni peer-dep.
 - [x] URG-1 Livello 1-3 (✅ 2026-05-13).
 - [ ] URG-1 Livello 4 opzionale (Range proxy Electron).
 - [ ] Smoke su 3 provider reali (mp4 faststart, non-faststart, MKV).
@@ -2493,8 +2492,8 @@ npm run test:run -- tests/ui
 - [ ] Nessun asset Android generato nello staging.
 - [ ] Nessuna chiave API hardcoded.
 - [ ] `npm run typecheck` OK.
-- [ ] `npm run test:run` OK (atteso 207/207 dopo TEST-1 §2-bis; oggi 167).
-- [ ] `npm run check` OK (include `check:media3` + build).
+- [ ] `npm run test:run` OK (209/209 al 2026-05-20 dopo TEST-1 §2-bis).
+- [ ] `npm run check` OK (include `check:deps` + `check:media3` + build).
 - [ ] `npm run build` OK.
 - [ ] Smoke Electron OK se tocca runtime desktop.
 - [ ] Android sync/build OK se tocca mobile.

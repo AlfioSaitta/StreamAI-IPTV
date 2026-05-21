@@ -5,6 +5,17 @@ Questo file serve come guida e contesto per gli agenti AI che collaborano allo s
 ## 📋 Panoramica Progetto
 **StreamAI IPTV** è un client IPTV avanzato che integra l'Intelligenza Artificiale (Google Gemini) per offrire raccomandazioni contestuali. È un'applicazione ibrida cross-platform.
 
+> **Stato migrazione Electron → Wails v3 (snapshot 2026-05-20, plan rev. 6):**
+> il backend Go è **completo per le Fasi 0–5, 2-bis e gran parte di 7-bis**
+> (9 `application.Service` Wails v3 in `internal/services/`,
+> `cmd/streamai/main.go` con reverse-shutdown order, `npm run wails:bindings`
+> genera 53 metodi TS in `frontend/bindings/`). Il frontend è ancora **100%
+> sull'API Electron** (35 occorrenze `window.electronAPI`): la **Fase 7 —
+> compat layer** è in corso (`services/wailsBridge.ts` + `services/hostBridge.ts`
+> in arrivo). Il **player nativo (Fase 6, libmpv + canvas WebGL2)** è il
+> gate critico residuo, non ancora iniziato (preflight SPIKE-1/2/4). Vedi
+> [`docs/plan-go-wails-migration.md`](docs/plan-go-wails-migration.md) §3.3.
+
 ## 🛠 Tech Stack
 - **Framework:** React 19, TypeScript, Vite
 - **Desktop Runtime:** Electron (con supporto HEVC custom)
@@ -24,23 +35,53 @@ Questo file serve come guida e contesto per gli agenti AI che collaborano allo s
 - **Icons:** Lucide React
 
 ## 📂 Struttura Directory Chiave
-- `/components`: Componenti UI.
-  - `VideoPlayerNew.tsx`: Player unificato. Gestisce Video.js, OSD, Timeline, scorciatoie tastiera e bridge verso player nativo Android.
-  - `ChannelList.tsx`: Lista canali virtualizzata (react-window) per alte prestazioni. Carosello "Continua a guardare" filtrato per tipo via `ProfilePreferences.continueWatching{Movies,Series}Enabled`.
-  - `AIRecommender.tsx`: Interfaccia utente per l'assistente AI.
-  - `CastDevicePicker.tsx`: UI per la selezione dei dispositivi di casting.
-  - `OnboardingWizard.tsx`: Wizard 3 step per creazione profilo (identità → fonte Xtream/M3U/skip → preferenze) con test connettività in tempo reale e validazione URL `.m3u`.
-  - `player/StreamDiagnostics.tsx`: Pannello diagnostica stream (buffer health live, ring buffer 10 errori, URL sanificato, warning codec/HDR).
-- `/services`: Logica di business (Singleton pattern).
-  - `platformService.ts`: Astrazione per gestire differenze tra Electron, Web e Capacitor.
-  - `geminiService.ts`: Logica di interazione con Google Gemini.
-  - `xtream.ts`: Client API per server IPTV Xtream Codes. `processContent()` preserva l'ordine d'inserimento dei gruppi `live` (alfabetico solo per `movie`/`series`).
-  - `deviceDiscovery.ts`: Logica di scansione rete per trovare dispositivi Cast/DLNA.
-  - `advertisingService.js`: (Electron Main Process) Servizio per annunciare l'app via mDNS/SSDP. **Deve essere incluso nella build.**
-  - `profileService.ts`: CRUD profili. `DEFAULT_PREFERENCES` include `continueWatchingMoviesEnabled` (false), `continueWatchingSeriesEnabled` (true), `hideAiUnavailableHint` (false), `autoNextEpisodeEnabled` (true).
-  - `parser.ts` / worker pipeline: parsing M3U asincrono (`parseM3UAsync`); per playlist >256 kB la parsing è delegata a Web Worker, per non bloccare la UI all'attivazione del profilo.
-- `/android`: Progetto nativo Android (Gradle).
-- `/scripts`: Script di automazione (es. patching FFmpeg per Electron).
+
+Layout post-ristrutturazione (Wails v3 migration — vedi
+`docs/plan-go-wails-migration.md` 2.1):
+
+```
+StreamAI-IPTV/
+├── frontend/                 # ★ TUTTO il codice React/TS in una cartella
+│   ├── index.html            # entry HTML (vite root)
+│   ├── index.tsx / index.css
+│   ├── App.tsx / types.ts / metadata.json / vite-env.d.ts
+│   ├── tailwind.config.js / postcss.config.js
+│   ├── components/  services/  hooks/  contexts/  tests/  public/
+│   ├── dist/                 # output `vite build` (consumato da go:embed)
+│   └── bindings/             # generati da `wails3 generate bindings` (gitignored)
+├── cmd/streamai/             # ★ entry point Wails v3 (Go)
+│   └── main.go
+├── internal/                 # ★ tutti i Wails Service Go
+│   ├── pkg/wailsevents/
+│   └── services/{discovery,advertising,cast,remote,netstatus,proxy,player}/
+├── assets.go                 # //go:embed all:frontend/dist
+├── go.mod / go.sum / .golangci.yml / Taskfile.yml
+├── android/                  # Capacitor 7 (Android target, fuori scope Wails)
+├── main.js / preload.js      # Electron legacy (fase 0 → fase 7 deprecati)
+├── package.json              # toolchain condiviso (Vite/Vitest/Electron/Cap)
+├── scripts/  build/  docs/  release/
+└── .version  README.md  AGENTS.md
+```
+
+- `frontend/` — sorgenti UI:
+  - `components/`: Componenti UI.
+    - `VideoPlayerNew.tsx`: Player unificato. Gestisce Video.js, OSD, Timeline, scorciatoie tastiera e bridge verso player nativo Android.
+    - `ChannelList.tsx`: Lista canali virtualizzata (react-window) per alte prestazioni. Carosello "Continua a guardare" filtrato per tipo via `ProfilePreferences.continueWatching{Movies,Series}Enabled`.
+    - `AIRecommender.tsx`: Interfaccia utente per l'assistente AI.
+    - `CastDevicePicker.tsx`: UI per la selezione dei dispositivi di casting.
+    - `OnboardingWizard.tsx`: Wizard 3 step per creazione profilo (identità → fonte Xtream/M3U/skip → preferenze) con test connettività in tempo reale e validazione URL `.m3u`.
+    - `player/StreamDiagnostics.tsx`: Pannello diagnostica stream (buffer health live, ring buffer 10 errori, URL sanificato, warning codec/HDR).
+  - `services/`: Logica di business (Singleton pattern).
+    - `platformService.ts`: Astrazione per gestire differenze tra Electron, Web e Capacitor.
+    - `geminiService.ts`: Logica di interazione con Google Gemini.
+    - `xtream.ts`: Client API per server IPTV Xtream Codes. `processContent()` preserva l'ordine d'inserimento dei gruppi `live` (alfabetico solo per `movie`/`series`).
+    - `deviceDiscovery.ts`: Logica di scansione rete per trovare dispositivi Cast/DLNA (verrà sostituita dal Service Go in `internal/services/discovery/`).
+    - `advertisingService.js`: (Electron Main Process — legacy) Servizio che annuncia l'app via mDNS/SSDP. **Deve essere incluso nella build Electron** (`package.json` `build.files` → `frontend/services/**`). Sostituito da `internal/services/advertising/` nel build Wails.
+    - `profileService.ts`: CRUD profili. `DEFAULT_PREFERENCES` include `continueWatchingMoviesEnabled` (false), `continueWatchingSeriesEnabled` (true), `hideAiUnavailableHint` (false), `autoNextEpisodeEnabled` (true).
+    - `parser.ts` / worker pipeline: parsing M3U asincrono (`parseM3UAsync`); per playlist >256 kB la parsing è delegata a Web Worker, per non bloccare la UI all'attivazione del profilo.
+- `cmd/streamai/main.go` + `internal/` — backend Wails v3 in Go.
+- `android/` — Progetto nativo Android (Gradle).
+- `scripts/` — Script di automazione (es. patching FFmpeg per Electron, sync versione, guard `check-wails-v3.mjs` / `check-media3-migration.mjs`).
 
 ## 💎 Caratteristiche Essenziali (Non-Negotiable)
 Queste funzionalità definiscono l'identità di StreamAI e devono essere preservate in ogni iterazione:
@@ -94,7 +135,17 @@ Queste funzionalità definiscono l'identità di StreamAI e devono essere preserv
 
 ### 2. Gestione Piattaforma (Cross-Platform)
 - **Mai** chiamare API specifiche (es. `window.electronAPI` o `CapacitorPlugins`) direttamente nei componenti UI.
-- Usa sempre `platformService` per verificare l'ambiente (`isElectron`, `isNative`, `isWeb`).
+- Usa sempre `platformService` per verificare l'ambiente (`isElectron`, `isWails`, `isDesktop`, `isNative`, `isWeb`).
+- **Bridge host (Fase 7.2):** per invocare API del backend desktop (Electron o Wails)
+  importa **`host`** da `services/hostBridge.ts` (cristallizzato a runtime in base a
+  `platformService.isWails` / `isElectron`). Pattern canonico:
+  ```ts
+  import { host } from './services/hostBridge';
+  if (host?.discoverDevices) {
+    const devices = await host.discoverDevices();
+  }
+  ```
+  La forma `requireHost()` lancia se nessun bridge è disponibile (web/mobile).
 - **Android:** Gestisci sempre il tasto fisico "Back" in `App.tsx` usando `App.addListener('backButton', ...)`.
 - **Electron Main Process:** I file eseguiti nel main process (es. `advertisingService.js`) devono essere in JavaScript CommonJS (`require`), non TypeScript, poiché non vengono transpilati da Vite.
 

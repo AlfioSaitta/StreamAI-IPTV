@@ -2,9 +2,9 @@
 // scripts/check-i18n.mjs
 // B.3 — i18n key consistency checker.
 //
-// Loads every locale in services/locales/ and verifies that all dictionaries
-// have exactly the same set of keys as the Italian reference. Exits with
-// non-zero status on any drift, so it can be wired into CI/pre-commit.
+// Loads every locale in frontend/services/locales/ and verifies that all
+// dictionaries have exactly the same set of keys as the Italian reference.
+// Exits with non-zero status on any drift, so it can be wired into CI/pre-commit.
 //
 // Usage: `node scripts/check-i18n.mjs`
 
@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const localesDir = path.resolve(__dirname, '../services/locales');
+const localesDir = path.resolve(__dirname, '../frontend/services/locales');
 
 const files = fs
   .readdirSync(localesDir)
@@ -61,7 +61,7 @@ for (const file of files) {
 
 const reference = dicts.get('it');
 if (!reference) {
-  console.error('[check-i18n] missing reference locale services/locales/it.ts');
+  console.error('[check-i18n] missing reference locale frontend/services/locales/it.ts');
   process.exit(2);
 }
 

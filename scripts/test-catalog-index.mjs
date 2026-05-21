@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-const { indexChannels, searchIndexedChannels } = await import('../services/catalogIndex.ts');
+const { indexChannels, searchIndexedChannels } = await import('../frontend/services/catalogIndex.ts');
 
 const channels = indexChannels([
   { id: '1', name: 'IT: The.Matrix.1999.FHD', cleanName: 'The Matrix', group: 'Cinema', genre: 'Sci-Fi', year: '1999', url: 'u', type: 'movie' },

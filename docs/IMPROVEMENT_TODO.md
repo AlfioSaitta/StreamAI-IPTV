@@ -33,19 +33,19 @@
 
 ## 🔥 Sprint 0 — Urgenze P0 (2-3 giorni)
 
-### TEST-1 — Fix suite Vitest rotta (P0, ½ g) — `§2-bis`
+### TEST-1 — Fix suite Vitest rotta (P0, ½ g) — `§2-bis` ✅ chiuso 2026-05-20
 
-- [ ] Aggiungere a `package.json → devDependencies`:
+- [x] Aggiungere a `package.json → devDependencies`:
       `"@testing-library/dom": "^10.4.0"` +
       `"@testing-library/jest-dom": "^6.6.3"`.
-- [ ] `npm install --legacy-peer-deps`.
-- [ ] `npm run test:run` → atteso **207/207 verde** (oggi 167/207).
-- [ ] `npm run check` → atteso verde.
-- [ ] Aggiungere `scripts/check-deps.mjs` (o estendere
-      `check-media3-migration.mjs`) che fallisce se
-      `@testing-library/react` non ha `@testing-library/dom` compagno.
-- [ ] Eseguire `npm explain @testing-library/dom` come smoke periodico.
-- [ ] Aggiornare §1 e §13 IMPROVEMENT_PLAN quando chiuso.
+- [x] `npm install --legacy-peer-deps`.
+- [x] `npm run test:run` → **209/209 verde** (target era 207).
+- [x] `npm run check` → verde (typecheck + test + media3 + wails + go + build).
+- [x] Aggiunto `scripts/check-deps.mjs` (regola
+      `@testing-library/react` → `@testing-library/dom` + `jest-dom`),
+      cablato in `npm run check` come primo step (`check:deps`).
+- [x] `npm explain @testing-library/dom` → `10.4.1` resolved.
+- [x] §1 e §13 IMPROVEMENT_PLAN aggiornati (stato, sequenza, criteri di accettazione).
 
 ### BUG-1 — Smoke residuo Films (P0, ½ g) — `§2.4`
 

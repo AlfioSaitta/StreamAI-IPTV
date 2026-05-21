@@ -6,6 +6,15 @@ This file provides context and guidelines for GitHub Copilot coding agent when w
 
 **StreamAI IPTV** is a next-generation IPTV player built with React 19, TypeScript, Electron, and Tailwind CSS. It features AI-powered recommendations using Google Gemini and supports cross-platform deployment (Linux, Windows, Android via Capacitor).
 
+> **Migration status (2026-05-20, plan rev. 6):** the desktop runtime is
+> migrating from Electron to **Go + Wails v3** (target v2.0.0). Backend Go
+> (fasi 0–5, 2-bis, gran parte di 7-bis) **complete**: 9 Wails Service
+> registrati in `cmd/streamai/main.go`. Frontend ancora 100% sull'API
+> Electron; Fase 7 (compat layer TS via `wailsBridge` + `hostBridge`) **in
+> corso**. Player nativo (Fase 6, libmpv + canvas WebGL2) **non ancora
+> iniziato** (gated da SPIKE-1/2/4). Vedi
+> [`docs/plan-go-wails-migration.md`](../docs/plan-go-wails-migration.md) §3.3.
+
 **Key Capabilities:**
 - Live TV streaming, Movies (VOD), and Series with advanced playback features
 - AI-powered content recommendations via Google Gemini
@@ -32,31 +41,55 @@ This file provides context and guidelines for GitHub Copilot coding agent when w
 
 ## Repository Structure
 
+After the Electron → Go/Wails v3 restructure (see
+`docs/plan-go-wails-migration.md` §2.1) the codebase is split in two
+clearly separated trees:
+
+- `frontend/` → **all** React/TypeScript code (sources, tests, build config,
+  Vite output). This is the Vite project root.
+- root → all Go/Wails code (`cmd/streamai/`, `internal/`, `assets.go`,
+  `go.mod`, `Taskfile.yml`) plus Electron-legacy bootstrap (`main.js`,
+  `preload.js`) and shared toolchain (`package.json`, `vite.config.ts`,
+  `vitest.config.ts`, `tsconfig.json`).
+
 ```
 streamai-iptv/
-├── components/          # React UI components
-│   ├── VideoPlayerNew.tsx     # Unified player (Video.js + Native + OSD)
-│   ├── AIRecommender.tsx      # AI assistant interface
-│   ├── ChannelList.tsx        # Virtualized channel list (react-window)
-│   ├── CastDevicePicker.tsx   # Cast device selection UI
-│   ├── OnboardingWizard.tsx   # 3-step profile creation wizard (identity → source → prefs)
-│   └── player/
-│       └── StreamDiagnostics.tsx  # Live buffer health + recent errors panel
-├── services/           # Business logic (Singleton pattern)
-│   ├── platformService.ts     # Platform abstraction (Electron/Web/Capacitor)
-│   ├── geminiService.ts       # Google Gemini AI integration
-│   ├── xtream.ts              # Xtream Codes API client (preserves live group order)
-│   ├── profileService.ts      # Profile CRUD + DEFAULT_PREFERENCES
-│   ├── parser.ts              # M3U parser + parseM3UAsync (worker for >256 kB)
-│   ├── deviceDiscovery.ts     # Network scanning for Cast/DLNA devices
-│   └── advertisingService.js  # (Electron Main) mDNS/SSDP advertising
-├── scripts/            # Build automation scripts
-│   └── patch-ffmpeg.js        # HEVC codec patching for Electron
-├── android/            # Native Android project (Gradle)
-├── main.js             # Electron entry point
-├── App.tsx             # Main React component (also: AiUnavailableHint banner)
-└── AGENTS.md           # Detailed technical documentation for AI agents
+├── frontend/                       # React 19 + Vite + Tailwind (UI only)
+│   ├── index.html / index.tsx / index.css / App.tsx / types.ts
+│   ├── tailwind.config.js / postcss.config.js
+│   ├── components/                 # React UI components
+│   │   ├── VideoPlayerNew.tsx          # Unified player (Video.js + Native + OSD)
+│   │   ├── AIRecommender.tsx           # AI assistant interface
+│   │   ├── ChannelList.tsx             # Virtualized channel list (react-window)
+│   │   ├── CastDevicePicker.tsx        # Cast device selection UI
+│   │   ├── OnboardingWizard.tsx        # 3-step profile creation wizard
+│   │   └── player/StreamDiagnostics.tsx
+│   ├── services/                   # Business logic (Singleton pattern)
+│   │   ├── platformService.ts          # Platform abstraction (Electron/Web/Capacitor)
+│   │   ├── geminiService.ts            # Google Gemini AI integration
+│   │   ├── xtream.ts                   # Xtream Codes API client (live group order)
+│   │   ├── profileService.ts           # Profile CRUD + DEFAULT_PREFERENCES
+│   │   ├── parser.ts                   # M3U parser + parseM3UAsync (worker >256 kB)
+│   │   ├── deviceDiscovery.ts          # Network scanning for Cast/DLNA devices
+│   │   └── advertisingService.js       # (Electron Main, legacy) mDNS/SSDP advertising
+│   ├── hooks/ / contexts/ / public/ / tests/
+│   └── dist/                       # `vite build` output, embedded by assets.go
+├── cmd/streamai/main.go            # Wails v3 entry point (application.New)
+├── internal/                       # Wails Services in Go
+│   ├── pkg/wailsevents/
+│   └── services/{discovery,advertising,cast,remote,netstatus,proxy,player}/
+├── assets.go                       # //go:embed all:frontend/dist
+├── go.mod / go.sum / .golangci.yml / Taskfile.yml
+├── android/                        # Capacitor 7 (Android target)
+├── scripts/                        # Build automation (patch-ffmpeg, check-wails-v3, …)
+├── main.js / preload.js            # Electron legacy (will be removed in fase 7)
+└── package.json                    # toolchain shared by Electron + Wails build
 ```
+
+> **Note:** Vite is configured with `root: 'frontend'` (see `vite.config.ts`);
+> Vitest scans `frontend/tests/**`. `package.json` and `node_modules/` stay
+> at the project root so the same toolchain serves Electron, Wails and
+> Capacitor builds without duplication.
 
 ## Build, Test, and Development
 

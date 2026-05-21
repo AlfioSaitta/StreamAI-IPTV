@@ -1,7 +1,8 @@
 # 📺 StreamAI IPTV Player
 
-**StreamAI** è un player IPTV di nuova generazione sviluppato con **React 19**, **TypeScript**, **Electron** e **Tailwind CSS**. 
-Si distingue per l'integrazione con **Google Gemini AI**, che offre raccomandazioni intelligenti sui contenuti basate sulle preferenze dell'utente, e per un ecosistema di networking avanzato per il casting e il controllo remoto.
+**StreamAI** è un player IPTV di nuova generazione sviluppato con **React 19**, **TypeScript**, **Tailwind CSS** e un runtime desktop **Wails v3** (Go) — con **Electron** ancora supportato in parallelo durante la fase di migrazione. Si distingue per l'integrazione con **Google Gemini AI**, che offre raccomandazioni intelligenti sui contenuti basate sulle preferenze dell'utente, e per un ecosistema di networking avanzato per il casting e il controllo remoto.
+
+> 🚧 **Migrazione in corso (Electron → Wails v3 / Go).** Il backend desktop è in fase di riscrittura come applicazione Wails v3 con Service Go per discovery, advertising, cast, remote/WebSocket, netstatus, proxy e player. Lo stato di avanzamento, gli inventari Electron ↔ Wails e le fasi residue sono tracciati in [`docs/plan-go-wails-migration.md`](docs/plan-go-wails-migration.md) (rev. 5). Il binario Electron resta la build di riferimento finché le Fasi 5–10 non sono complete.
 
 ---
 
@@ -20,8 +21,8 @@ Si distingue per l'integrazione con **Google Gemini AI**, che offre raccomandazi
 ### 📡 Networking & Casting
 - **Casting Universale**: Trasmissione su Chromecast, dispositivi DLNA/UPnP e AirPlay.
 - **Device Discovery**: Scansione rete locale cancellabile, con concorrenza limitata, progress UI, cache TTL, deduplica IP/protocollo e minori falsi positivi.
-- **Advertising Service**: L'app si annuncia sulla rete tramite mDNS (Bonjour), SSDP e DIAL con porta configurabile/fallback, rendendosi visibile come target di casting per altre app.
-- **Controllo Remoto**: Architettura pronta per il controllo remoto tramite WebSocket e API REST locali.
+- **Advertising Service**: L'app si annuncia sulla rete tramite mDNS (Bonjour), SSDP e DIAL con porta configurabile/fallback, rendendosi visibile come target di casting per altre app. Nel runtime Wails v3 è implementato come Service Go (`internal/services/advertising/`) con annunci `_airplay._tcp`, `_raop._tcp`, `_googlecast._tcp`, `_dial._tcp` + UPnP `MediaRenderer:1` / DIAL `device:1`.
+- **Controllo Remoto**: WebSocket server (porta dinamica, broadcast UDP del descrittore) e bridge stato playback ↔ AI/UI implementati come Service Go `remote` + `netstatus` (Fase 4 della migrazione Wails).
 
 ### 🤖 AI Assistant
 - **Ricerca intelligente**: Chiedi all'AI cosa vuoi guardare con linguaggio naturale.
@@ -60,6 +61,7 @@ Si distingue per l'integrazione con **Google Gemini AI**, che offre raccomandazi
 
 - **Node.js**: v18+ (per build e sviluppo)
 - **npm**: v9+
+- **Go**: 1.23+ (solo per il runtime Wails v3, opzionale finché Electron è il default)
 - **Sistema Operativo**: Linux (testato), Windows, macOS
 
 ---
@@ -105,6 +107,12 @@ npm run typecheck
 
 # Type-check + build
 npm run check
+
+# Build runtime Wails v3 (Go) → build/bin/streamai
+npm run wails:build
+npm run wails:build:debug   # versione con symbol info
+npm run wails:dev           # hot-reload Vite + Go (richiede `wails3` CLI)
+npm run wails:bindings      # rigenera binding TS dai Service Go
 
 # Build + pacchetto Linux (auto-detect distro host)
 npm run dist:linux
@@ -312,6 +320,26 @@ L'applicazione è completamente controllabile via tastiera per un'esperienza "Le
 | `L` | Mostra/Nascondi Playlist (Live/Serie) |
 | `Esc` | Indietro / Chiudi menu / Esci da Fullscreen |
 
+### Stato migrazione Wails v3
+
+La rotta da Electron a Wails v3 (Go) è descritta in `docs/plan-go-wails-migration.md` (rev. 5). Stato corrente:
+
+| Fase | Ambito | Stato |
+|------|--------|-------|
+| 1 | Bootstrap Wails v3 + restructure `frontend/` + go:embed | ✅ |
+| 2 | Discovery Service (Go) + sostituzione `deviceDiscovery.ts` | ✅ |
+| 2-bis | Advertising mDNS/SSDP + DIAL HTTP receiver + ServiceStartup hooks | ✅ |
+| 3 | Cast Service (castv2 Go + DLNA SOAP + AirPlay) | ✅ |
+| 4 | Remote WebSocket + UDP broadcast + Netstatus bridge | ✅ |
+| 5 | Proxy stream (TLS skip, header rewrite, cleartext) | ✅ |
+| 6 | Player bridge (Video.js + nativo Android) | ☐ |
+| 7 | Lifecycle, single-instance ✅, tray, media keys, data migration IndexedDB v1→v2 | 🔄 |
+| 8 | Packaging Wails per-distro + firma GPG | ☐ |
+| 9 | Rimozione `main.js` / `preload.js` Electron | ☐ |
+| 10 | E2E test casting cross-vendor + collaudo TV box | ☐ |
+
+Per i dettagli implementativi e l'inventario completo Electron → Wails (43 voci E1–E43) consulta [`docs/plan-go-wails-migration.md`](docs/plan-go-wails-migration.md).
+
 ### Navigazione TV/telecomando
 
 - Le frecce direzionali spostano il focus tra elementi `tv-focus` visibili nella schermata corrente.
@@ -347,27 +375,40 @@ STREAMAI_ADVERTISING_PORT=8090
 
 ## 📁 Struttura Progetto
 
+Il repository è organizzato per supportare contemporaneamente il runtime **Electron** (legacy) e il runtime **Wails v3** (in arrivo). Il frontend React vive in `frontend/`, il backend Go in `cmd/` + `internal/`.
+
 ```
 streamai-iptv/
-├── components/          # Componenti React
-│   ├── VideoPlayerNew.tsx # Player principale (Video.js + Nativo + OSD)
-│   ├── AIRecommender.tsx # Assistente AI
-│   ├── ChannelList.tsx  # Lista canali virtualizzata
-│   ├── CastDevicePicker.tsx # Menu selezione dispositivi Cast
-│   └── ...
-├── services/            # Servizi (Business Logic)
-│   ├── geminiService.ts # Integrazione Gemini AI
-│   ├── deviceDiscovery.ts # Scansione rete (mDNS, SSDP, ARP)
-│   ├── advertisingService.js # (Electron Main) Annuncio servizi rete
-│   ├── platformService.ts # Astrazione piattaforma
-│   └── ...
-├── scripts/             # Script di build
-│   ├── patch-ffmpeg.js  # Patch codec HEVC
-│   └── android-build-release.sh # Build release Android
-├── main.js              # Entry point Electron
-├── App.tsx              # Componente principale
-└── package.json
+├── frontend/                       # React 19 + Vite + Tailwind (UI only)
+│   ├── App.tsx / index.tsx / index.html / types.ts
+│   ├── components/                 # Componenti React (VideoPlayerNew, ChannelList, …)
+│   ├── services/                   # Logica business (geminiService, xtream, deviceDiscovery, …)
+│   ├── hooks/ contexts/ public/ tests/
+│   └── dist/                       # Output `vite build` (embed via assets.go)
+├── cmd/streamai/main.go            # Entry point Wails v3 (application.New)
+├── internal/                       # Wails Services in Go
+│   ├── pkg/wailsevents/
+│   └── services/
+│       ├── discovery/              # Scansione subnet (sostituisce deviceDiscovery.ts)
+│       ├── advertising/            # mDNS + SSDP + DIAL HTTP receiver
+│       ├── cast/                   # Chromecast / DLNA / AirPlay launcher
+│       ├── remote/                 # WebSocket + UDP broadcast + REST locale
+│       ├── netstatus/              # Bridge stato playback ↔ remote/AI
+│       ├── proxy/                  # Header rewrite + TLS skip per stream IPTV
+│       └── player/                 # Bridge verso player nativo / Video.js
+├── assets.go                       # //go:embed all:frontend/dist
+├── go.mod / go.sum / Taskfile.yml / .golangci.yml
+├── android/                        # Capacitor 7 (Android target)
+│   └── plugins/capacitor-video-player/  # Plugin Media3 1.10.1 vendorato
+├── main.js / preload.js            # Entry point Electron (legacy, fase 7 della migrazione)
+├── scripts/                        # patch-ffmpeg, sync-version, check-wails-v3, …
+├── docs/                           # plan-go-wails-migration.md, IMPROVEMENT_PLAN.md, SIGNING.md, INSTALL.md
+├── build/depends/                  # JSON dipendenze per-distro (deb/rpm/arch)
+├── release/                        # Artefatti electron-builder
+└── package.json / vite.config.ts / tsconfig.json / vitest.config.ts
 ```
+
+> **Nota:** Vite ha `root: 'frontend'` (vedi `vite.config.ts`) e Vitest legge da `frontend/tests/**`. `package.json` + `node_modules/` restano in root così la stessa toolchain serve build Electron, Wails e Capacitor senza duplicazione.
 
 ---
 

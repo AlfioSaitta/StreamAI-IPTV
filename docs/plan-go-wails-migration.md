@@ -1,11 +1,52 @@
 # 🚀 Piano di Migrazione: Electron → Go + Wails v3
 
-> **Status:** Approvato per esecuzione — **revisione 4** (Wails v3 esclusivo)  
+> **Status:** In esecuzione — **revisione 6** (snapshot stato 2026-05-20)  
 > **Owner:** Maintainer StreamAI-IPTV  
 > **Target ramo:** `feat/wails-migration` (long-lived)  
 > **Versione di partenza:** `1.x` Electron  
 > **Versione di arrivo:** `2.0.0` Wails v3 — **Linux + Windows + macOS day-1**  
-> **Ultima revisione:** 2026-05-18
+> **Ultima revisione:** 2026-05-20 (rev. 6)
+
+> ## 🆕 Cosa cambia in rev. 6 (2026-05-20)
+> Snapshot dello stato del codice dopo le iterazioni di 2026-05-19/20.
+> Backend Go: **fasi 0–5, 2-bis, gran parte di 7-bis** complete e build verde
+> (`go build -tags gtk3 ./...` + `wails3 generate bindings ./...` genera 9
+> Service, 53 metodi, 12 model in `frontend/bindings/`). Frontend: ancora
+> 100% sull'API Electron (35 occorrenze `window.electronAPI`, nessun
+> `wailsBridge`, nessun `isWails`). Avvio **Fase 7 (compat layer TS)**:
+> installazione `@wailsio/runtime`, `services/platformService.ts` esteso
+> con `isWails`, nuovi `services/wailsBridge.ts` + `services/hostBridge.ts`
+> wrap dei Service Go già implementati (discovery, cast, netstatus,
+> remote, advertising, proxy, powersave, mediakeys). Player out-of-scope
+> Fase 7 (gated dagli SPIKE-1/2/4 della Fase 6). Vedi §3.3 "Snapshot
+> stato 2026-05-20".
+
+> ## 🗂️ Cosa è cambiato in rev. 5 (2026-05-19)
+> Analisi statica di `main.js` (685 righe), `preload.js`, `frontend/services/advertisingService.js`
+> (274 righe) confrontata con i Wails Service già scritti. Identificate **15 gap**
+> rispetto al piano rev. 4 — vedi §3.2. Modifiche al piano:
+> 1. **Fase 2 estesa**: aggiunto sotto-task §6 Fase 2-bis *DIAL HTTP receiver*
+>    (`/dial.xml` + `/apps/<APP>` GET/POST) — senza descrittore HTTP i client
+>    DIAL (YouTube/Netflix/AppCast) non possono cast verso di noi.
+> 2. **Fase 4** marcata ✅ COMPLETATA 2026-05-19: `remote/service.go` (WS :1902,
+>    ping 30s, replay lastStatus, comando `request-status-broadcast` al
+>    primo client) + `netstatus/service.go` (UDP multicast 239.255.255.251:1901,
+>    listener+broadcaster, deviceID = hostname, filtraggio self-loop).
+> 3. **Fase 5 estesa**: proxy IPTV ora include esplicitamente TLS-skip /
+>    certificate-bypass / disable-CSP/X-Frame-Options come da
+>    `STREAMAI_INSECURE_ELECTRON` opt-in di Electron, oltre alla riscrittura
+>    header HTTP. libmpv `tls-verify=no` configurabile per stream sporchi.
+> 4. **Nuova Fase 7-bis** *Integrazione OS, lifecycle & data migration*
+>    (≈ 5 gg): hook shutdown ordinato dei Service, single-instance lock,
+>    system tray + icon embed, power-save blocker durante playback
+>    (display sleep prevention), media keys MPRIS2 / SMTC / MPNowPlaying,
+>    notifiche di sistema, logging file rotante (`zerolog` + `lumberjack`),
+>    crash recover, **migrazione IndexedDB profili da Chromium → WebKit/
+>    WebView2/WKWebView** (rischio data-loss v1→v2 senza export/import).
+> 5. **§10 aggiornata** con nuove righe: DIAL receiver, power-save, media
+>    keys, notifiche, persistenza dati.
+> 6. **§7 rischi** ampliato: R23 (data-loss IndexedDB), R24 (display sleep
+>    durante playback), R25 (DIAL receiver test cross-vendor).
 
 > ## 📌 Decisioni vincolanti (rev. 4)
 > 1. **Runtime: Wails v3** (release stable a partire dalla v3.0.0 ufficiale,
@@ -315,12 +356,118 @@ export const host = platformService.isWails
 (regex one-shot, ~20 occorrenze).
 
 
+### 3.2 Inventario completo Electron → Wails (gap analysis, rev. 5)
+
+Estratto da analisi statica di `main.js`, `preload.js`,
+`frontend/services/advertisingService.js`. Le righe ✅ sono coperte
+dal piano; le righe ⚠️ richiedono task aggiunti in questa revisione.
+
+| # | Feature Electron (file:line) | Stato piano | Wails v3 target | Fase |
+|---|---|---|---|---|
+| E1 | `BrowserWindow({backgroundColor:'#141414', autoHideMenuBar:true, icon})` (main.js:259) | ✅ | `app.Window.NewWithOptions({BackgroundColour, …})` + asset `build/icons/` | 1 |
+| E2 | `webPreferences.webSecurity / allowRunningInsecureContent` (main.js:264-271) | ⚠️ Indiretto | Proxy HTTP locale + libmpv `tls-verify=no` opt-in | 5 |
+| E3 | `session.setCertificateVerifyProc()` + `certificate-error` (main.js:276-284) | ⚠️ Indiretto | libmpv `tls-verify=no` + proxy `InsecureSkipVerify` | 5 |
+| E4 | `webRequest.onBeforeSendHeaders` → UA "StreamAI IPTV" + no-cache (main.js:286-295) | ✅ | `proxy.RewriteRequest()` middleware | 5 |
+| E5 | `webRequest.onHeadersReceived` → strip CSP/X-Frame-Options + CORS `*` (main.js:297-307) | ✅ | `proxy.RewriteResponse()` middleware | 5 |
+| E6 | Chromium switches: `enable-features=VaapiVideoDecoder, ProprietaryCodecs, …` (main.js:229-251) | ✅ N/A | libmpv `hwdec=auto-safe` (no webview decode) | 6 |
+| E7 | `STREAMAI_INSECURE_ELECTRON` env opt-in | ⚠️ | `STREAMAI_INSECURE=1` → proxy + libmpv flag | 5 |
+| E8 | `ipcMain.handle('get-local-ips')` (main.js:512) | ✅ | `DiscoveryService.GetLocalIPs` | 2 ✅ |
+| E9 | `ipcMain.handle('probe-device-services')` (main.js:528) | ✅ | `DiscoveryService.ProbeDeviceServices` | 2 ✅ |
+| E10 | `ipcMain.handle('scan-ip')` (main.js:533) | ✅ | `DiscoveryService.ScanIP` | 2 ✅ |
+| E11 | `ipcMain.handle('discover-devices')` SSDP + scan **prime 3 NIC** (main.js:544-560) | ✅ | `DiscoveryService.DiscoverDevices` (allineare slice 3 NIC) | 2 ✅ |
+| E12 | Event `device-found` durante scan (streaming) (main.js:149,182) | ✅ | `wailsevents.Emit("device-found", dev)` | 2 ✅ |
+| E13 | `ipcMain.handle('cast-connect/load/control/disconnect')` (main.js:562-641) | ✅ | `CastService.*` | 3 ✅ |
+| E14 | Event `cast-status` polling 1s (main.js:64) | ✅ | `wailsevents.Emit("cast-status", st)` diff-emit | 3 ✅ |
+| E15 | Cast `Seek` (main.js:628) | ⚠️ Lib lacuna | Canale CastV2 raw via `client.NewChannel` | 3-bis |
+| E16 | WebSocket `:1902` server + `wsClients` set (main.js:441-506) | ✅ | `remote/service.go` `coder/websocket` | 4 ✅ |
+| E17 | WS replay `lastStatus` al nuovo client (main.js:460) | ✅ | `remote.lastSt` snapshot | 4 ✅ |
+| E18 | WS emit `request-status-broadcast` al primo client (main.js:464) | ✅ | `wailsevents.Emit("request-status-broadcast")` | 4 ✅ |
+| E19 | WS ping/pong keepalive 30s (main.js:486) | ✅ | `remote.pingLoop()` | 4 ✅ |
+| E20 | WS forward `remote-control-command` (main.js:478) | ✅ | `wailsevents.Emit("remote-control-command", cmd)` | 4 ✅ |
+| E21 | UDP listener multicast 239.255.255.251:1901 (main.js:324-357) | ✅ | `netstatus.listenLoop()` | 4 ✅ |
+| E22 | UDP broadcaster per-interface (multicast + .255 broadcast) (main.js:400-435) | ✅ | `netstatus.UpdatePlaybackStatus()` | 4 ✅ |
+| E23 | `deviceId = os.hostname()` filtro self-loop (main.js:27, 338) | ✅ | `netstatus.DeviceID()` | 4 ✅ |
+| E24 | Event `network-playback-status` verso renderer (main.js:342) | ✅ | `wailsevents.Emit("network-playback-status", st)` | 4 ✅ |
+| E25 | WS forward status anche a wsClients (main.js:430-434) | ✅ | `remote.BroadcastStatus()` chiamato da netstatus | 4 ✅ |
+| E26 | `advertisingService.start/stop` mDNS AirPlay (advertisingService.js:106-129) | ✅ | `advertising/mdns.go` zeroconf | 2 ✅ |
+| E27 | `advertisingService` SSDP/DIAL announce + USN (advertisingService.js:131-157) | ✅ | `advertising/ssdp.go` go-ssdp | 2 ✅ |
+| E28 | **HTTP server :8090 `/dial.xml` + `/apps/<APP>` GET/POST** (advertisingService.js:159-268) | ✅ | `advertising/dial_http.go` (retry 8090..8094) | 2-bis ✅ |
+| E29 | `ipcMain.on('update-playback-status')` → DIAL `state=running` (advertisingService.js:36) | ✅ | `netstatus.SetDIALStateSetter(advertising)` bridge | 2-bis ✅ |
+| E30 | `app.whenReady` → createWindow (main.js:647) | ✅ | `app.Run()` blocking | 1 |
+| E31 | `app.on('window-all-closed') → quit` (main.js:649) | ⚠️ | `app.OnEvent(events.Common.ApplicationOpenedWithFile…)` + macOS dock keep-alive | 7-bis |
+| E32 | `app.on('activate') → re-create window` macOS dock (main.js:655) | ⚠️ | `app.OnEvent("activate")` | 7-bis |
+| E33 | `app.on('will-quit')` → cleanup ordinato (main.js:661) | ⚠️ | `ServiceShutdown()` per ogni Service Wails v3 | 7-bis |
+| E34 | App icon embed (`icon: path.join(__dirname,'icon.png')`) (main.js:263) | ⚠️ | Wails v3: `application.Options{Icon: icon.png bytes}` + asset bundle | 1 / 7-bis |
+| E35 | `unlimited-storage` Chromium switch (main.js:210) | ❌ MANCA | WebKitGTK / WebView2 / WKWebView quota IndexedDB diversa → **export/import profili v1→v2** | 7-bis |
+| E36 | (assente in v1) Power-save / display-sleep prevention durante playback | ❌ MANCA | `org.freedesktop.ScreenSaver.Inhibit` (Linux DBus) + `SetThreadExecutionState(ES_DISPLAY_REQUIRED)` (Win) + `IOPMAssertionCreateWithName("PreventUserIdleDisplaySleep")` (macOS) | 7-bis |
+| E37 | (assente in v1) Media keys hardware (Play/Pause/Next) | ❌ MANCA | MPRIS2 DBus (Linux), SMTC (Win), MPNowPlayingInfoCenter (macOS) | 7-bis |
+| E38 | (assente in v1) Single-instance lock | ❌ MANCA | `flock` su `$XDG_RUNTIME_DIR/streamai.lock` cross-OS | 7-bis |
+| E39 | (assente in v1) System tray | ❌ MANCA | `app.NewSystemTray()` Wails v3 | 7-bis |
+| E40 | (assente in v1) Logging file rotante | ❌ MANCA | `zerolog` + `lumberjack` su `$XDG_STATE_HOME/streamai/streamai.log` | 7-bis |
+| E41 | (assente in v1) Crash recovery / panic capture | ❌ MANCA | `recover()` top-level + dump su file `crash-<ts>.log` | 7-bis |
+| E42 | HTML5 Notifications API (frontend) | ⚠️ | WebKitGTK richiede `webkit_web_context_set_preferred_languages`+ permission grant; in Wails v3 esposto via `application.NotificationService` | 7-bis |
+| E43 | DevTools webview (Electron Ctrl+Shift+I) | ⚠️ | Wails v3: `application.Options{Debug:{Enabled:true}}` solo in dev build | 1 |
+
+**Sintesi gap rev. 5:** 13 task nuovi (E28, E29, E31–E42 al netto delle ✅).
+Tutti raggruppati nelle nuove fasi **2-bis** (DIAL receiver) e **7-bis**
+(integrazione OS + lifecycle + data migration). Stima incrementale:
+**+5 gg-uomo** sul totale (≈ 50 → ≈ 55 gg).
+
+### 3.3 Snapshot stato 2026-05-20 (rev. 6)
+
+| Componente | Stato | Note |
+|---|---|---|
+| `cmd/streamai/main.go` | ✅ | Single-instance + logging + crashguard + 9 Service registrati + tray + devtools opt-in + reverse-shutdown order |
+| `internal/services/discovery/` | ✅ | SSDP + subnet /24 + mDNS browse + ProbeServices |
+| `internal/services/advertising/` | ✅ | mDNS + SSDP + **DIAL HTTP receiver** (Fase 2-bis) |
+| `internal/services/cast/` | ✅ | barnybug/go-cast, polling 1s diff-emit; `Seek` non implementato (Fase 3-bis) |
+| `internal/services/remote/` | ✅ | coder/websocket :1902, replay lastSt, request-status-broadcast |
+| `internal/services/netstatus/` | ✅ | UDP multicast :1901, bridge DIAL state, bridge WS broadcaster |
+| `internal/services/proxy/` | ✅ | HTTP proxy IPTV `127.0.0.1:<random>` con strip CSP/XFO + UA rewrite + TLS-skip opt-in |
+| `internal/services/player/` | ⚠️ scaffold | Dispatcher + stub backend + cgo backend (`-tags mpv`) ✅ 2026-05-21; render-API + PiP ❌ gated da SPIKE-1/2/4 |
+| `internal/services/powersave/` + `pkg/powersave/` | ✅ | DBus ScreenSaver (Linux), SetThreadExecutionState (Win), caffeinate (macOS) |
+| `internal/services/mediakeys/` + `pkg/mediakeys/` | ✅ Linux | MPRIS2 D-Bus; SMTC Win + MPNowPlaying macOS rinviati |
+| `internal/pkg/singleinstance/` | ✅ | flock + unix socket FOCUS IPC (Unix); stub Windows |
+| `internal/pkg/logging/` | ✅ | zerolog + lumberjack, XDG paths + override `STREAMAI_LOG_FILE` |
+| `internal/pkg/crashguard/` | ✅ | `Recover` top-level, crash-<ts>.log next to log file |
+| `internal/pkg/tray/` | ✅ | SystemTray menu Mostra/Log/Esci; PiP+Pausa rinviate a Fase 6 |
+| `internal/pkg/devtools/` | ✅ | `STREAMAI_DEBUG=1` opt-in, Ctrl+Shift+I / F12 |
+| `internal/pkg/appicon/` | ✅ | 256×256 + 512×512 embed |
+| `internal/pkg/wailsevents/` | ✅ | Emit helper con guard early-startup |
+| `frontend/bindings/` | ✅ generato | 9 Service, 53 metodi, 12 model — `npm run wails:bindings` (warning `DIALStateSetter` ✅ risolto 2026-05-21, vedi §3.4) |
+| `services/platformService.ts` | ✅ | Esteso 2026-05-20 con `isWails` + `isDesktop` (Fase 7.1) |
+| `services/wailsBridge.ts` | ✅ | Creato 2026-05-20 (Fase 7.1) — wrap di discovery/cast/netstatus |
+| `services/hostBridge.ts` | ✅ | Creato 2026-05-20 (Fase 7.1) — accessor `host` runtime-switched |
+| Sostituzione `window.electronAPI` (35 occ.) | ✅ | Sweep completato 2026-05-20 (Fase 7.2) — 15 occorrenze effettive su 6 file via `host` accessor |
+| `package.json` deps `@wailsio/runtime` | ✅ | `@wailsio/runtime@3.0.0-alpha.79` (Fase 7.1) |
+| `nfpm.yaml` + `linux-release.yml` Wails | ❌ | Fase 8 |
+| Workflow Windows / macOS | ❌ | Fase 9 / 9-bis |
+| Data migration v1 → v2 (IndexedDB) | ❌ | Fase 7-bis.8 — critica, non iniziata |
+| Notifiche di sistema | 🚧 | Fase 7-bis.9 bloccata su upstream Wails alpha.93 |
+
+### 3.4 Warning bindings noto (DIALStateSetter) — ✅ RISOLTO 2026-05-21
+
+`wails3 generate bindings ./...` emetteva un warning su
+`netstatus.SetDIALStateSetter(b DIALStateSetter)`: i parametri di tipo
+interface non-vuoto non sono serializzabili via `encoding/json` e il
+binding generato accetterebbe solo `null`. **Mitigazione adottata:** il
+metodo è stato rimosso dalla superficie pubblica del Service e la
+dipendenza `DIALStateSetter` è ora iniettata tramite il costruttore
+`netstatus.New(ws, dial)`. Ordine di costruzione in `cmd/streamai/main.go`
+invertito (advertising prima di netstatus) per accomodare la
+constructor injection. Bindings rigenerati: 9 Service, **53 metodi**, 12
+model, **0 warning**. Inoltre `package.json` `wails:bindings` e
+`Taskfile.yml` `generate:bindings` ora invocano `wails3 generate
+bindings ./...` con il pattern di pacchetti esplicito (senza, alpha.93
+processa 0 Service).
+
+
 ---
 
 ## 4. Player video integrato + Picture-in-Picture (architettura dettagliata)
 
 Sezione critica: il punto di maggior costo ingegneristico della migrazione.
-Implementiamo **un solo backend** (D), uguale su tutti gli OS.
+Implementiamo **un solo backend** (D), uguale su tutti e 3 gli OS.
 
 ### 4.1 Pipeline unico: libmpv → canvas WebGL
 
@@ -353,7 +500,7 @@ Implementiamo **un solo backend** (D), uguale su tutti gli OS.
 
 Niente più backend B / A / engine selector: una sola classe `MpvEngine` con
 le stesse API esposte oggi da `useWebPlayerEngine.ts`. La logica di proxy IPTV
-(§5) resta per riscrittura header HTTP, ma **non fa transmuxing**: passa
+(§5) resta per riscrivere header HTTP, ma **non fa transmuxing**: passa
 l'URL così com'è a libmpv, che gestisce HLS/DASH/MPEG-TS/MP4 nativamente.
 
 ### 4.2 Backend D — libmpv render-API → `<canvas>` in-DOM
@@ -520,7 +667,8 @@ Con libmpv in backend D, **tutti** disponibili senza patch FFmpeg:
 > (3840×2160, fino a 60 fps, HEVC 10-bit / AV1)** in modo fluido e con
 > sincronia audio/video impeccabile su HW di fascia consumer moderna
 > (Intel UHD Graphics 770+ / AMD RDNA2+ / NVIDIA Maxwell+ / Apple Silicon /
-> Intel ≥ 11ª gen iGPU). Drift AV ≤ ±40 ms su qualsiasi sessione di 1h.
+> Intel ≥ 11ª gen iGPU). Drift AV ≤ ±40 ms a regime, nessun
+> sync re-snap visibile/udibile su sessioni di 1+ ora. Vedi §4.8.
 
 #### 4.8.1 Pipeline a 4K, decisioni chiave
 
@@ -618,7 +766,7 @@ tempo reale (debug build sempre, prod build con `?diag=1`):
 
 - Frame dropped (vo / decoder)
 - AV-sync delta corrente (ms, +/- = video in anticipo/ritardo)
-- AV-sync drift media ultimi 60s
+- AV-sync drift medio / peak su HLS live HEVC 4K, sessione 1h
 - Buffer health (cache-buffering-state / demuxer-cache-duration)
 - Bitrate corrente / target / max disponibile
 - Codec, profile, level, color space, HDR transfer
@@ -739,104 +887,326 @@ singolo binario fat. Pipeline CI `macos-release.yml`:
 > Convenzione: ☐ todo · ◐ in progress · ☑ done · ✖ canceled. Stime in
 > giornate-uomo (gg) di lavoro focalizzato.
 
-### Fase 0 — Preparazione & baseline (≈3 gg)
-- ☐ Catturare baseline KPI (vedi §1.3) su **Linux + Windows + macOS** e
-  annotare in `docs/MIGRATION_KPI.md` (un foglio per OS)
-- ☐ Creare branch `feat/wails-migration` da `main`
-- ☐ Install Go 1.23+ in CI matrix (matrix-add accanto a Node)
-- ☐ Install Wails v3 CLI:
-  `go install github.com/wailsapp/wails/v3/cmd/wails3@latest` (versione
-  pinnata in `Taskfile.yml` + `go.mod`)
-- ☐ Setup CI runner matrix: `ubuntu-24.04`, `windows-2022`, `macos-14`
-  (Apple Silicon) — verificare disponibilità minuti per workflow paralleli
-- ☐ Verificare libmpv + webkitgtk-6.0 (o webkit2gtk-4.1 come fallback)
-  disponibili sulle 6 distro Linux target — `wails3` su Linux usa
-  preferibilmente WebKitGTK 6.0 dove disponibile
-- ☐ Pin versioni mpv pre-built: `mpv-2.dll` (Windows shinchiro build) +
-  `libmpv.2.dylib` (macOS universal, iina o Homebrew lipo)
-- ☐ Setup keychain CI: Apple Developer ID cert + Authenticode EV cert
-  (issue separato, blocking per fase 8/9)
-- ☐ Aggiungere `scripts/check-wails-v3.mjs` lint guard che fa fail PR-check
-  se compaiono import `wails/v2`, `wailsjs/go/`, `runtime.EventsEmit`,
-  `runtime.EventsOn`, `wails.Run` nel codebase (post-Fase 1)
+### Fase 0 — Preparazione & baseline (≈3 gg) — ✅ COMPLETATA 2026-05-18
+- ☑ Catturare baseline KPI (vedi §1.3) su **Linux** e annotare in
+  `docs/MIGRATION_KPI.md` — Win/macOS rinviati a Fase 9/9-bis (no runner CI ancora)
+- ☑ Branch `feat/wails-migration` creato da `main` (lavoriamo su questo)
+- ☑ Go 1.26 installato in dev (`go version go1.26.3 linux/amd64`)
+- ☑ Wails v3 CLI installato: `wails3 v3.0.0-alpha.93`
+  (`go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha.93`)
+- ☑ Lint guard `scripts/check-wails-v3.mjs` operativo
+  (`npm run check:wails` fa parte di `npm run check`)
+- ☐ CI runner matrix `ubuntu-24.04`, `windows-2022`, `macos-14` — rinviato a Fase 8/9/9-bis
+- ☐ Pin mpv pre-built `mpv-2.dll` / `libmpv.2.dylib` — rinviato a Fase 6/9/9-bis
+- ☐ Keychain CI Apple + Authenticode — rinviato a Fase 9/9-bis
 
-### Fase 1 — Scheletro Wails v3 (≈3 gg)
-- ☐ `wails3 init -n streamai-iptv -t react-ts` in cartella `wails/` temporanea
-- ☐ Mergiare struttura: portare `frontend/` Wails v3 alla root, riusando
-  `App.tsx`, `components/`, `services/*.ts`. `vite.config.ts` aggiornato
-  con alias `frontend/bindings/*` e dev-server config compatibile con
-  `wails3 dev`.
-- ☐ Creare `cmd/streamai/main.go` con:
-  ```go
-  app := application.New(application.Options{
-    Name: "StreamAI", Description: "IPTV Player",
-    Services: []application.Service{ /* …vedi §2 schema… */ },
-    Assets:   application.AssetOptions{Handler: assets.Handler()},
-  })
-  // window principale, system tray, menu nativi
-  app.Run()
-  ```
-- ☐ Creare struttura `internal/services/<name>/service.go` con `Service{}`
-  struct + (opz.) `ServiceStartup(ctx, options) error` / `ServiceShutdown()
-  error` per discovery, advertising, cast, remote, netstatus, proxy, player
-- ☐ Configurare `Taskfile.yml` (target `dev`, `build`, `package:linux`,
-  `package:windows`, `package:darwin`)
-- ☐ Verificare build cold: `wails3 dev` mostra l'app React come oggi
-- ☐ Aggiungere `go.mod` + `.golangci.yml` (linter, regola `forbidigo` per
-  bloccare import `wails/v2` permanentemente)
+### Fase 1 — Scheletro Wails v3 (≈3 gg) — ✅ COMPLETATA 2026-05-18
+- ☑ Frontend portato sotto `frontend/` con `vite.config.ts root:"frontend"`
+- ☑ `cmd/streamai/main.go` con `application.New(...)` + 9 Service registrati
+  (powersave, mediakeys, player stub, proxy, advertising, netstatus, remote,
+  cast, discovery) — ordine reverse-shutdown documentato in main.go
+- ☑ Tutti i `internal/services/<name>/service.go` esistono con
+  `ServiceStartup(ctx, opts) error` / `ServiceShutdown() error`
+  dove rilevante
+- ☑ `Taskfile.yml` con target `dev`, `build`, `frontend:build`,
+  `generate:bindings`. `npm run wails:dev` / `wails:build` / `wails:bindings`
+- ☑ `go.mod` modulo `github.com/AlfioSaitta/StreamAI-IPTV`,
+  `.golangci.yml` con regola `forbidigo` per bloccare `wails/v2`
+- ☑ `assets.go` con `//go:embed all:frontend/dist`
 
-### Fase 2 — Migrazione discovery & advertising (≈4 gg)
-- ☐ Port `discoverSsdpDevices()` → `internal/services/discovery/ssdp.go` (`koron/go-ssdp`)
-- ☐ Port `scanSubnet()` → `internal/services/discovery/subnet.go` (goroutine pool con
-  semaforo, sostituisce concurrency manuale)
-- ☐ Port `probeDeviceServices()` → `internal/services/discovery/probe.go` (`net.DialTimeout`)
-- ☐ Port `services/advertisingService.js` → `internal/services/advertising/{mdns,ssdp}.go`
-  (`grandcat/zeroconf` + `koron/go-ssdp` advertise mode)
-- ☐ Definire `DiscoveryService` v3: metodi pubblici `DiscoverDevices`,
-  `ScanIP`, `ProbeDeviceServices`, `GetLocalIPs` (auto-bindati)
-- ☐ Emit eventi via `app.EmitEvent(&application.CustomEvent{Name:
-  "device-found", Data: dev})` per streaming results
-- ☐ Generare bindings: `wails3 generate bindings -ts -d frontend/bindings`
-  → `frontend/bindings/streamai/services/discovery/DiscoveryService.ts`
-- ☐ Unit tests Go: mock multicast con `net.PacketConn` fake (testify)
+### Fase 2 — Migrazione discovery & advertising (≈4 gg) — ✅ COMPLETATA 2026-05-19
+- ☑ Port `discoverSsdpDevices()` → `internal/services/discovery/ssdp.go` (`koron/go-ssdp` v0.9.0)
+- ☑ Port `scanSubnet()` → `internal/services/discovery/subnet.go` (goroutine
+  pool con channel + `sync.WaitGroup`, concurrency=24 come main.js)
+- ☑ Port `probeDeviceServices()` → `internal/services/discovery/probe.go`
+  (`net.Dialer.DialContext` con timeout 600 ms; stesse 5 porte/priorità di
+  main.js: 8009 castv2, 8008 dial, 9080/8080 dlna, 7000 airplay)
+- ☑ Port `services/advertisingService.js` → `internal/services/advertising/{mdns,ssdp}.go`
+  (`grandcat/zeroconf` v1.0.0 + `koron/go-ssdp` advertise mode); errori
+  SSDP non-fatali (mDNS resta su); `Start/Stop/Status/SetInstance/SetHTTPPort`
+  idempotenti; `closers []func()` normalizza signature shutdown
+  (`zeroconf.Server.Shutdown()` ≠ `ssdp.Advertiser.Close() error`)
+- ☑ Definire `DiscoveryService` v3: metodi pubblici `DiscoverDevices`,
+  `ScanIP`, `ProbeDeviceServices`, `GetLocalIPs` (registrati in
+  `cmd/streamai/main.go`)
+- ☑ Helper `internal/pkg/wailsevents/Emit(name, data)` con guard
+  `application.Get() == nil` (early-startup safe) + counter
+  `DroppedCount()` per diagnostica
+- ☑ Eventi `"device-found"` streammati per ogni nuovo IP via `addAndEmit()`
+  thread-safe (`deviceSet` con `sync.Mutex` + dedup map[string]Device)
+- ☐ Generare bindings TS: `wails3 generate bindings -ts -d frontend/bindings`
+  → posticipato a Fase 6 (UI integration), bindings vivono in `.gitignore`
+- ☑ Unit tests Go (`go test ./internal/...`): `classifyDevice`,
+  `hostFromLocation` (rifiuta hostname non-IPv4 e IPv6), `GetLocalIPs`
+  (skip in sandbox senza IPv4)
+- ☑ mDNS browse complementare via `grandcat/zeroconf.Resolver.Browse` su
+  `_googlecast._tcp`, `_airplay._tcp`, `_raop._tcp`, `_dial._tcp`,
+  `_dlna._tcp` (Chromecast moderni rispondono solo via mDNS, no SSDP) —
+  funzione `browseMDNS()` pronta, attivazione integrata in `DiscoverDevices`
+  prevista Fase 3 (cast)
 
-### Fase 3 — Migrazione Cast (Chromecast CastV2) (≈3 gg)
-- ☐ Scegliere libreria (`vishen/go-chromecast` vs `barnybug/go-cast`) — POC
-- ☐ Port `cast-connect/load/control/disconnect` in `internal/services/cast/`
-- ☐ Status streaming → `app.EmitEvent("cast-status", …)` con tick 1s tramite
-  `time.Ticker` in goroutine avviata da `ServiceStartup`
-- ☐ Test end-to-end manuale: Chromecast 3rd gen + Google TV + AndroidTV box
-- ☐ Documentare differenze `streamType: 'LIVE'` vs `'BUFFERED'` per VOD
+**Note implementative:**
+- `application.Get()` ritorna l'istanza Wails post-`app.Run()`; eventi
+  emessi durante `ServiceStartup` vanno droppati (frontend non ancora
+  pronto). Verifichiamo con `DroppedCount` in produzione.
+- `koron/go-ssdp.Advertise` ha **due signature** in v0.9.0: l'attuale
+  richiede `location any` (era `string` in v0.6). Passato `string` ⇒ OK.
+- `zeroconf.Register(instance, service, "local.", port, txt, nil)`: il
+  parametro `ifaces nil` significa "tutte le interface up" — perfetto
+  per multi-NIC desktop.
+- IPv4 only: `searchSSDP` e `localSubnetBases` filtrano `To4() != nil`;
+  IPv6 multicast richiederebbe SSDP `[FF02::C]:1900` + scan completamente
+  diverso, fuori scope Fase 2 (vedi MOD/IPv6 in `IMPROVEMENT_TODO.md` §future).
 
-### Fase 4 — Migrazione remote control & UDP status (≈2 gg)
-- ☐ Port WebSocket server → `internal/services/remote/server.go`
-  (`nhooyr.io/websocket`) avviato in `ServiceStartup`
-- ☐ Port UDP multicast broadcast → `internal/services/netstatus/broadcast.go`
-- ☐ Hot-reconnect su cambio interfaccia (`net.Interfaces` polling)
-- ☐ Verificare interop con `useRemoteControl.ts` esistente (no cambi UI):
-  i comandi remoti vengono ri-emessi al frontend via `app.EmitEvent(
-  "remote-control-command", cmd)`
+### Fase 2-bis — DIAL HTTP receiver (≈1.5 gg, gap E28+E29 rev. 5) — ✅ COMPLETATA 2026-05-19
 
-### Fase 5 — HTTP proxy IPTV & header rewrite (≈2 gg)
-- ☐ Implementare `internal/services/proxy/server.go` su porta locale random
-  (`127.0.0.1:0` con `net.Listen` random port) come `Service` standalone
-- ☐ Pattern: `http://127.0.0.1:<p>/proxy?u=<base64url>&ua=<...>` → riscrive
-  `User-Agent`, strippa `CSP`/`X-Frame-Options`, abilita CORS `*`
-- ☐ Espone `(*ProxyService).BuildProxyURL(stream Stream) string`
-- ☐ **Nessun transmux**: libmpv accetta direttamente HLS/DASH/MPEG-TS/MP4,
-  il proxy serve solo per riscrivere header HTTP problematici dei provider IPTV
-- ☐ In alternativa, considerare l'integrazione come **middleware
-  dell'AssetServer v3** (`application.AssetServerOptions.Middleware`) per
-  evitare il listener separato — decisione architetturale al momento
-  dell'implementazione
-- ☐ Sostituisce in `App.tsx` la dipendenza dai webRequest interceptor di
-  Electron (Wails non li espone nativamente)
+> Rationale: `advertisingService.js` non si limita ad annunciare via mDNS/
+> SSDP — espone anche un **HTTP server su porta `8090` (con retry +1 fino
+> a `8094`)** che serve `/dial.xml` (UPnP device descriptor) e gestisce
+> `/apps/StreamAI IPTV` (GET = stato `running|stopped`, POST = launch
+> request da remoto). Senza questo descrittore, i client DIAL nativi
+> (YouTube, Netflix, Tubi, AppCast) **non vedono StreamAI come receiver**
+> anche se l'SSDP annuncia il device. Coperto solo parzialmente in Fase 2.
+
+- ☑ Implementato `internal/services/advertising/dial_http.go`:
+  - `net.Listen("tcp4", "0.0.0.0:8090")` con retry +1 fino a `MAX_PORT_ATTEMPTS=5`
+    (`isAddrInUse()` portable match su `EADDRINUSE`, replica `advertisingService.js:174-194`).
+  - Handler `/dial.xml` → XML UPnP device descriptor con `friendlyName=StreamAI IPTV`,
+    `manufacturer=StreamAI`, `modelName=StreamAI Desktop Player`, `UDN=uuid:streamai-<version>`
+    (versione iniettata da `SetAppVersion()` chiamato in `cmd/streamai/main.go`).
+  - Handler `/apps/StreamAI IPTV` con match path tollerante a url-encoding (`%20` o spazio
+    letterale) e trailing slash. Estende lo spec: aggiunto anche `DELETE` (DIAL allowStop=true).
+    - `GET` → XML `<state>running|stopped</state>` da `dialState atomic.Bool`.
+    - `POST` → body parser best-effort (`extractDialURL`): JSON `{"url":"..."}`, form-urlencoded
+      `v=`/`url=`/`src=`/`uri=`, raw `http(s)://...`. Emit `wailsevents.Emit("dial-launch-request", {app, contentType, raw, url})`.
+    - `DELETE` → `dial-launch-request-stop`.
+- ☑ `Service.Start()` aggiornato per avviare HTTP DIAL **prima** di SSDP (la LOCATION URL SSDP
+  deve puntare alla porta effettiva del DIAL server).
+- ☑ `ssdp.go`: LOCATION URL ora `http://<advertisedHost>:<actualHTTPPort>/dial.xml` con IP IPv4
+  reale (prima NIC non-loopback). Fallback a `httpPort` legacy se DIAL HTTP non parte.
+- ☑ Bridge netstatus → advertising: interfaccia `DIALStateSetter { SetDIALState(bool) }`
+  esposta da advertising e iniettata in netstatus via `SetDIALStateSetter()` post-construction
+  (evita ciclo import). `UpdatePlaybackStatus()` propaga `status.IsPlaying`.
+- ☑ Wiring `cmd/streamai/main.go`: `advertisingSvc.SetAppVersion(version)` +
+  `netstatusSvc.SetDIALStateSetter(advertisingSvc)` prima di `application.New(...)`.
+- ☑ Lifecycle hooks Wails v3 in `advertising/service.go`: `ServiceStartup(ctx, ServiceOptions) error`
+  invoca `Start()` (mDNS + DIAL HTTP + SSDP); `ServiceShutdown() error` invoca `Stop()`.
+  Errori non-fatali (mDNS può fallire in container/sandbox dove i multicast socket sono filtrati)
+  vengono loggati ma non abbattono l'app. Replica `app.whenReady() → advertisingService.start()`
+  + `app.on('will-quit', ...)` di main.js Electron. Prefisso "Service" esclude i metodi dal bindings
+  generator v3 (non esposti al frontend).
+- ☑ Unit test (`dial_http_test.go`, 13 test):
+  - rendering `dial.xml` (Content-Type, Application-URL, friendlyName/modelName/UDN, no XSS).
+  - `/apps/<APP>` GET stato stopped + running.
+  - URL-encoded path + trailing slash + unknown app → 404.
+  - POST launch → 201 + Location header.
+  - DELETE stop → 200; PUT → 405.
+  - `extractDialURL` su 10 casi (raw, JSON, form-urlencoded multi-key, garbage).
+  - `SetDIALState` idempotente.
+  - Lifecycle end-to-end del listener su porta reale (skippato in env senza porte libere).
+  - `ServiceStartup`/`ServiceShutdown` idempotenti + soft-fail su mDNS/SSDP non disponibili.
+- ☐ Test end-to-end manuale: cast da YouTube Android → StreamAI riceve
+  POST con URL HLS → frontend avvia playback (rinviato a Fase 10).
+
+
+
+### Fase 3 — Migrazione Cast (Chromecast CastV2) (≈3 gg) — ✅ COMPLETATA 2026-05-19
+- ☑ Scegliere libreria: **`barnybug/go-cast`** v0.0.0-2024-05-23 (POC ok).
+  `vishen/go-chromecast` scartato perché tira dentro gRPC + OpenTelemetry +
+  OAuth2 + Google APIs (~150 MB di moduli) per uno use-case che richiede
+  solo CastV2 protobuf. `barnybug` aggiunge solo `gogo/protobuf` e bumpa
+  `miekg/dns` (già presente via zeroconf). Binario finale 18 MB (+1 MB).
+- ☑ Port `cast-connect/load/control/disconnect` → `internal/services/cast/
+  service.go`. API pubbliche: `Connect(host, port)`, `Load(LoadRequest)`,
+  `Control(ControlCommand)`, `Disconnect()`, `GetStatus() Status`. Timeout
+  (`connectTimeout=8s`, `loadTimeout=12s`, `controlTimeout=4s`) matchano
+  esattamente le costanti `CAST_*_TIMEOUT_MS` di main.js.
+- ☑ Status streaming → `wailsevents.Emit("cast-status", Status)` con tick
+  1 s tramite `time.Ticker` in goroutine avviata in `Connect()` (non in
+  `ServiceStartup` — l'app non sa a priori se l'utente userà mai il
+  cast). `pollStatus()` diffa contro l'ultimo snapshot e emette solo se
+  cambia qualcosa (riduce traffico IPC). `ServiceShutdown()` chiude il
+  ticker e la sessione.
+- ☑ Documentate differenze `streamType:"LIVE"` (default, nasconde
+  timeline sul receiver) vs `"BUFFERED"` (VOD, seekable) nel doc-comment
+  del package.
+- ☑ Heuristic `guessContentType` ricalca `getCastContentType` di main.js
+  (.m3u8 → HLS, .mpd → DASH, .mkv → matroska, .mp4/.ts/default → mp4/mp2t).
+- ☑ Unit tests Go (`go test ./internal/services/cast/`): `isValidIPv4`,
+  `clamp01`, `guessContentType` (10 + 5 + 7 casi, edge cases inclusi
+  case-insensitive e IPv6 esplicitamente rifiutato).
+- ☐ Test end-to-end manuale: Chromecast 3rd gen + Google TV + AndroidTV
+  box (rinviato a Fase 10 — QA cross-platform; richiede device reale).
+
+**Limitazioni note (TODO Fase 3-bis):**
+- `barnybug/go-cast` non espone `Seek`. `Control{action:"seek"}` ritorna
+  `errors.New("cast: seek non implementato (Fase 3-bis)")` non-fatal.
+  Per implementarlo: creare un canale CastV2 ad-hoc via
+  `client.NewChannel(sourceId, transportId, NamespaceMedia)` usando
+  `transportId` da `ApplicationSession.TransportId` (ottenuto in
+  `Load`), poi inviare un payload `{type:"SEEK", currentTime: N,
+  mediaSessionId: M}` via `Channel.Request`. Bassa priorità: i live
+  stream IPTV non sono seekable, e per VOD esiste già il fallback UI.
+
+### Fase 4 — Migrazione remote control & UDP status (≈2 gg) — ✅ COMPLETATA 2026-05-19
+- ☑ Port WebSocket server → `internal/services/remote/service.go`
+  (`coder/websocket` v1.8.14) avviato in `ServiceStartup`, porta 1902
+  configurabile (`New(port int)`, 0 → `DefaultPort=1902`). `InsecureSkipVerify`
+  abilitato (LAN-only), `SetReadLimit(64 KB)`, keepalive ping 30s.
+- ☑ Replay `lastSt` snapshot al nuovo client (E17), forward comandi remoti
+  via `wailsevents.Emit("remote-control-command", cmd)` (E20), risposta
+  immediata `{"type":"pong"}` ai ping client (E19).
+- ☑ Emissione `request-status-broadcast` al primo client connesso (E18)
+  → il frontend ri-invia lo stato corrente via `UpdatePlaybackStatus()`.
+- ☑ Port UDP multicast → `internal/services/netstatus/service.go`. Listener
+  `net.ListenUDP("udp4", ":1901")` con `SetReadDeadline(1s)` per polling
+  `ctx.Done()`. Broadcaster per-interface (multicast 239.255.255.251 +
+  broadcast `<a.b.c>.255`) replicando logica `main.js:400-435`.
+- ☑ `deviceID = os.Hostname()` per filtro self-loop (E23). Bridge
+  netstatus → remote: interfaccia `WSBroadcaster { BroadcastStatus(any) }`
+  iniettata via costruttore — i client WS ricevono lo stesso payload via
+  WS (E25).
+- ☑ Hot-reconnect: rejoin multicast group ogni 30s (loop in goroutine
+  `rejoinLoop`), copre cambio interfaccia con `net.Interfaces` rilettura.
+- ☑ Wiring in `cmd/streamai/main.go`: `remoteSvc := remote.New(0)` →
+  `netstatusSvc := netstatus.New(remoteSvc)` → `Services: [..., remoteSvc,
+  netstatusSvc, ...]` in `application.Options`. Binding TS generato
+  posticipato a Fase 6 (UI integration).
+- ☐ Unit test (rinviato a Fase 4-bis QA): `BroadcastStatus` JSON shape,
+  `localIPv4()` skip in sandbox, deviceID stable across restart.
+
+**Note implementative:**
+- `coder/websocket` API: `websocket.Accept(w, r, &AcceptOptions{InsecureSkipVerify:
+  true})` per accettare connessioni da qualsiasi origin LAN (Electron usava
+  `WebSocketServer({host:'0.0.0.0'})` senza origin check). Read context
+  cancellabile via `ctx`, non serve goroutine separata di shutdown.
+- UDP listener: `net.ListenUDP("udp4", &net.UDPAddr{Port:1901})` con bind
+  wildcard `0.0.0.0` per ricevere su tutte le NIC. Per JoinGroup esplicito
+  per-NIC (multi-VLAN), serve `golang.org/x/net/ipv4.PacketConn.JoinGroup` —
+  non implementato in Fase 4 (rinviato se l'utenza segnala issue su setup
+  enterprise).
+- ServiceStartup `(ctx, options application.ServiceOptions) error` — firma
+  esatta richiesta da Wails v3 alpha.93 `pkg/application/services.go:98`.
+
+### Fase 5 — HTTP proxy IPTV & header rewrite (≈2.5 gg, esteso rev. 5) — ✅ COMPLETATA 2026-05-20
+- ☑ Implementato `internal/services/proxy/service.go` su porta locale random
+  (`127.0.0.1:0` con `net.Listen("tcp4", ...)`) come Wails v3 Service con
+  lifecycle `ServiceStartup`/`ServiceShutdown` (start automatico).
+- ☑ Pattern: `http://127.0.0.1:<p>/proxy?u=<base64url>&ua=<...>&h=<base64json>`
+  — i parametri viaggiano in query string per evitare URL-encoding ricorsivo
+  annidato dei chunk HLS.
+- ☑ Espone `BuildProxyURL(streamURL, userAgent, headers) (string, error)` +
+  `Port() (int, error)` + `Insecure() bool` + `SetInsecure(bool)` come API
+  pubblica bindabile al frontend.
+- ☑ **Nessun transmux**: il body viene copiato 1:1 via `io.Copy` senza
+  buffer — adatto a stream live MPEG-TS/HLS long-running.
+- ☑ Listener stand-alone (no AssetServer middleware): più semplice da
+  testare in isolamento + permette URL stabili indipendenti dal lifecycle
+  della finestra.
+- ☑ **Rewrite request headers** (replica `main.js:286-295`):
+  - `User-Agent: StreamAI IPTV` di default, override per-stream via `ua=`.
+  - Strip `Upgrade-Insecure-Requests`, `Origin`, `Referer` (provider IPTV
+    li usano come anti-hotlink — `extraHeaders` permette override mirato).
+  - Set baseline `Cache-Control: no-cache`, `Pragma: no-cache`, `Accept: */*`.
+  - Strip hop-by-hop (`Connection`, `Keep-Alive`, `Transfer-Encoding`, …).
+  - `extraHeaders` (JSON base64url in `h=`) per Cookie/Referer/X-Forwarded-For
+    custom per stream.
+- ☑ **Rewrite response headers** (replica `main.js:297-307`):
+  - Strip `Content-Security-Policy`, `Content-Security-Policy-Report-Only`,
+    `X-Frame-Options`.
+  - Strip hop-by-hop.
+  - Force `Access-Control-Allow-Origin: *`, `Access-Control-Allow-Headers: *`,
+    `Access-Control-Allow-Methods: GET, HEAD, OPTIONS`.
+- ☑ **TLS-skip opt-in** (replica E2+E3+E7):
+  - Env `STREAMAI_INSECURE_PROXY=1` (alias `STREAMAI_INSECURE_ELECTRON=1`
+    per backward-compat con la build Electron).
+  - `http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: insecure}}`
+    (gosec G402 silenziato con nolint + commento: abilitato solo on user opt-in).
+  - `SetInsecure(bool)` toggle a runtime — la UI può mostrare il banner
+    "Modalità insicura attiva" e ricostruire il client al volo.
+  - Persistenza UI lato profilo (`ProfilePreferences.allowInsecureStreams`)
+    rinviata a Fase 6 — il backend è già pronto.
+- ☑ Sanitizzazione log: `sanitizeURL()` maschera `username/password/pwd/token`
+  in query + userinfo `http://user:pass@host` prima di scrivere su `log.Printf`.
+- ☑ Redirect chain: `CheckRedirect` con limite 10 (CDN failover comuni in
+  HLS multi-bitrate).
+- ☑ Helper `IsIPTVRequest(url)` esportato (replica `isIptvRequest()`
+  main.js:15-19) per altri Service / test.
+- ☑ Wiring `cmd/streamai/main.go` (vedi sotto): `application.NewService(proxy.New())`
+  già registrato pre-Fase 5; Wails ora invoca automaticamente `ServiceStartup`.
+- ☑ Unit test (`service_test.go`, 11 test, run con `-race`):
+  - `IsIPTVRequest` su 11 URL (live/movie/series/player_api/porte Xtream).
+  - `sanitizeURL` su query-string + userinfo.
+  - `rewriteRequestHeaders` baseline IPTV + override extra.
+  - `rewriteResponseHeaders` strip CSP/XFO + add CORS.
+  - `BuildProxyURL` errori (proxy non avviato, scheme invalido) + round-trip
+    base64url di `u`, `ua`, `h`.
+  - **End-to-end**: fake upstream con CSP/XFO ostili → proxy strippa headers,
+    inietta UA custom, rimuove Origin, preserva body M3U8 invariato.
+  - Lifecycle: `Start`/`Stop` idempotenti.
+  - Bad params: missing `u`, base64 invalido, scheme `ftp://` → 400.
+  - `SetInsecure` toggle.
+- ☐ TLS-skip UI banner + persistenza `ProfilePreferences.allowInsecureStreams`
+  (rinviato a Fase 6, lato player).
+- ☐ `tls-verify=no` su libmpv quando `allowInsecureStreams=true` (Fase 6).
 
 ### Fase 6 — Player video integrato + PiP + 4K/AV-sync (≈11 gg) ⚠️ rischio alto, gating
 
-Questa fase è il **gate critico** della migrazione. Si parte con cinque
-spike *tecnici di fattibilità* su tutti e 3 gli OS: se uno fallisce, si
-rivede la roadmap prima di continuare con il porting delle altre feature.
+> **Stato 2026-05-21 (rev. 6.1):** scaffold backend Go + frontend hook
+> implementato (control plane completo, audio funzionante con
+> `-tags mpv`). **Video rendering** + **PiP** + **gli SPIKE 1/2/4
+> obbligatori restano TODO** — richiedono HW dedicato (Intel UHD 770+
+> / Apple Silicon / NVIDIA GTX 1660+, sessioni soak 1h, sample 4K HEVC
+> HDR10 + AV1) non disponibile in CI.
+
+#### 6.0-bis — Pre-spike scaffolding (✅ COMPLETATA 2026-05-21)
+- ☑ `internal/services/player/service.go` ridisegnato come **dispatcher**:
+  API pubblica thread-safe + interfaccia `backend` privata + `New()` selector
+  `newBackend()` build-tag-gated.
+- ☑ `internal/services/player/mpv_stub.go` (default, no-tag): backend
+  che ritorna `errNotBuilt: "rebuild with -tags mpv"` su tutti i metodi
+  → permette compilazione su CI/dev senza libmpv installato (openSUSE TW
+  development host non ha mpv pacchettizzato).
+- ☑ `internal/services/player/mpv_cgo.go` (build tag `mpv && (linux ||
+  darwin)`, `#cgo pkg-config: mpv`): backend cgo reale con:
+  - `mpv_create` + 18 opzioni profilo IPTV-friendly applicate **pre**-
+    `mpv_initialize` (plan §4.8.2: hwdec=auto-safe, video-sync=audio,
+    audio-buffer=0.2, framedrop=vo, cache=10s, demuxer=150MiB, …).
+  - **`vo=null`**: `mpv_render_context_create` non ancora attivo
+    (gated da SPIKE-1). Audio + control plane funzionanti, ma frame
+    decodificati non escono dal canvas.
+  - Helper tipizzati `setOption/setPropertyString/getPropertyString/
+    getPropertyFloat/getPropertyBool/command` con free deterministico
+    di `C.CString` via `defer C.free`.
+  - Implementazione `Load/Play/Pause/Stop/Seek/SetVolume/SetMuted/
+    SetSpeed/SetAid/SetSid/AddSub/SetMaxBitrate` via property/command.
+  - `Tracks()` via JSON unmarshal di `track-list` property.
+  - `State()` snapshot via 7 get_property tipizzati (paused, time-pos,
+    duration, volume, mute, speed, video-bitrate).
+  - HTTP headers: `User-Agent` via option dedicata, altri via
+    `http-header-fields` ("k: v\nk: v\n" formato libmpv).
+  - `Close()` chiama `mpv_terminate_destroy` + reset puntatore;
+    finalizer Go come safety net.
+- ☑ `internal/services/player/service_test.go` (5 test, 16 sub-test,
+  race-clean): `New()` smoke, `ServiceShutdown` idempotente, propagazione
+  `errNotBuilt` su tutti i 16 metodi pubblici, clamping `SetVolume`
+  (-0.5/0/0.7/1/1.5/42 → 0..1), 100 goroutine concorrenti senza panic.
+- ☑ `wails3 generate bindings` rigenerato: 9 Service, **54 metodi**
+  (+1 `State`), **13 model** (+1 `State`).
+- ☑ `frontend/hooks/useNativeMpvEngine.ts`: hook React che parla col
+  PlayerService Go via binding TS. Polling `State()` 250ms (placeholder
+  per push-events `wailsevents.Emit("player-state")` post-SPIKE).
+  Resize debounced 100ms come da plan §6.1. Error capture `errNotBuilt`
+  → `error` state per banner UI "Backend video non disponibile".
+- ☑ Validazione: `go build -tags gtk3 ./...` ✅, `go test -race
+  ./internal/services/player/` ✅ 21/21, `npx tsc --noEmit` ✅,
+  `npm run check:wails` ✅, `vitest run` ✅ 209/209.
+
+> **Sblocco UI:** con questo scaffold il frontend può già implementare
+> e testare l'OSD nuovo + l'integrazione cast/PiP/sleep timer in
+> ambiente Wails dev, audio funzionante quando il binario è compilato
+> con `-tags mpv` su un host con `libmpv-dev` installato. Il rendering
+> video reale è la prossima dipendenza dura.
 
 #### 6.0 Spike obbligatori (preflight, 5 gg) — Linux + Windows + macOS
 - ☐ **SPIKE-1: libmpv render-API → texture GL → canvas WebGL2 a 4K@60**
@@ -956,10 +1326,451 @@ rivede la roadmap prima di continuare con il porting delle altre feature.
 - ☐ Verifica HW decode attivo (VAAPI/NVDEC/D3D11VA/VideoToolbox) via
   `mpv --msg-level=vd=v` log capture
 
-### Fase 7 — Compat layer & cleanup TS (≈3 gg)
-- ☐ Creare `services/wailsBridge.ts` (vedi §3.1)
-- ☐ Estendere `platformService.ts` con `isWails`
-- ☐ Sostituire 100% delle occorrenze `window.electronAPI` con `host` (grep+sed)
+### Fase 7-bis — Integrazione OS, lifecycle & data migration (≈5 gg, nuova rev. 5)
+
+> Rationale: Electron fornisce "gratis" diversi servizi di integrazione OS
+> (lifecycle window, icon, devtools, IPC quota, IndexedDB Chromium).
+> Migrando a Wails v3 + webview di sistema, **15 dettagli vanno
+> ri-implementati esplicitamente** (vedi §3.2 righe E31–E43). Senza
+> questa fase la v2.0.0 RC rischia regressioni invisibili in sviluppo
+> ma critiche per gli utenti (profili persi al primo avvio, schermo che
+> si spegne durante un film, doppia istanza che spara due UDP broadcaster).
+
+#### 7-bis.1 Lifecycle & shutdown ordinato (E31–E33) (1 gg) — ✅ COMPLETATA 2026-05-20 (parziale)
+- ☑ `cmd/streamai/main.go`: `app.Event.OnApplicationEvent(events.Common.
+  ApplicationStarted, …)` logga il cold-start time (delta da `time.Now()`
+  catturato in cima a `main`), version, commit e path log file.
+- ☑ Cleanup ordinato via **registration order**: Wails v3 invoca
+  `ServiceShutdown` in ordine inverso di registrazione, quindi i servizi
+  sono ora registrati nell'ordine `player, proxy, advertising, netstatus,
+  remote, cast, discovery` per ottenere il teardown richiesto dal plan:
+  `cast → remote → netstatus → advertising → proxy → player` (l'ultimo
+  status WS può uscire prima della chiusura :1902, gli annunci
+  mDNS/SSDP vengono rimossi dopo lo stop dei broadcaster UDP, proxy e
+  player chiudono per ultimi). `discovery` non ha lifecycle hooks
+  (scan on-demand), posizionato in coda neutrale.
+- ☐ `app.OnEvent("activate")` (macOS): ricreazione main window quando
+  `len(app.Windows())==0` — **rinviato a Fase 9-bis** (packaging macOS).
+- ☐ Handler `SIGTERM`/`SIGINT` cooperativo (Unix): **rinviato** — Wails
+  v3 alpha.93 già intercetta i segnali dall'event loop GTK/GLib.
+  Da verificare in QA Fase 10.
+- ☐ `app.OnEvent("windowClosed")` platform-aware (E31): **rinviato a
+  Fase 9-bis** (comportamento macOS-specifico).
+
+#### 7-bis.2 Single-instance lock (E38) (0.5 gg) — ✅ COMPLETATA 2026-05-20
+- ☑ `internal/pkg/singleinstance/`:
+  - Linux/macOS (build tag `unix`): `flock(LOCK_EX|LOCK_NB)` su
+    `$XDG_RUNTIME_DIR/streamai.lock` (fallback `/tmp/streamai-<uid>/`)
+    via `golang.org/x/sys/unix`.
+  - Windows (build tag `!unix`): stub no-op (entrambe le istanze
+    partono); estensione `CreateMutexW("Global\\StreamAI-SingleInstance")`
+    + named pipe rinviata a 7-bis.2 estensione quando Wails Windows
+    sarà supportato in produzione.
+- ☑ IPC "show & focus": Unix socket in
+  `$XDG_RUNTIME_DIR/streamai.sock` con permessi 0600. La seconda
+  istanza fa `Dial("unix", ...)` con timeout 2s e invia `"FOCUS\n"`;
+  la prima dispatcha la callback `onFocus` in goroutine separata.
+- ☑ Wiring `cmd/streamai/main.go`: `singleinstance.Acquire("streamai",
+  callback)` come prima istruzione di `main()`; se
+  `ErrAlreadyRunning` ⇒ `os.Exit(0)`; soft-fail su altri errori
+  (lock file non scrivibile, etc.) per non abbattere l'app.
+  Callback `onFocus`: `app.Window.GetByName("main").Show().Focus()`.
+- ☑ Gestione stale: socket pre-esistente di crash precedente viene
+  unlinkato prima di `net.Listen("unix", ...)`; lock file persistente
+  non blocca (flock è advisory + per-fd, il lock muore con il processo).
+- ☑ Unit test (`singleinstance_test.go`, 8 test, race-clean):
+  - Prima istanza acquisisce + socket creato.
+  - Seconda istanza riceve `ErrAlreadyRunning`.
+  - Focus IPC: callback `onFocus` invocata sulla prima dopo retry
+    della seconda.
+  - `Release` + reacquire (lock e socket riusabili dopo Release).
+  - `Release` idempotente (doppia chiamata = no-op).
+  - `paths()` rifiuta `appID` vuoto o con separatori path.
+  - `XDG_RUNTIME_DIR` rispettato.
+  - Socket stale (crash della prima istanza) viene unlinkato e
+    riusato dalla nuova.
+
+
+#### 7-bis.3 Power-save / display sleep inhibitor (E36) (1 gg) — ✅ COMPLETATA 2026-05-20
+> Bug latente in Electron v1: durante un film/serie 2h lo schermo può
+> spegnersi (l'utente deve muovere il mouse). Risolto nativamente in v2.
+- ☑ Nuovo package `internal/pkg/powersave/` con tipo `Inhibitor`
+  thread-safe (sync.Mutex), API `New() *Inhibitor`, `Inhibit(reason
+  string) error`, `Uninhibit() error`, `Active() bool`, `Reason()
+  string`. Idempotenza: doppio `Inhibit` ritorna `ErrAlreadyActive`
+  (soft-error, preserva il reason originale); `Uninhibit` su inactive
+  è no-op.
+- ☑ Backend platform-specific via build-tag:
+  - `powersave_linux.go` (linux + *BSD): D-Bus session bus,
+    `org.freedesktop.ScreenSaver.Inhibit("StreamAI", reason)` →
+    `uint32 cookie`; rilascio via `UnInhibit(cookie)`. Compatibile
+    con GNOME, KDE Plasma, XFCE, Cinnamon, MATE, Budgie, Hyprland,
+    sway+swayidle ≥ 1.7. Verificato funzionante sulla sessione GNOME
+    di sviluppo (log "powersave: inhibitor active" reale, non sandbox
+    fallback).
+  - `powersave_windows.go`: `SetThreadExecutionState(ES_CONTINUOUS|
+    ES_DISPLAY_REQUIRED|ES_SYSTEM_REQUIRED|ES_AWAYMODE_REQUIRED)` via
+    `golang.org/x/sys/windows` (`kernel32.dll!SetThreadExecutionState`,
+    nessun cgo). Reset a `ES_CONTINUOUS` su Uninhibit. Goroutine
+    lockata a OS thread per coerenza pre-Win10.
+  - `powersave_darwin.go`: subprocess `/usr/bin/caffeinate -d -i -w
+    <PID>` (no cgo). Il flag `-w <PID>` aggancia la vita di
+    caffeinate al PID nostro: se l'app crasha senza Uninhibit,
+    caffeinate muore con noi → zero leak di IOPM assertion. Su
+    Uninhibit esplicito facciamo `Process.Kill()`.
+  - `powersave_other.go` (`!linux && !windows && !darwin && !*BSD`):
+    no-op silenzioso (Plan9, illumos, …).
+- ☑ Cross-compile verificato: pure-pkg compila su Linux, Windows
+  (CGO_ENABLED=0), macOS (CGO_ENABLED=0). Il wrapper Service
+  importa Wails che richiede cgo Cocoa su macOS — vincolo Wails,
+  non nostro.
+- ☑ Nuovo Wails Service `internal/services/powersave/` con metodi
+  bindable `Start(reason) error`, `Stop() error`, `Active() bool`,
+  `Reason() string` + lifecycle `ServiceStartup` (no-op lazy) e
+  `ServiceShutdown` (rilascia inhibition pendente).
+- ☑ Wiring `cmd/streamai/main.go`: registrato in cima all'array
+  (Wails reverse-shutdown: powersave per ultimo → l'IOPMAssertion/
+  DBus inhibition viene rilasciata DOPO che il player ha già
+  fatto Stop(), pipeline "playerStop → screenSleepReleased"
+  observable in QA Fase 10).
+- ☑ Mapping IPC documentato (Electron → Wails) nel godoc del Service:
+  - `electronAPI.powerSaveStart(reason)` → `PowerSaveService.Start`
+  - `electronAPI.powerSaveStop()`        → `PowerSaveService.Stop`
+  - `electronAPI.powerSaveActive()`      → `PowerSaveService.Active`
+- ☑ Unit test (2 file, 3 test): `powersave_test.go` lifecycle +
+  idempotenza + default reason "Video playback"; `service_test.go`
+  smoke del wrapper Wails + idempotenza `ServiceShutdown`.
+- ☐ Hook `PlayerService.OnPlay/OnPause/OnStop` → rinviato a Fase 6
+  (PlayerService non implementato). Punto di aggancio in
+  `cmd/streamai/main.go`: basterà chiamare
+  `powersaveSvc.Start("Live TV")` dentro callback OnStateChange del
+  player. In alternativa il frontend può invocare il binding
+  TS diretto (`PowerSaveService.Start`) — pattern usato anche da
+  altri servizi (cast, advertising) in attesa del player nativo.
+- ☐ Toggle utente `ProfilePreferences.preventDisplaySleep` (default
+  true) → rinviato a Fase 7 (compat layer & cleanup TS), dove
+  verranno aggiunti tutti i nuovi flag di `ProfilePreferences`.
+
+#### 7-bis.4 Media keys hardware (E37) (1 gg) — ✅ COMPLETATA 2026-05-20 (Linux), 🚧 Windows/macOS rinviati
+- ☑ Nuovo package `internal/pkg/mediakeys/` con tipo `Controller`
+  thread-safe (sync.Mutex), API `New(Callbacks) *Controller`,
+  `Start(identity) error`, `Stop() error`, `SetStatus`, `SetMetadata`,
+  `SetVolume`, `SetCapabilities`, `Started`, `SetCallbacks`.
+- ☑ Backend platform-specific via build-tag:
+  - `mediakeys_linux.go` (linux + *BSD): **MPRIS2 D-Bus session**.
+    Bus name `org.mpris.MediaPlayer2.streamai` (sanitizeIdentity
+    → `[a-z0-9_]`), object path `/org/mpris/MediaPlayer2`, due
+    interfacce `org.mpris.MediaPlayer2` (Raise/Quit + 7 properties:
+    Identity, DesktopEntry, CanQuit, CanRaise, HasTrackList,
+    SupportedUriSchemes, SupportedMimeTypes) e
+    `org.mpris.MediaPlayer2.Player` (10 metodi: Next, Previous,
+    Pause, PlayPause, Stop, Play, Seek, SetPosition, OpenUri + 14
+    properties: PlaybackStatus, LoopStatus, Rate, Shuffle,
+    Metadata, Volume, Position, MinimumRate, MaximumRate, 6×Can*).
+    Introspection completa via godbus/introspect → playerctl,
+    `gdbus introspect`, GNOME Shell media widget, KDE Plasma
+    Plasmoid Media Player. Fallback per-instance bus name
+    `streamai.instance<PID>` se il name principale è già preso
+    (single-instance lock di Fase 7-bis.2 evita comunque la collisione).
+  - `mediakeys_other.go` (`!linux && !*BSD`): stub no-op per
+    Windows/macOS. **TODO esplicito** nel godoc per future
+    estensioni (SMTC via `saltosystems/winrt-go` su Windows;
+    `MPNowPlayingInfoCenter` + `MPRemoteCommandCenter` via cgo
+    Cocoa su macOS, `-framework MediaPlayer`).
+- ☑ Workaround `go vet stdmethods`: il metodo `Seek(int64) *dbus.Error`
+  confligge con la signature `io.Seeker`. Soluzione adottata:
+  rinominato il metodo Go in `MprisSeek` e registrato sul bus col
+  nome `Seek` via `conn.ExportWithMap` + post-processing della
+  introspection (`buildIntrospection` rinomina manualmente).
+  Zero impatto sulla DBus signature visibile dal client.
+- ☑ Cross-compile verificato: pure-pkg + Service compilano su
+  Linux, Windows (CGO_ENABLED=0), macOS (pure-pkg only).
+- ☑ Nuovo Wails Service `internal/services/mediakeys/` con metodi
+  bindable `Start*/Stop*/SetPlaybackStatus/SetMetadata/SetVolume/
+  SetCapabilities/Started` (input JSON-safe: `MetadataInput`,
+  `CapabilitiesInput`; secondi ⇄ microseconds conversione interna).
+- ☑ Bridge eventi backend → frontend: ogni callback OnXxx emette
+  un evento Wails `media-key` con payload
+  `{action: "play|pause|playpause|stop|next|previous|seek|
+  setposition|raise|quit", offsetSeconds?, positionSeconds?}` via
+  `wailsevents.Emit`. Pattern di consumo lato frontend documentato
+  nel godoc del Service. Le callback partono in goroutine separata
+  (`dispatchCallback`) per non bloccare l'event loop D-Bus.
+- ☑ Wiring `cmd/streamai/main.go`: registrato sotto `powersave` in
+  cima all'array (Wails reverse-shutdown: mediakeys chiude DOPO
+  player, così `PlayerService.Stop → SetStatus("Stopped")` arriva
+  al DE prima dell'unregister del bus name).
+- ☑ Unit test (`mediakeys_test.go`, 6 test): Start/Stop lifecycle
+  + idempotenza ErrAlreadyStarted, setter pre-Start no-crash,
+  volume clamp [0,1], SetCallbacks atomic swap, dispatchCallback
+  nil-safe, DefaultCapabilities sanity.
+- ☑ Unit test Linux (`mediakeys_linux_test.go`, 1 test): 7 casi
+  per `sanitizeIdentity` (ASCII, spazi, simboli, non-ASCII,
+  empty, lowercase).
+- ☑ **End-to-end test reale** (`e2e_linux_test.go`, 2 test,
+  `//go:build linux`, skip se gdbus non in PATH):
+  - `TestE2E_MprisAdvertisedToSessionBus`: registra il
+    Controller, lancia `gdbus introspect` reale sul session bus,
+    verifica che l'introspection contenga `org.mpris.MediaPlayer2`,
+    `Play`, `Pause`, `PlayPause`, `Seek`, `PlaybackStatus`,
+    `Identity` (passa sul GNOME di dev).
+  - `TestE2E_MethodCallDispatchesCallback`: chiama `gdbus call`
+    su `Play`/`Pause`/`Next` e verifica che le callback Go
+    vengano invocate (passa, log "MPRIS Play()/Pause()/Next()"
+    osservabili nei test verbose).
+- ☐ Hook automatico da PlayerService → SetStatus/SetMetadata/
+  SetCapabilities: rinviato a Fase 6 (PlayerService non
+  implementato). Il frontend può intanto chiamare i binding TS
+  direttamente dal componente `VideoPlayerNew.tsx`.
+- 🚧 SMTC Windows: rinviato — richiede `saltosystems/winrt-go`,
+  +1 gg stimato. Tracking dedicato.
+- 🚧 MPRemoteCommandCenter macOS: rinviato — richiede cgo Cocoa +
+  Info.plist bundle ID, +1.5 gg stimato. Tracking dedicato.
+
+#### 7-bis.5 System tray & icon embed (E34, E39) (0.5 gg) — ✅ COMPLETATA 2026-05-20
+- ☑ Nuovo package `internal/pkg/appicon/` con `AppIcon256` + `AppIcon512`
+  embeddati via `//go:embed` da copie locali di `build/icons/256x256.png`
+  e `build/icons/512x512.png` (le copie sono necessarie perché
+  `//go:embed` non supporta path al di fuori del package).
+- ☑ `application.Options{Icon: appicon.AppIcon256}` in `cmd/streamai/main.go`
+  → dock/taskbar (Linux/macOS), finestra alt-tab + AppUserModelID (Windows),
+  dialog About.
+- ☑ Nuovo package `internal/pkg/tray/` con `Setup(app, logFilePath)
+  *application.SystemTray`. Best-effort: ritorna nil su app nil
+  senza panicare.
+- ☑ Tray attributes (replica spec plan):
+  - Tooltip: "StreamAI IPTV"
+  - Icon: `AppIcon256`
+  - Click sull'icona: toggle show/hide della main window (se visibile
+    + focused ⇒ Hide; altrimenti Show + Focus). Su Linux KDE / Windows
+    è il left-click; su macOS il click apre comunque il menu (NSStatusItem).
+  - Menu: "Mostra finestra" / "Apri cartella log" (disabled se
+    `logFilePath==""`, altrimenti apre la dir contenente streamai.log
+    via `xdg-open` / `open` / `explorer`) / separator / "Esci"
+    (accelerator `CmdOrCtrl+Q`, chiama `app.Quit()`).
+- ☑ Wiring: `tray.Setup(app, logFile)` invocato dentro l'handler
+  `OnApplicationEvent(events.Common.ApplicationStarted, …)` perché su
+  Linux/GTK la connessione dbus per libayatana-appindicator non è
+  pronta prima di `g_application_activate`.
+- ☑ Voci "Picture-in-Picture" e "Pausa" del piano **rinviate**:
+  richiedono wiring backend↔frontend via Wails Events (`tray:pip-toggle`,
+  `tray:play-pause`) che dipende dal PlayerService di Fase 6. Punto di
+  aggancio già pronto in `tray.Setup`.
+- ☑ Voce "Minimize to tray" su macOS rinviata a Fase 9-bis (packaging
+  macOS), insieme alla migrazione a `SetTemplateIcon` (icona
+  monocromatica template-style per light/dark adaptive).
+- ☑ Unit test (`tray_test.go`, 3 test): embed PNG non-empty + magic
+  header valido, `openPath` builder per OS, regression guard su
+  `MainWindowName`.
+
+#### 7-bis.6 Logging file rotante (E40) (0.5 gg) — ✅ COMPLETATA 2026-05-20
+- ☑ Nuovo package `internal/pkg/logging/` con `Init(Options) (logFile,
+  error)`, `Close()`, `LogFilePath()`, `WriteCrashReport(appID, payload)`,
+  `CrashReportsDir(appID)`.
+- ☑ Dual output via `io.MultiWriter`: `zerolog.ConsoleWriter{Out:
+  os.Stderr}` (colori disabilitati automaticamente se stderr non è un
+  TTY) + `lumberjack.Logger{MaxSize:10, MaxBackups:5, Compress:true}`.
+- ☑ Path file per OS (replica spec plan):
+  - Linux/*BSD: `$XDG_STATE_HOME/streamai/streamai.log`
+    (fallback `~/.local/state/streamai/streamai.log`)
+  - macOS: `~/Library/Logs/StreamAI/streamai.log`
+  - Windows: `%LOCALAPPDATA%\StreamAI\logs\streamai.log`
+    (fallback `%APPDATA%\StreamAI\logs\`)
+- ☑ Override path via env `STREAMAI_LOG_FILE` (utile CI/test) —
+  supporta espansione `~/` lato Linux/macOS.
+- ☑ Livello configurabile `STREAMAI_LOG_LEVEL=trace|debug|info|warn|
+  error|fatal|panic|disabled` (default `info`, fallback `info` su
+  valori sconosciuti). Parsing case-insensitive con alias
+  `warn|warning`, `disabled|off|silent`.
+- ☑ Wiring `cmd/streamai/main.go`: `logging.Init(...)` come PRIMA
+  istruzione di `main()` (prima del single-instance lock, così anche
+  l'exit "altra istanza attiva" finisce sul file rotante).
+  `defer logging.Close()` su exit path normale; `crashguard.Recover`
+  chiama `logging.Close()` prima di `os.Exit(1)`.
+- ☑ Sostituite tutte le chiamate `log.Printf` in `main.go` con
+  `log.Info/Warn/Error().Err(...).Str(...).Msg(...)` di zerolog.
+  Gli altri service mantengono il `log.Printf` standard (verrà
+  migrato gradualmente nei rispettivi PR — il global zerolog
+  intercetta comunque l'output via `log.SetOutput` indiretto se
+  necessario).
+- ☑ Unit test (`logger_test.go`, 4 test): `parseLevelEnv` (default,
+  case-insensitive, fallback, `disabled`), `resolveLogPath` (override
+  + default Linux via `XDG_STATE_HOME`), `Init` end-to-end con
+  `STREAMAI_LOG_FILE` redirect, `WriteCrashReport` su path Linux.
+- ☐ UI menu Help → "Apri cartella log" → rinviato a Fase 7-bis.5
+  (system tray + menu nativi).
+
+#### 7-bis.7 Crash recovery / panic capture (E41) (0.5 gg) — ✅ COMPLETATA 2026-05-20 (parziale)
+- ☑ Nuovo package `internal/pkg/crashguard/` con `Recover(appID,
+  version, commitSHA)` (defer top-level main) e `RecoverGoroutine(name)`
+  (defer per goroutine non-main: logga via zerolog ma non termina il
+  processo).
+- ☑ `Recover` su panic costruisce payload completo (timestamp, version,
+  commit, OS/arch, Go version, NumCPU, NumGoroutine, log file path,
+  panic value, stack trace via `debug.Stack()`) e lo scrive in
+  `crashes/crash-<unix-nano>.log` accanto al log principale via
+  `logging.WriteCrashReport`. Fa `logging.Close()` per garantire
+  flush del file rotante e termina con `os.Exit(1)`.
+- ☑ Best-effort: se la scrittura del crash report fallisce
+  (filesystem RO, perm denied), il payload viene comunque
+  dumpato su `os.Stderr` per non perdere informazioni.
+- ☑ Wiring `cmd/streamai/main.go`: `defer crashguard.Recover(
+  "streamai", version, commitSHA)` come seconda istruzione di
+  `main()` (dopo `logging.Init`, prima di qualsiasi codice che
+  possa panicare).
+- ☑ Unit test (`crashguard_test.go`, 3 test):
+  `buildPayload` contiene tutti i campi attesi, `RecoverGoroutine`
+  cattura panic senza terminare il test runner, `nonEmpty` helper.
+- ☐ Dialog opt-in "StreamAI è crashato. Invia report? [Invia/Ignora]"
+  al prossimo avvio se `CrashReportsDir(appID)` non vuota — **rinviato**
+  a Fase 7-bis.9 (notifiche di sistema) per accoppiarlo al
+  permission grant del webview.
+
+#### 7-bis.8 Migrazione dati v1 → v2 (E35) (1 gg) ⚠️ CRITICA
+> **Rischio data-loss alto.** Electron v1 salva profili, EPG cache, watch
+> history, M3U cache in **IndexedDB di Chromium** (path
+> `~/.config/StreamAI-IPTV/IndexedDB/file__0.indexeddb.leveldb/`). Webview
+> di sistema (WebKitGTK/WebView2/WKWebView) hanno path IndexedDB
+> **completamente diversi** → primo avvio v2 = utente vede onboarding
+> wizard come se fosse nuovo. Inaccettabile.
+- ☐ Step 1 (in v1.x-final patch release): aggiungere voce menu "**Esporta
+  backup completo**" → genera `streamai-backup-<date>.json` con tutto
+  IndexedDB serializzato (profili, EPG, history, preferenze, custom logos)
+- ☐ Step 2 (in v2.0.0): all'avvio, se IndexedDB vuoto, mostra dialog
+  "Migrazione da StreamAI v1" con 3 opzioni:
+  - **Import file backup** (drag-drop `.json` esportato)
+  - **Import automatico** da path Chromium IndexedDB v1 (Go legge LevelDB
+    via `github.com/syndtr/goleveldb` e deserializza i record IDB) —
+    funziona se v1 è ancora installato sulla stessa macchina
+  - **Inizia da zero** (onboarding standard)
+- ☐ Import automatico: `internal/pkg/migrate/idb_chromium.go`
+  - Linux: `~/.config/StreamAI-IPTV/IndexedDB/`
+  - Windows: `%APPDATA%\StreamAI-IPTV\IndexedDB\`
+  - macOS: `~/Library/Application Support/StreamAI-IPTV/IndexedDB/`
+- ☐ Decoder IDB-LevelDB → JSON canonical → injection via
+  `MigrationService.ImportSnapshot(json)` (usa `app.Window.Eval` per
+  scrivere su IndexedDB del webview tramite l'API JS standard)
+- ☐ Test: VM con v1 + dati reali → install v2 → parity check
+  `tests/migration/parity-check.sh`
+
+#### 7-bis.9 Notifiche di sistema (E42) (0.25 gg) — 🚧 BLOCCATA 2026-05-20
+- ⚠ **Blocker:** Wails v3 alpha.93 NON espone ancora
+  `application.NewNotification(...)` (verificato via grep —
+  esistono solo riferimenti a NSWorkspaceNotification per
+  l'observer pattern, non un'API utente per emettere notifiche).
+- Opzioni di sblocco (decisione rinviata):
+  1. Attendere Wails v3.0.0 stable (notifiche schedulate in
+     roadmap upstream). Vedi
+     https://github.com/wailsapp/wails/issues/3253.
+  2. Implementare un wrapper interno `internal/services/notifier/`
+     platform-specific:
+     - Linux/*BSD: D-Bus `org.freedesktop.Notifications.Notify`
+       (godbus, replica di `notify-send`).
+     - Windows: `Windows.UI.Notifications.ToastNotification` via
+       `github.com/saltosystems/winrt-go`.
+     - macOS: `osascript -e 'display notification "..."'`
+       subprocess (no cgo richiesto) o `UNUserNotificationCenter`
+       via cgo Cocoa (richiede `Info.plist` bundle id).
+  3. Web Notifications API (`Notification.requestPermission()` +
+     `new Notification(...)` lato frontend): più semplice ma
+     richiede al primo uso il permission grant del webview.
+- Use case attesi: "Nuovo episodio disponibile", "Cast device
+  connesso", "Errore stream", "Aggiornamento disponibile",
+  "StreamAI crash report ready (Fase 7-bis.7)".
+
+#### 7-bis.10 DevTools toggle (E43) (0.25 gg) — ✅ COMPLETATA 2026-05-20
+- ☑ Nuovo package `internal/pkg/devtools/` con `Enabled() bool`
+  (parsing env `STREAMAI_DEBUG=1|true|yes|on`, case-insensitive,
+  trim spaces) e `KeyBindings() map[string]func(application.Window)`.
+- ☑ Wails v3 alpha.93 espone già `WebviewWindowOptions{DevToolsEnabled,
+  KeyBindings}`. Wiring `cmd/streamai/main.go`:
+  - `DevToolsEnabled: devtools.Enabled()` → forza abilitazione in
+    build `production` quando l'utente lancia con `STREAMAI_DEBUG=1`.
+    In dev build (default `go build` senza tag `production`) Wails
+    abilita automaticamente i DevTools, l'env è ridondante ma
+    innocuo.
+  - `KeyBindings: devtools.KeyBindings()` → mappa
+    `cmdorctrl+shift+i` e `f12` ⇒ `w.OpenDevTools()`. La sintassi
+    accelerator Wails risolve `cmdorctrl` a `Cmd` su macOS e `Ctrl`
+    su Linux/Windows. Ritorna `nil` senza opt-in, così le bindings
+    NON vengono registrate (privacy).
+- ☑ Nei 3 webview (WebKitGTK 6.0, WebView2, WKWebView) `Ctrl+Shift+I`
+  / `F12` sono già gestiti nativamente quando DevTools sono attivi
+  — le KeyBindings Wails sono un layer aggiuntivo che funziona
+  anche su iframe sandbox o quando il webview ha focus non-default.
+- ☑ Logging: in opt-in viene scritto su zerolog "DevTools forced
+  enabled via env opt-in" (tracciabile in `streamai.log`).
+- ☑ Unit test (`devtools_test.go`, 3 test): parsing env (10 casi
+  cover positivi+negativi+whitespace), `KeyBindings` returns nil
+  senza opt-in / map con 2 entries con opt-in, callback safe su
+  window nil (regression guard "tasto premuto durante teardown").
+
+### Fase 7 — Compat layer & cleanup TS (≈3 gg) — ◐ IN PROGRESS 2026-05-20
+
+> **Stato attuale (2026-05-20):** backend Go pronto (9 Service registrati,
+> bindings TS generabili via `npm run wails:bindings`). Frontend è ancora
+> 100% sull'API Electron (35 occorrenze `window.electronAPI` su 7 file).
+> La fase è stata splittata in 3 micro-step incrementali per ridurre il
+> rischio di regressione UI:
+>
+> - **7.1 Foundation** (questo PR): `@wailsio/runtime` come dep,
+>   `platformService.ts` esteso con `isWails`, nuovi `wailsBridge.ts`
+>   wrap dei Service Go disponibili (discovery, cast, netstatus, remote,
+>   advertising, proxy, powersave, mediakeys), `hostBridge.ts` switch
+>   `isWails ? wailsBridge : electronAPI`. **Zero rimozioni** di codice
+>   Electron — pura aggiunta.
+> - **7.2 Migration sweep** (PR successivo): grep+sed di `window.electronAPI`
+>   → `host` su 35 occorrenze, mantenendo Electron come fallback runtime.
+>   Test suite vitest verde.
+> - **7.3 Electron drop** (PR finale, dopo Fase 6 player + smoke test
+>   v2.0.0-rc): rimozione `preload.js`, `main.js`, `useWebPlayerEngine.ts`,
+>   `video.js`, `hls.js`, `mpegts.js`, `electron*`, `castv2-client`,
+>   `node-ssdp`, `bonjour`, `ws` da `package.json`. Disabilita
+>   `scripts/patch-ffmpeg.js`.
+
+#### 7.1 Foundation (✅ COMPLETATA 2026-05-20)
+- ☑ Aggiunto `@wailsio/runtime@3.0.0-alpha.79` a `package.json` deps
+  (upstream npm in lag rispetto a `wails3` CLI alpha.93; alpha.79 è
+  l'ultimo pubblicato e API-compatibile per `Events.On` + `Call.ByID`).
+- ☑ `services/platformService.ts` esteso: nuovo flag `isWails`
+  (= `!!(window as any).wails`), nuovo `isDesktop = isElectron || isWails`,
+  `Platform` ora include `'wails'`. Le `capabilities` (`casting`, `pip`,
+  `download`) usano `isDesktop` invece di `isElectron`.
+- ☑ Nuovo `services/wailsBridge.ts`: wrap dei Service Go disponibili
+  (discovery, cast, netstatus) tramite i binding TS generati.
+  Eventi `device-found` / `cast-status` / `network-playback-status` /
+  `remote-control-command` / `request-status-broadcast` instradati via
+  `@wailsio/runtime` `Events.On`. Shape `HostAPI` 1:1 con `preload.js`.
+- ☑ Nuovo `services/hostBridge.ts`: accessor pigro `host` che cristallizza
+  alla prima call l'API corretta in base a `platformService.isWails` /
+  `isElectron`. Helper `requireHost()` per call site post-7.2 che esigono
+  un bridge presente.
+- ☑ `npx tsc --noEmit` verde, `npm run check:wails` verde, `vitest run`
+  209/209 verde, `go build -tags gtk3 ./...` verde, `go test ./internal/...`
+  verde su tutti i pacchetti con test (14 ok).
+- ☐ Documentare in `AGENTS.md` § "Cross-Platform Development" il pattern
+  `host` invece di `window.electronAPI` — rinviato a Fase 7.2 (insieme al
+  primo migration site).
+
+#### 7.2 Migration sweep (✅ COMPLETATA 2026-05-20)
+- ☑ Sostituite **15 occorrenze** `window.electronAPI` → `host` in:
+  - `frontend/App.tsx` (1 sito: `onNetworkPlaybackStatus`)
+  - `frontend/components/VideoPlayerNew.tsx` (2 siti: `updatePlaybackStatus`)
+  - `frontend/hooks/useCastSession.ts` (7 siti: castConnect/Load/Control/Disconnect + onCastStatus; `isElectron` → `isDesktop`, `electronAPI` → `hostBridge!`)
+  - `frontend/hooks/useRemoteControl.ts` (1 sito: `onRemoteControlCommand` + `onRequestStatusBroadcast`)
+  - `frontend/hooks/useWebPlayerEngine.ts` (1 sito: gating bandwidth monitoring)
+  - `frontend/services/deviceDiscovery.ts` (12 siti: discoverDevices, getLocalIPs, scanIp, probeDeviceServices, castToDevice, onDeviceFound) + `private get isElectron()` ora ritorna `platformService.isDesktop && !!host`
+- ☑ Eventi: `electronAPI.on*` → `host.on*` (gli helper `onEvent` di `wailsBridge.ts`
+  proxy-ano via `@wailsio/runtime` `Events.On` quando `host === wailsBridge`).
+- ☑ Type-check `npx tsc --noEmit` verde dopo la sostituzione (1 fix tipizzazione
+  esplicita su `DiscoveredDevice` nel callback `onDeviceFound`).
+- ☑ `npm run check:wails` verde, `vitest run` 209/209 verde.
+- ☑ `frontend/AGENTS.md` § "Cross-Platform Development" aggiornato con pattern `host`.
+- ☐ Smoke manuale Wails dev (`npm run wails:dev`) e Electron dev (`npm run dev`)
+  rinviato a QA Fase 10 (build Wails richiede runtime libmpv + webkit2gtk-4.1
+  sul dev host, già installati su openSUSE TW).
+
+#### 7.3 Electron drop (dopo Fase 6 + RC stabile)
 - ☐ Eliminare `preload.js`, `main.js`, dipendenze `electron*`, `castv2-client`,
   `node-ssdp`, `bonjour`, `ws` da `package.json` `dependencies`
 - ☐ Rimuovere `useWebPlayerEngine.ts`, `video.js`, `hls.js`, `mpegts.js`,
@@ -967,6 +1778,7 @@ rivede la roadmap prima di continuare con il porting delle altre feature.
   player path; questi pacchetti restano solo su `1.x-legacy`)
 - ☐ `scripts/patch-ffmpeg.js`: deprecare (rimuovere `postinstall`)
 - ☐ Aggiornare `services/platformService.ts` test (`tests/`)
+- ☐ Tag `1.x-legacy` per archive + commit `chore: drop electron runtime`
 
 ### Fase 8 — Packaging Linux (≈3 gg)
 - ☐ Creare `nfpm.yaml` con templating per `${VERSION}` `${DISTRO}` `${ARCH}`
@@ -1054,11 +1866,12 @@ rivede la roadmap prima di continuare con il porting delle altre feature.
 - ☐ Tag `v2.0.0-rc.1` → CI release (Linux + Windows + macOS in parallelo)
   → beta opt-in 2 settimane → smoke test → `v2.0.0`
 
-**Totale stimato: ~50 gg-uomo** (≈ 10 settimane full-time, 4–5 mesi
-part-time). Distribuzione: Fase 0–7 ~33 gg (Linux-first dev, include
-i 5 spike preflight + tuning AV-sync), Fase 8 ~3 gg (packaging Linux),
-Fase 9 ~3 gg (Windows), Fase 9-bis ~4 gg (macOS), Fase 10 ~6 gg (QA
-tri-platform inclusi soak test 4K notturni), Fase 11 ~2 gg.
+**Totale stimato: ~55 gg-uomo** (≈ 11 settimane full-time, 5 mesi
+part-time — rev. 5: +5 gg per Fase 2-bis DIAL HTTP receiver + Fase 7-bis
+integrazione OS/lifecycle/data-migration). Distribuzione: Fase 0–6
+~33 gg, Fase 2-bis ~1.5 gg, Fase 7-bis ~5 gg, Fase 7 cleanup ~3 gg,
+Fase 8 ~3 gg (Linux), Fase 9 ~3 gg (Win), Fase 9-bis ~4 gg (macOS),
+Fase 10 ~6 gg (QA), Fase 11 ~2 gg.
 
 > **Critical path:** Fase 6 (player + PiP). Gli spike 6.0 vengono eseguiti
 > **in parallelo sui 3 OS**: se anche uno solo fallisce su una piattaforma,
@@ -1096,6 +1909,10 @@ tri-platform inclusi soak test 4K notturni), Fase 11 ~2 gg.
 | R20 | **Audio underrun durante zapping rapido** (cambio canale Live) | Media | Medio | `audio-buffer=0.5` per profilo Live; `cache-pause=yes` previene crash audio; UI mostra spinner durante riempimento cache |
 | R21 | **WebGL2 shader YUV→RGB non bit-exact a HEVC 10-bit** (precisione FP16) | Bassa | Medio | Shader con `highp` precision + LUT BT.2020/BT.709; test pixel-diff vs reference mpv su 100 frame campione |
 | R22 | **HW decode VAAPI/NVDEC fallisce silentemente** (driver vecchi) → fallback SW imploso | Media | Alto | Probe runtime via `mpv --hwdec-list` + check supporto codec specifico; UI warning "HW decode non disponibile, riduco a 1080p" |
+| R23 | **Data-loss IndexedDB v1→v2** (Chromium → WebKitGTK/WebView2/WKWebView path diverso) | Alta | Critico | Fase 7-bis.8: export "backup completo" in v1.x-final + import automatico da LevelDB Chromium in v2.0.0; dialog onboarding "Migrazione da v1" obbligatorio se IndexedDB vuoto |
+| R24 | **Schermo si spegne durante film 2h** (no display-sleep inhibitor) | Alta | Alto | Fase 7-bis.3: DBus ScreenSaver.Inhibit (Linux) + SetThreadExecutionState (Win) + IOPMAssertion (macOS); attivo solo durante `playerState=PLAYING` |
+| R25 | **DIAL receiver non testato cross-vendor** (YouTube/Netflix/Tubi) | Media | Alto | Fase 2-bis include test e2e Fase 10; XML descriptor /dial.xml conforme spec UPnP-DIAL 1.7; HTTP retry su porte 8090–8094 |
+| R26 | **Single-instance lock fallisce su NFS/CIFS home** (flock non supportato) | Bassa | Medio | Fallback su `/tmp/streamai-${uid}.lock` se XDG_RUNTIME_DIR non flock-capable; rilevato via `errno EOPNOTSUPP` |
 
 ---
 
@@ -1194,7 +2011,15 @@ tri-platform inclusi soak test 4K notturni), Fase 11 ~2 gg.
 | Cast Chromecast | ✅ OK | go-chromecast |
 | Cast DLNA/UPnP | ✅ OK | SSDP advertise + scan in Go |
 | AirPlay advertise | ✅ OK | zeroconf mDNS |
+| **DIAL receiver** | ✅ **Nuovo (Fase 2-bis)** | HTTP `/dial.xml` + `/apps/<APP>` per ricezione cast da YouTube/Netflix/Tubi |
 | Keyboard shortcuts | ✅ Invariato | Tutto frontend |
+| **Media keys hardware** | ✅ **Nuovo (Fase 7-bis.4)** | MPRIS2 (Linux) / SMTC (Win) / MPNowPlaying (macOS) |
+| **Display sleep prevention** | ✅ **Nuovo (Fase 7-bis.3)** | DBus ScreenSaver.Inhibit / SetThreadExecutionState / IOPMAssertion |
+| **System tray** | ✅ **Nuovo (Fase 7-bis.5)** | `app.NewSystemTray()` con menu show/hide/PiP/quit |
+| **Notifiche di sistema** | ✅ **Nuovo (Fase 7-bis.9)** | Wails `application.NewNotification` |
+| **Single-instance lock** | ✅ **Nuovo (Fase 7-bis.2)** ✅ done | flock XDG_RUNTIME_DIR + unix socket "FOCUS" IPC (Linux/macOS); stub no-op Windows |
+| **Persistenza dati v1→v2** | ✅ **Nuovo (Fase 7-bis.8)** | Backup JSON export v1 + LevelDB import automatico in v2 |
+| **Logging file rotante** | ✅ **Nuovo (Fase 7-bis.6)** | zerolog + lumberjack, 10MB×5 file gzip |
 | OSD/Timeline | ✅ Invariato | DOM HTML sopra canvas mpv |
 | HEVC/AV1/HDR | ✅ Migliorato | libmpv HW accel universale su 3 OS (VAAPI/NVDEC/D3D11VA/VideoToolbox) |
 | **Playback 4K fluido** | ✅ **Pieno (vincolo §4.8)** | NV12/P010 zero-copy via shm + shader WebGL2; HW decode obbligatorio; framedrop=vo + UI warning su HW debole |
