@@ -147,3 +147,42 @@ L'harness in `cmd/spike-mpv-render/` ha attualmente:
 - ☐ Misura GPU time via `EXT_disjoint_timer_query_webgl2` lato browser
 - ☐ Soak automatizzato con `-duration` ≥ 10m + auto-report
 
+## Smoke run osservato (2026-05-21)
+
+Dev host: openSUSE TW, GPU **NVIDIA GeForce RTX 3050 Ti Laptop** (driver
+580.159.03), OpenGL 3.3 Core via EGL surfaceless. Sorgente sintetica
+`av://lavfi:testsrc2` (no decoder reale → misura solo render + readback).
+
+| FBO | Frames in 10 s | p50 | p95 | p99 | max | result |
+|-----|---------------:|----:|----:|----:|----:|:------:|
+| 1920×1080 RGBA8 | 601 | 16.66 ms | 16.91 ms | 18.78 ms | 19.47 ms | **warn** |
+| 3840×2160 RGBA8 | 583 | 16.98 ms | 18.75 ms | 22.16 ms | 24.65 ms | **fail** |
+
+> p50 ≈ 16.6 ms su entrambe le risoluzioni = cadenza VSync del decoder
+> a 60 fps (1/60 = 16.67 ms). I numeri **non** sono il tempo GPU reale:
+> il bottleneck dominante è `glReadPixels` sincrono CPU-side
+> (~ 8 MB/frame a 1080p, ~ 33 MB/frame a 4K).
+
+**Conclusione preliminare:** il pipeline EGL + FBO + readback RGBA8 **non**
+soddisfa il KPI 4K60 (p95 18.75 > 14 ms target). Questo era atteso e
+**richiede** la promozione di **SPIKE-5 (DRM-PRIME zero-copy)** a
+mandatory per il 4K Linux, oppure il passaggio a transport WebCodecs
+(SPIKE-3 fallback). Le misure su sorgente reale (HEVC/H.264 decoded)
+seguiranno l'installazione del pacchetto codec completo (su openSUSE TW
+richiede repo Packman per ffmpeg/mpv full-codec).
+
+## Smoke quick-start
+
+```bash
+task spike:1:build      # richiede mpv-devel + Mesa-libEGL-devel + Mesa-libGL-devel
+task spike:1:smoke      # 10 s @ 1080p + 10 s @ 4K via lavfi (no codec real)
+ls dist/spike1/         # smoke-1080p.json, smoke-4k.json
+```
+
+Per misure con codec reale (HEVC/H.264) installare:
+
+- **openSUSE TW**: `sudo zypper install -y --from packman ffmpeg-7 libavcodec`
+  (Packman ha ffmpeg full-codec; il repo OSS ha solo libopenh264).
+- **Ubuntu 24.04+**: codec full inclusi di default.
+- **Fedora**: `sudo dnf install ffmpeg-free --allowerasing`.
+

@@ -18,6 +18,12 @@ package main
 // #include <mpv/render.h>
 // #include <mpv/render_gl.h>
 //
+// // Forward declaration della callback Go esportata in basso (cgo //export).
+// extern void goSpike1UpdateCallback(void);
+//
+// // Forward declaration del trampoline (definito in trampoline.c).
+// extern void spike1_update_trampoline(void* ctx);
+//
 // // Trampoline per il callback `get_proc_address` (Go non può passare
 // // direttamente i puntatori a funzione C; usiamo eglGetProcAddress).
 // static void* spike1_get_proc_address(void* ctx, const char* name) {
@@ -48,11 +54,9 @@ package main
 //         .get_proc_address = spike1_get_proc_address,
 //         .get_proc_address_ctx = NULL,
 //     };
-//     int advanced = 1;
 //     mpv_render_param params[] = {
 //         { MPV_RENDER_PARAM_API_TYPE, api_type },
 //         { MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &gl_init },
-//         { MPV_RENDER_PARAM_ADVANCED_CONTROL, &advanced },
 //         { 0 }
 //     };
 //     return mpv_render_context_create(out, h, params);
@@ -161,6 +165,9 @@ func run(f cliFlags) error {
 		return fmt.Errorf("mpv_render_context_create: %s", C.GoString(C.mpv_error_string(rc)))
 	}
 	defer C.mpv_render_context_free(rctx)
+	if f.Verbose {
+		log.Printf("mpv_render_context_create OK (%p)", unsafe.Pointer(rctx))
+	}
 
 	// 4) FBO target (RGBA8 color attachment).
 	fbo, fboTex, err := createFBO(f.FboW, f.FboH)
@@ -212,6 +219,10 @@ func run(f cliFlags) error {
 //      installato con mpv_render_context_set_update_callback);
 //   2. misura wall-clock di spike1_render_fbo + glReadPixels;
 //   3. accumula sample (dopo warmup) e (se attivo) push verso wsHub.
+//
+// In parallelo droppa eventi mpv (mpv_wait_event timeout 0) per non far
+// crescere all'infinito la coda interna — bloccare la coda è una causa
+// classica di "render-API silenzioso" su libmpv.
 func renderLoop(
 	ctx context.Context,
 	f cliFlags,
@@ -232,24 +243,45 @@ func renderLoop(
 	ticker := time.NewTicker(2 * time.Millisecond)
 	defer ticker.Stop()
 
+	// Goroutine event-drain: chiama mpv_wait_event con timeout 0.1 s in
+	// loop, ignora gli eventi. Necessario per non far stallare la
+	// render-API (libmpv accoda eventi in attesa del consumatore; quando
+	// la coda è piena alcune build smettono di emettere update-frame).
+	stopDrain := make(chan struct{})
+	defer close(stopDrain)
+	go func() {
+		for {
+			select {
+			case <-stopDrain:
+				return
+			default:
+				_ = C.mpv_wait_event(mpv, 0.1)
+			}
+		}
+	}()
+
+	var pollHits, pollMisses uint64
+
 	for {
 		select {
 		case <-ctx.Done():
 			col.stop()
 			return ctx.Err()
 		case <-redraw:
-			// Render disponibile.
+			pollHits++
 		case <-ticker.C:
-			// Anche senza update flag, ogni 2 ms verifichiamo se mpv vuole
-			// renderizzare (mpv_render_context_update può ritornare il bit
-			// FRAME anche senza callback in alcune build).
 			if uint64(C.mpv_render_context_update(rctx))&uint64(C.MPV_RENDER_UPDATE_FRAME) == 0 {
+				pollMisses++
 				if time.Now().After(deadline) {
 					col.stop()
+					if f.Verbose {
+						log.Printf("renderLoop end: pollHits=%d pollMisses=%d (no frame ever)", pollHits, pollMisses)
+					}
 					return nil
 				}
 				continue
 			}
+			pollHits++
 		}
 
 		t0 := time.Now()
@@ -272,6 +304,9 @@ func renderLoop(
 
 		if time.Now().After(deadline) {
 			col.stop()
+			if f.Verbose {
+				log.Printf("renderLoop end: pollHits=%d pollMisses=%d frames=%d", pollHits, pollMisses, len(col.samples))
+			}
 			return nil
 		}
 	}
@@ -280,13 +315,22 @@ func renderLoop(
 // ---- mpv helpers -----------------------------------------------------------
 
 func mpvOptions(f cliFlags) [][2]string {
-	level := "no"
+	level := "warn"
+	terminal := "no"
 	if f.Verbose {
 		level = "v"
+		terminal = "yes"
 	}
 	return [][2]string{
-		{"terminal", "no"},
+		{"terminal", terminal},
 		{"msg-level", "all=" + level},
+		// Niente config utente / script Lua / ytdl_hook: SPIKE-1 deve
+		// misurare il decoder + render core, non hook esterni.
+		{"config", "no"},
+		{"load-scripts", "no"},
+		{"load-auto-profiles", "no"},
+		{"load-osd-console", "no"},
+		{"load-stats-overlay", "no"},
 		{"idle", "yes"},
 		{"keep-open", "always"},
 		{"hwdec", f.Hwdec},
@@ -297,6 +341,11 @@ func mpvOptions(f cliFlags) [][2]string {
 		{"cache", "yes"},
 		{"cache-secs", "10"},
 		{"user-agent", "StreamAI-Spike1/0.1"},
+		// Headless: nessun output audio (evita stall in attesa di un
+		// device PipeWire/Pulse non disponibile in CI / smoke test).
+		{"ao", "null"},
+		// Esplicito: rimuovi la pausa iniziale, vogliamo misurare playback.
+		{"pause", "no"},
 	}
 }
 
@@ -322,26 +371,9 @@ func mpvGetPropertyInt64(h *C.mpv_handle, name string) int64 {
 	return int64(out)
 }
 
-// updateCallbackChan è globale perché il trampoline C non può catturare
-// closures Go. Per un PoC single-instance (l'harness) è accettabile.
-var (
-	updateCallbackMu   sync.Mutex
-	updateCallbackChan chan struct{}
-)
-
-//export goSpike1UpdateCallback
-func goSpike1UpdateCallback() {
-	updateCallbackMu.Lock()
-	ch := updateCallbackChan
-	updateCallbackMu.Unlock()
-	if ch == nil {
-		return
-	}
-	select {
-	case ch <- struct{}{}:
-	default:
-	}
-}
+// updateCallbackChan / goSpike1UpdateCallback sono definiti in
+// cgo_always.go (sempre presenti nel package, necessario per il linker
+// del trampoline.c sia in build mpv che in stub).
 
 func installUpdateCallback(rctx *C.mpv_render_context) <-chan struct{} {
 	ch := make(chan struct{}, 1)

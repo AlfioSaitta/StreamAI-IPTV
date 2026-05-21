@@ -79,3 +79,6 @@ build/icons/
 # Wails build binary at root (task build:dev)
 /streamai
 /spike-mpv-render
+
+# SPIKE-1 smoke reports (generati da task spike:1:smoke)
+/dist/spike1/

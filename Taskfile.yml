@@ -111,10 +111,29 @@ tasks:
       Build dell'harness Go SPIKE-1 (libmpv render → EGL surfaceless → FBO).
       Richiede libmpv-dev + libegl1-mesa-dev + libgl1-mesa-dev (vedi
       docs/spike1-methodology.md). Build tag 'mpv spike1' obbligatori.
+    env:
+      # mpv-devel su openSUSE TW (e altre distro recenti) espone
+      # -fno-strict-overflow nelle CFLAGS pkg-config; cgo lo blocca
+      # per default. Whitelistato qui (è un flag GCC innocuo).
+      CGO_CFLAGS_ALLOW: '-fno-strict-overflow'
     cmds:
       - mkdir -p {{.BIN_DIR}}
       - go build -tags "mpv spike1 {{.TAGS}}" -trimpath -o {{.BIN_DIR}}/spike-mpv-render ./cmd/spike-mpv-render
       - echo "Built {{.BIN_DIR}}/spike-mpv-render"
+
+  spike:1:smoke:
+    desc: |
+      Smoke test rapido (8 s @ 1080p60 + 8 s @ 4K60) usando una sorgente
+      sintetica libavfilter (av://lavfi:testsrc2). Non richiede codec
+      HEVC/H.264 nel sistema — utile per validare il pipeline EGL+FBO+
+      readback senza dipendere dall'installazione codec dell'host.
+    deps: [spike:1:build]
+    cmds:
+      - mkdir -p dist/spike1
+      - ./{{.BIN_DIR}}/spike-mpv-render -url 'av://lavfi:testsrc2=size=1920x1080:rate=60' -duration 8s -warmup 2s -fbo-width 1920 -fbo-height 1080 -hwdec no -output dist/spike1/smoke-1080p.json
+      - ./{{.BIN_DIR}}/spike-mpv-render -url 'av://lavfi:testsrc2=size=3840x2160:rate=60' -duration 8s -warmup 2s -fbo-width 3840 -fbo-height 2160 -hwdec no -output dist/spike1/smoke-4k.json
+      - 'echo "Smoke reports: dist/spike1/smoke-1080p.json + smoke-4k.json"'
+      - 'grep -E "\"(p50|p95|p99|max|result|frames)\"" dist/spike1/smoke-1080p.json dist/spike1/smoke-4k.json || true'
 
   spike:1:run:
     desc: |
