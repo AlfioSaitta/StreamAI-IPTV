@@ -2,7 +2,10 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   isElectron: true,
-  
+
+  // GPU / HW acceleration status (per StreamDiagnostics + warning R22)
+  getGpuStatus: () => ipcRenderer.invoke('get-gpu-status'),
+
   // Funzioni esistenti
   discoverDevices: () => ipcRenderer.invoke('discover-devices'),
   getLocalIPs: () => ipcRenderer.invoke('get-local-ips'),

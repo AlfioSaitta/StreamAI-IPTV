@@ -4,6 +4,7 @@
 
 import { platformService } from './platformService';
 import { host } from './hostBridge';
+import type { GpuStatus } from './hwAccelService';
 
 // Type for Electron API
 interface NetworkInterface {
@@ -34,6 +35,8 @@ interface ElectronAPI {
   onNetworkPlaybackStatus?: (callback: (status: { deviceId: string; channelName: string }) => void) => () => void;
   onRemoteControlCommand?: (callback: (command: unknown) => void) => () => void;
   onRequestStatusBroadcast?: (callback: () => void) => () => void;
+  /** Stato dell'accelerazione HW vista da Chromium (R22). */
+  getGpuStatus?: () => Promise<GpuStatus>;
   isElectron: boolean;
 }
 

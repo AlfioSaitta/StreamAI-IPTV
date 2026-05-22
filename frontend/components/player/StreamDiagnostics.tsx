@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
@@ -15,10 +15,12 @@ import {
   Video,
   Volume2,
   X,
+  Zap,
 } from 'lucide-react';
 import { Badge, Button, Card, IconButton } from '../shared';
 import type { StreamCodecInfo } from '../../services/streamInfoService';
 import type { PlayerEngine, StreamSourceInfo } from './playerTypes';
+import { getHwAccelStatus, type GpuStatus } from '../../services/hwAccelService';
 
 /**
  * P8.2 — Schermata Info Stream / Diagnostica
@@ -173,6 +175,15 @@ const StreamDiagnostics: React.FC<StreamDiagnosticsProps> = ({
     return 'success';
   }, [info]);
 
+  // Stato HW host (R22): lo fetchiamo all'apertura del pannello.
+  const [gpu, setGpu] = useState<GpuStatus | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    getHwAccelStatus().then((s) => { if (active) setGpu(s); }).catch(() => { /* noop */ });
+    return () => { active = false; };
+  }, [open]);
+
   if (!open) return null;
 
   const height = info?.height ?? null;
@@ -249,6 +260,35 @@ const StreamDiagnostics: React.FC<StreamDiagnosticsProps> = ({
             </Badge>
           )}
         </div>
+
+        {/* HOST GPU / HW ACCEL */}
+        {gpu && gpu.ok && (
+          <Card padding="md" elevation="raised">
+            <SectionTitle icon={Zap}>Host GPU &amp; HW decode</SectionTitle>
+            <Row
+              label="Video decode (Chromium)"
+              value={
+                <span className={gpu.accelerated ? 'text-state-success' : 'text-state-warning'}>
+                  {gpu.accelerated ? 'Hardware' : 'Software'}
+                  <span className="ml-2 text-content-muted">({gpu.videoDecode})</span>
+                </span>
+              }
+              hint="da app.getGPUFeatureStatus()"
+            />
+            {gpu.switches.useGl && <Row label="GL backend" value={gpu.switches.useGl} />}
+erèp            {gpu.switches.useAngle && <Row label="ANGLE backend" value={gpu.switches.useAngle} />}
+            {gpu.switches.ozonePlatform && <Row label="Ozone platform" value={gpu.switches.ozonePlatform} />}
+            {gpu.disabledByUser && (
+              <Row label="Override utente" value={<span className="text-state-warning">STREAMAI_DISABLE_HW=1</span>} />
+            )}
+            {Boolean((gpu.gpuInfo as { auxAttributes?: { glRenderer?: string } })?.auxAttributes?.glRenderer) && (
+              <Row
+                label="GL renderer"
+                value={(gpu.gpuInfo as { auxAttributes: { glRenderer: string } }).auxAttributes.glRenderer}
+              />
+            )}
+          </Card>
+        )}
 
         {/* VIDEO */}
         <Card padding="md" elevation="raised">
@@ -440,6 +480,12 @@ const StreamDiagnostics: React.FC<StreamDiagnosticsProps> = ({
             if (info.frameDropRate > 5) warns.push('Alto tasso di frame drop: possibili problemi di performance.');
             if (info.videoBitDepth && info.videoBitDepth > 8 && !info.hardwareAccelerated) {
               warns.push('Video 10-bit senza accelerazione HW.');
+            }
+            if (gpu && gpu.ok && !gpu.accelerated && !gpu.disabledByUser) {
+              warns.push(
+                'Chromium sta usando il decoder video SOFTWARE (silent fallback driver). '
+                + 'Verifica VA-API/Media Foundation/VideoToolbox; vedi chrome://gpu.'
+              );
             }
             if (warns.length === 0) return null;
             return (

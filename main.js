@@ -228,24 +228,66 @@ app.commandLine.appendSwitch('cipher-suite-blacklist', '');
 // ============================================
 const enabledFeatures = [
   'MediaRouter', 'GlobalMediaControls', 'CastMediaRouteProvider',
-  'PlatformHEVCDecoderSupport', 'ProprietaryCodecs'
+  'PlatformHEVCDecoderSupport', 'ProprietaryCodecs',
+  // Cross-platform: rasterizzazione GPU + canvas OOP (riduce upload CPU→GPU
+  // e abilita zero-copy per i frame video decodificati in HW).
+  'CanvasOopRasterization',
 ];
 const disabledFeatures = [
   'BlockInsecurePrivateNetworkRequests', 'IsolateOrigins', 'site-per-process',
-  'HardwareMediaKeyHandling'
+  'HardwareMediaKeyHandling',
+  // UseChromeOSDirectVideoDecoder è ChromeOS-specific: forzato OFF altrove
+  // (vedi override Linux sotto) per non interferire con VaapiVideoDecoder.
 ];
-if (isLinux) {
-  app.commandLine.appendSwitch('ozone-platform', 'x11');
-  app.commandLine.appendSwitch('disable-gpu-compositing');
-  app.commandLine.appendSwitch('disable-gpu-sandbox');
+const disableHwOverride = ['1', 'true', 'yes'].includes(
+  String(process.env.STREAMAI_DISABLE_HW || '').toLowerCase()
+);
+if (disableHwOverride) {
+  // Escape hatch per utenti con driver rotti: usabile come `STREAMAI_DISABLE_HW=1`.
+  console.warn('[GPU] STREAMAI_DISABLE_HW=1 → HW video decoding disabilitato per scelta utente.');
+  app.disableHardwareAcceleration();
+} else if (isLinux) {
+  // --- Linux: VA-API path ---
+  // Prima usavamo `disable-gpu-compositing` + `disable-gpu-sandbox` che
+  // disattivavano il compositor GL richiesto da `VaapiVideoDecodeLinuxGL`,
+  // causando silent-fallback SW (vedi R22 in plan-go-wails-migration.md).
+  // Ora teniamo il compositor GPU acceso. Chromium moderno accetta solo
+  // `egl-angle` come GL backend (vedi gl_factory.cc); usiamo ANGLE/GL
+  // che è il path supportato per VA-API zero-copy.
+  app.commandLine.appendSwitch('ozone-platform-hint', 'auto'); // X11 o Wayland
+  app.commandLine.appendSwitch('use-angle', 'gl');             // ANGLE → GL nativo
   app.commandLine.appendSwitch('enable-accelerated-video-decode');
+  app.commandLine.appendSwitch('enable-accelerated-mjpeg-decode');
   app.commandLine.appendSwitch('ignore-gpu-blocklist');
-  enabledFeatures.push('VaapiVideoDecoder', 'VaapiVideoDecodeLinuxGL', 'VaapiIgnoreDriverChecks', 'UseChromeOSDirectVideoDecoder');
   app.commandLine.appendSwitch('enable-ffmpeg-video-decoding');
   app.commandLine.appendSwitch('enable-proprietary-codecs');
+  enabledFeatures.push(
+    'VaapiVideoDecoder',
+    'VaapiVideoEncoder',
+    'VaapiVideoDecodeLinuxGL',
+    'VaapiIgnoreDriverChecks',
+    'AcceleratedVideoDecodeLinuxGL',
+  );
+  // ChromeOS-only: deve restare disabilitata su Linux desktop, altrimenti
+  // Chromium tenta il path ChromeOS DirectVideoDecoder e bypassa VAAPI.
+  disabledFeatures.push('UseChromeOSDirectVideoDecoder');
 }
 if (process.platform === 'win32') {
-  enabledFeatures.push('MediaFoundationAsyncH264Encoding', 'MediaFoundationVideoCapture', 'MediaFoundationH264Encoding', 'MediaFoundationClearPlayback');
+  // Windows: Media Foundation per H.264/HEVC HW decode + D3D11 video.
+  app.commandLine.appendSwitch('enable-accelerated-video-decode');
+  enabledFeatures.push(
+    'MediaFoundationAsyncH264Encoding',
+    'MediaFoundationVideoCapture',
+    'MediaFoundationH264Encoding',
+    'MediaFoundationClearPlayback',
+    'D3D11VideoDecoder',
+    'D3D11VideoDecoderVP9Profile2',
+    'D3D11VideoDecoderHEVC',
+  );
+}
+if (process.platform === 'darwin') {
+  // macOS: VideoToolbox è già attivo by default; basta non bloccarlo.
+  enabledFeatures.push('VideoToolboxVp9Decoding', 'VideoToolboxAV1Decoding');
 }
 app.commandLine.appendSwitch('enable-features', enabledFeatures.join(','));
 app.commandLine.appendSwitch('disable-features', disabledFeatures.join(','));
@@ -504,6 +546,43 @@ function setupWebSocketServer() {
     console.error('[WebSocketServer] Errore del server WebSocket:', error);
   });
 }
+
+// ============================================
+// IPC GPU / HARDWARE ACCELERATION STATUS
+// ============================================
+
+/**
+ * Restituisce lo stato reale dell'accelerazione HW vista da Chromium.
+ * Usato da StreamDiagnostics per il warning R22 (silent SW fallback).
+ *
+ * Chiave principale: `videoDecode` in `app.getGPUFeatureStatus()` deve
+ * essere `enabled` (o `enabled_force`). Tutto il resto è informativo.
+ */
+ipcMain.handle('get-gpu-status', async () => {
+  try {
+    const featureStatus = app.getGPUFeatureStatus ? app.getGPUFeatureStatus() : {};
+    const gpuInfo = app.getGPUInfo ? await app.getGPUInfo('basic') : null;
+    const videoDecode = String(featureStatus.video_decode || featureStatus.videoDecode || 'unknown');
+    const accelerated = /^enabled/.test(videoDecode);
+    return {
+      ok: true,
+      accelerated,
+      videoDecode,
+      featureStatus,
+      gpuInfo,
+      platform: process.platform,
+      disabledByUser: disableHwOverride,
+      switches: {
+        useGl: app.commandLine.getSwitchValue('use-gl') || null,
+        useAngle: app.commandLine.getSwitchValue('use-angle') || null,
+        ozonePlatform: app.commandLine.getSwitchValue('ozone-platform-hint') || app.commandLine.getSwitchValue('ozone-platform') || null,
+        enabledFeatures: app.commandLine.getSwitchValue('enable-features') || null,
+      },
+    };
+  } catch (error) {
+    return { ok: false, error: String(error && error.message || error) };
+  }
+});
 
 // ============================================
 // IPC DISCOVERY E CAST NATIVO
