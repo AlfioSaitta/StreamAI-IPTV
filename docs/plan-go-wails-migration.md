@@ -11,7 +11,7 @@
 > Snapshot dello stato del codice dopo le iterazioni di 2026-05-19/20.
 > Backend Go: **fasi 0–5, 2-bis, gran parte di 7-bis** complete e build verde
 > (`go build -tags gtk3 ./...` + `wails3 generate bindings ./...` genera 9
-> Service, 53 metodi, 12 model in `frontend/bindings/`). Frontend: ancora
+> Service, 54 metodi, 13 model in `frontend/bindings/`). Frontend: ancora
 > 100% sull'API Electron (35 occorrenze `window.electronAPI`, nessun
 > `wailsBridge`, nessun `isWails`). Avvio **Fase 7 (compat layer TS)**:
 > installazione `@wailsio/runtime`, `services/platformService.ts` esteso
@@ -434,7 +434,7 @@ Tutti raggruppati nelle nuove fasi **2-bis** (DIAL receiver) e **7-bis**
 | `internal/pkg/devtools/` | ✅ | `STREAMAI_DEBUG=1` opt-in, Ctrl+Shift+I / F12 |
 | `internal/pkg/appicon/` | ✅ | 256×256 + 512×512 embed |
 | `internal/pkg/wailsevents/` | ✅ | Emit helper con guard early-startup |
-| `frontend/bindings/` | ✅ generato | 9 Service, 53 metodi, 12 model — `npm run wails:bindings` (warning `DIALStateSetter` ✅ risolto 2026-05-21, vedi §3.4) |
+| `frontend/bindings/` | ✅ generato | 9 Service, 54 metodi, 13 model — `npm run wails:bindings` (warning `DIALStateSetter` ✅ risolto 2026-05-21, vedi §3.4) |
 | `services/platformService.ts` | ✅ | Esteso 2026-05-20 con `isWails` + `isDesktop` (Fase 7.1) |
 | `services/wailsBridge.ts` | ✅ | Creato 2026-05-20 (Fase 7.1) — wrap di discovery/cast/netstatus |
 | `services/hostBridge.ts` | ✅ | Creato 2026-05-20 (Fase 7.1) — accessor `host` runtime-switched |
@@ -455,7 +455,7 @@ metodo è stato rimosso dalla superficie pubblica del Service e la
 dipendenza `DIALStateSetter` è ora iniettata tramite il costruttore
 `netstatus.New(ws, dial)`. Ordine di costruzione in `cmd/streamai/main.go`
 invertito (advertising prima di netstatus) per accomodare la
-constructor injection. Bindings rigenerati: 9 Service, **53 metodi**, 12
+constructor injection. Bindings rigenerati: 9 Service, **54 metodi**, 13
 model, **0 warning**. Inoltre `package.json` `wails:bindings` e
 `Taskfile.yml` `generate:bindings` ora invocano `wails3 generate
 bindings ./...` con il pattern di pacchetti esplicito (senza, alpha.93

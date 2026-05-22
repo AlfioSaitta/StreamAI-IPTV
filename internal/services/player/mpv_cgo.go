@@ -446,6 +446,47 @@ func (b *cgoBackend) State() (State, error) {
 	return st, nil
 }
 
+// HwInfo legge da libmpv le property che descrivono la pipeline di
+// decodifica attiva. Pensato per essere chiamato sia con file caricato
+// (restituisce valori reali) sia idle (campi codec vuoti, ma `MpvVersion`
+// e `LibmpvAPIVersion` sempre popolati). Vedi tipo HwAccelInfo in service.go.
+func (b *cgoBackend) HwInfo() (HwAccelInfo, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	info := HwAccelInfo{Built: true}
+
+	// LibmpvAPIVersion non richiede mpv_handle.
+	info.LibmpvAPIVersion = int(C.mpv_client_api_version())
+
+	// MpvVersion senza handle: usiamo un handle temporaneo se
+	// necessario, ma l'API mpv_client_name richiede handle. Per
+	// la versione mpv-runtime usiamo la property "mpv-version" via
+	// handle se disponibile.
+	if b.handle == nil {
+		// Nessuno stream caricato: ritorniamo solo le info statiche.
+		return info, nil
+	}
+
+	if v, err := getPropertyString(b.handle, "mpv-version"); err == nil {
+		info.MpvVersion = strings.TrimSpace(v)
+	}
+	// "hwdec-current" property: stringa che indica il backend attivo
+	// (es. "vaapi", "vaapi-copy", "nvdec", "drm", "videotoolbox",
+	// "d3d11va", "no", ""). Vuoto = nessun decoder attivo (idle).
+	if v, err := getPropertyString(b.handle, "hwdec-current"); err == nil {
+		info.HwdecCurrent = strings.TrimSpace(v)
+		info.Accelerated = info.HwdecCurrent != "" && info.HwdecCurrent != "no"
+	}
+	if v, err := getPropertyString(b.handle, "video-codec"); err == nil {
+		info.VideoCodec = strings.TrimSpace(v)
+	}
+	if v, err := getPropertyString(b.handle, "video-format"); err == nil {
+		info.VideoCodecID = strings.TrimSpace(v)
+	}
+	return info, nil
+}
+
 func (b *cgoBackend) Close() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()

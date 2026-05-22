@@ -23,6 +23,7 @@ import { Events as WailsEvents } from '@wailsio/runtime';
 import * as Discovery from '../bindings/github.com/AlfioSaitta/StreamAI-IPTV/internal/services/discovery/service';
 import * as Cast from '../bindings/github.com/AlfioSaitta/StreamAI-IPTV/internal/services/cast/service';
 import * as NetStatus from '../bindings/github.com/AlfioSaitta/StreamAI-IPTV/internal/services/netstatus/service';
+import * as Player from '../bindings/github.com/AlfioSaitta/StreamAI-IPTV/internal/services/player/service';
 
 /**
  * Sottoinsieme dell'API `window.electronAPI` esposta a `services/hostBridge.ts`.
@@ -54,6 +55,11 @@ export interface HostAPI {
   onNetworkPlaybackStatus: (cb: (status: unknown) => void) => () => void;
   onRemoteControlCommand: (cb: (command: unknown) => void) => () => void;
   onRequestStatusBroadcast: (cb: () => void) => () => void;
+
+  // GPU / HW accel — wrapper sopra `player.Service.HwAccelInfo()`. Per
+  // mantenere la shape allineata con `window.electronAPI.getGpuStatus()`
+  // (vedi `services/hwAccelService.ts`).
+  getGpuStatus: () => Promise<unknown>;
 }
 
 /**
@@ -109,6 +115,58 @@ export const wailsBridge: HostAPI = {
   onNetworkPlaybackStatus: (cb) => onEvent('network-playback-status', cb),
   onRemoteControlCommand: (cb) => onEvent('remote-control-command', cb),
   onRequestStatusBroadcast: (cb) => onEvent('request-status-broadcast', () => cb()),
+
+  // --- GPU / HW accel ---
+  // Adatta `player.HwAccelInfo` (shape Go) alla shape `GpuStatus` di
+  // `hwAccelService.ts`. Su Wails la fonte è libmpv (`hwdec-current`,
+  // `mpv-version`, ecc.), non Chromium feature flags.
+  getGpuStatus: async () => {
+    try {
+      const info = (await Player.HwAccelInfo()) as {
+        built: boolean;
+        accelerated: boolean;
+        hwdecCurrent: string;
+        mpvVersion: string;
+        libmpvApiVersion: number;
+        videoCodec: string;
+        videoCodecId: string;
+        error?: string;
+      };
+      return {
+        ok: true,
+        accelerated: info.accelerated,
+        videoDecode: info.accelerated
+          ? `enabled (${info.hwdecCurrent})`
+          : info.built
+            ? info.hwdecCurrent || 'software'
+            : 'disabled (mpv backend not built)',
+        featureStatus: {
+          mpv_version: info.mpvVersion || 'unknown',
+          libmpv_api_version: String(info.libmpvApiVersion || 0),
+          hwdec_current: info.hwdecCurrent || 'idle',
+          video_codec: info.videoCodec || '',
+          video_format: info.videoCodecId || '',
+        },
+        gpuInfo: null,
+        platform: 'wails',
+        disabledByUser: !info.built,
+        switches: { useGl: null, useAngle: null, ozonePlatform: null, enabledFeatures: null },
+        error: info.error,
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        accelerated: false,
+        videoDecode: 'unknown',
+        featureStatus: {},
+        gpuInfo: null,
+        platform: 'wails',
+        disabledByUser: false,
+        switches: { useGl: null, useAngle: null, ozonePlatform: null, enabledFeatures: null },
+        error: String((err as Error)?.message || err),
+      };
+    }
+  },
 };
 
 export default wailsBridge;

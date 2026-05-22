@@ -9,7 +9,7 @@ Questo file serve come guida e contesto per gli agenti AI che collaborano allo s
 > il backend Go è **completo per le Fasi 0–5, 2-bis e gran parte di 7-bis**
 > (9 `application.Service` Wails v3 in `internal/services/`,
 > `cmd/streamai/main.go` con reverse-shutdown order, `npm run wails:bindings`
-> genera 53 metodi TS in `frontend/bindings/`). Il frontend è ancora **100%
+> genera 54 metodi TS in `frontend/bindings/`). Il frontend è ancora **100%
 > sull'API Electron** (35 occorrenze `window.electronAPI`): la **Fase 7 —
 > compat layer** è in corso (`services/wailsBridge.ts` + `services/hostBridge.ts`
 > in arrivo). Il **player nativo (Fase 6, libmpv + canvas WebGL2)** è il

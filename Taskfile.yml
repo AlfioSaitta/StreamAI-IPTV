@@ -7,10 +7,11 @@ version: "3"
 
 # Wails v3 alpha.93 su openSUSE TW richiede il build-tag `gtk3` per usare
 # webkit2gtk-4.1 (webkitgtk-6.0 non ancora pacchettizzato). Su distro con
-# webkitgtk-6.0 disponibile (Ubuntu 24.04+, Fedora 40+, Arch) rimuovere
-# il tag: `task build TAGS=""`.
+# webkitgtk-6.0 disponibile (Ubuntu 24.04+, Fedora 40+, Arch) togli `gtk3`:
+# `task build TAGS=mpv`. Per build senza libmpv (CI senza mpv-devel)
+# togli `mpv`: `task build TAGS=gtk3` ⇒ usa lo stub che ritorna errNotBuilt.
 vars:
-  TAGS: '{{.TAGS | default "gtk3"}}'
+  TAGS: '{{.TAGS | default "gtk3 mpv"}}'
   BIN_NAME: streamai
   BIN_DIR: build/bin
   VERSION:
@@ -18,6 +19,20 @@ vars:
   COMMIT_SHA:
     sh: git rev-parse --short=7 HEAD 2>/dev/null || echo ""
   LDFLAGS: '-s -w -X main.version={{.VERSION}} -X main.commitSHA={{.COMMIT_SHA}}'
+
+# Whitelist CFLAGS richiesta da cgo per il backend `mpv` (vedi commento
+# spike:1:build). mpv-devel su openSUSE TW / Fedora / Arch espone
+# -fno-strict-overflow + -fstack-clash-protection + -fcf-protection-*
+# nelle CFLAGS pkg-config; cgo li blocca per default (go.dev/s/invalidflag).
+# Sono flag GCC innocui (hardening). Va riferita in `env:` dei task che
+# fanno `go build/run/test` con `mpv` nei tags.
+#
+# Su task >=3.32 si potrebbe alzare a top-level `env:`; qui restiamo
+# compat con 3.4 (openSUSE TW).
+#
+# Uso: `env: { CGO_CFLAGS_ALLOW: '{{.CGO_FLAGS_ALLOW}}' }` nel task.
+vars:
+  CGO_FLAGS_ALLOW: "-fno-strict-overflow|-fstack-clash-protection|-fcf-protection|-fno-omit-frame-pointer"
 
 tasks:
   default:
@@ -46,6 +61,8 @@ tasks:
   build:
     desc: Build completo (frontend + backend).
     deps: [frontend:build]
+    env:
+      CGO_CFLAGS_ALLOW: "{{.CGO_FLAGS_ALLOW}}"
     cmds:
       - mkdir -p {{.BIN_DIR}}
       - go build -tags "{{.TAGS}}" -trimpath -ldflags="{{.LDFLAGS}}" -o {{.BIN_DIR}}/{{.BIN_NAME}} ./cmd/streamai
@@ -53,29 +70,39 @@ tasks:
 
   build:debug:
     desc: Build di debug con symbol info.
+    env:
+      CGO_CFLAGS_ALLOW: "{{.CGO_FLAGS_ALLOW}}"
     cmds:
       - mkdir -p {{.BIN_DIR}}
       - go build -tags "{{.TAGS}}" -gcflags="all=-N -l" -o {{.BIN_DIR}}/{{.BIN_NAME}}-debug ./cmd/streamai
 
   dev:
     desc: Avvia Wails v3 in modalita' sviluppo (hot-reload Vite + Go).
+    env:
+      CGO_CFLAGS_ALLOW: "{{.CGO_FLAGS_ALLOW}}"
     cmds:
       - wails3 dev -tags "{{.TAGS}}"
 
   # ---- Quality gates ----
   lint:
     desc: golangci-lint + check-wails-v3 (regression guard v2).
+    env:
+      CGO_CFLAGS_ALLOW: "{{.CGO_FLAGS_ALLOW}}"
     cmds:
       - golangci-lint run --build-tags "{{.TAGS}}" ./...
       - node scripts/check-wails-v3.mjs
 
   test:
     desc: Test Go con race detector.
+    env:
+      CGO_CFLAGS_ALLOW: "{{.CGO_FLAGS_ALLOW}}"
     cmds:
       - go test -tags "{{.TAGS}}" -race -count=1 ./...
 
   vet:
     desc: go vet.
+    env:
+      CGO_CFLAGS_ALLOW: "{{.CGO_FLAGS_ALLOW}}"
     cmds:
       - go vet -tags "{{.TAGS}}" ./...
 

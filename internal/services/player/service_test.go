@@ -2,6 +2,13 @@
 // default, senza `-tags mpv`). Il backend cgo reale è coperto solo in
 // integrazione (richiede libmpv installato + asset video di test, vedi
 // tests/playback/4k-soak.sh — Fase 10 QA).
+//
+// Build constraint: questi test richiedono `stubBackend` (vedi
+// volumeRecorder in fondo), che esiste solo quando il binario è
+// compilato senza `-tags mpv`. Per testare il backend cgo eseguire
+// integration suite in `tests/playback/`.
+
+//go:build !mpv
 
 package player
 

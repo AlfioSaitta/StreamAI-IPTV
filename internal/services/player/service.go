@@ -71,6 +71,33 @@ type State struct {
 	BitrateKbps int     `json:"bitrateKbps"` // current track bitrate (0 = unknown)
 }
 
+// HwAccelInfo riassume lo stato dell'accelerazione hardware del backend
+// libmpv. Equivalente Wails dell'IPC `get-gpu-status` di Electron — il
+// frontend (services/hwAccelService.ts) consuma entrambi via hostBridge.
+//
+// Campi:
+//   - Built: true se il binario è stato compilato con `-tags mpv` (backend
+//     reale); false se è in uso lo stub. UI mostra warning "Backend
+//     video non disponibile" quando false.
+//   - HwdecCurrent: valore della property mpv `hwdec-current`. Vuoto se
+//     nessun file è caricato. Valori tipici: "vaapi", "nvdec", "drm",
+//     "videotoolbox", "d3d11va", "no" (= software).
+//   - Accelerated: true se `HwdecCurrent` ≠ "" e ≠ "no". Comodo per la UI.
+//   - MpvVersion: stringa libmpv (es. "v0.39.0"). Utile in diagnostica
+//     per matchare bug report (#vaapi su mpv 0.36 vs 0.39).
+//   - VideoCodec / VideoCodecID: codec corrente come visto da mpv.
+//   - LibmpvAPIVersion: numerico (es. 132). Soglia minima nostra: 107.
+type HwAccelInfo struct {
+	Built            bool   `json:"built"`
+	Accelerated      bool   `json:"accelerated"`
+	HwdecCurrent     string `json:"hwdecCurrent"`
+	MpvVersion       string `json:"mpvVersion"`
+	LibmpvAPIVersion int    `json:"libmpvApiVersion"`
+	VideoCodec       string `json:"videoCodec"`
+	VideoCodecID     string `json:"videoCodecId"`
+	Error            string `json:"error,omitempty"`
+}
+
 // backend è l'interfaccia interna che ciascuna implementazione
 // (cgo-mpv o stub) deve soddisfare. Permette di:
 //   - testare il dispatcher senza libmpv;
@@ -94,6 +121,7 @@ type backend interface {
 	SetMaxBitrate(kbps int) error
 	BufferInfo() (BufferInfo, error)
 	State() (State, error)
+	HwInfo() (HwAccelInfo, error)
 	Close() error
 }
 
@@ -238,3 +266,20 @@ func (s *Service) State() (State, error) {
 	defer s.mu.Unlock()
 	return s.backend.State()
 }
+
+// HwAccelInfo restituisce lo stato corrente dell'accelerazione hardware
+// libmpv (vedi tipo HwAccelInfo). Esposto a `frontend/services/
+// hwAccelService.ts` come controparte Wails dell'IPC Electron
+// `get-gpu-status`. Sicuro anche con stub backend: ritorna
+// `HwAccelInfo{Built: false}` invece di errore, così la UI può
+// mostrare il warning senza far esplodere la promise.
+func (s *Service) HwAccelInfo() (HwAccelInfo, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	info, err := s.backend.HwInfo()
+	if err != nil && errors.Is(err, errNotBuilt) {
+		return HwAccelInfo{Built: false, Error: err.Error()}, nil
+	}
+	return info, err
+}
+

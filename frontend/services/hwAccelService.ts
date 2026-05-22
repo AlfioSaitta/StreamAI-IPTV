@@ -2,10 +2,12 @@
  * hwAccelService — query runtime dello stato dell'accelerazione hardware.
  *
  * Combina due fonti:
- *  1. `app.getGPUFeatureStatus()` esposta via Electron IPC
- *     (`window.electronAPI.getGpuStatus`) — fonte autoritativa: dice se
- *     Chromium ha effettivamente abilitato la HW video decode su questa
- *     macchina (VA-API / Media Foundation / VideoToolbox).
+ *  1. **Host bridge** (`services/hostBridge.ts → host.getGpuStatus()`):
+ *     - Electron path → `app.getGPUFeatureStatus()` + `getGPUInfo('basic')`
+ *       (vedi IPC `get-gpu-status` in `main.js`).
+ *     - Wails path → `player.Service.HwAccelInfo()` (legge `hwdec-current`,
+ *       `mpv-version`, `video-codec` da libmpv).
+ *     Entrambi ritornano la stessa shape `GpuStatus` (vedi `wailsBridge.ts`).
  *  2. `navigator.mediaCapabilities.decodingInfo()` per-codec — già usato
  *     da `streamInfoService.ts` per popolare `info.hardwareAccelerated`.
  *
@@ -14,6 +16,7 @@
  */
 
 import { platformService } from './platformService';
+import { host } from './hostBridge';
 
 export interface GpuStatus {
   ok: boolean;
@@ -59,21 +62,19 @@ export async function getHwAccelStatus(force = false): Promise<GpuStatus> {
   if (inflight) return inflight;
   inflight = (async () => {
     try {
-      if (platformService.isElectron) {
-        const api = (window as unknown as {
-          electronAPI?: { getGpuStatus?: () => Promise<GpuStatus> };
-        }).electronAPI;
-        if (api?.getGpuStatus) {
-          const status = await api.getGpuStatus();
-          cached = status ?? FALLBACK;
-          return cached;
-        }
+      // `host` viene da hostBridge.ts: è elettron-API in Electron, wailsBridge
+      // in Wails, null su web/mobile. Entrambi i bridge espongono
+      // `getGpuStatus()` con la stessa shape.
+      const getter = (host as { getGpuStatus?: () => Promise<GpuStatus> } | null)?.getGpuStatus;
+      if (typeof getter === 'function') {
+        const status = await getter();
+        cached = status ?? FALLBACK;
+        return cached;
       }
-      // Non-Electron (web, Wails pre-Fase 6): nessun modo di leggere
-      // `getGPUFeatureStatus`; lasciamo il fallback. `streamInfoService`
-      // continuerà comunque a popolare `hardwareAccelerated` per-codec
-      // via MediaCapabilities.
-      cached = { ...FALLBACK, ok: true };
+      // Web/mobile: nessun bridge desktop → `streamInfoService` continua
+      // comunque a popolare `hardwareAccelerated` per-codec via
+      // navigator.mediaCapabilities.
+      cached = { ...FALLBACK, ok: true, platform: platformService.isNative ? 'mobile' : 'web' };
       return cached;
     } catch (error) {
       cached = { ...FALLBACK, error: String((error as Error)?.message || error) };
