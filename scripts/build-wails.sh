@@ -36,9 +36,15 @@ for arg in "$@"; do
   esac
 done
 
-TAGS="${TAGS:-gtk3}"
+TAGS="${TAGS:-gtk3 mpv}"
 BIN_NAME="${BIN_NAME:-streamai}"
 BIN_DIR="${BIN_DIR:-build/bin}"
+
+# mpv-devel su openSUSE TW / Fedora / Arch espone -fno-strict-overflow
+# + -fstack-clash-protection + -fcf-protection-* nelle CFLAGS pkg-config;
+# cgo li blocca per default (go.dev/s/invalidflag). Sono flag GCC innocui
+# (hardening), li whitelistiamo se non già fornito dall'utente.
+export CGO_CFLAGS_ALLOW="${CGO_CFLAGS_ALLOW:--fno-strict-overflow|-fstack-clash-protection|-fcf-protection|-fno-omit-frame-pointer}"
 
 if [[ -r "$ROOT/.version" ]]; then
   VERSION="$(tr -d '[:space:]' < "$ROOT/.version")"

@@ -109,9 +109,11 @@ npm run typecheck
 npm run check
 
 # Build runtime Wails v3 (Go) → build/bin/streamai
-npm run wails:build
+# (richiede mpv-devel + webkit2gtk-4_1-devel + go ≥ 1.22, vedi docs/wails-quickstart.md)
+npm run wails:build         # release ~19 MB con backend libmpv (tags 'gtk3 mpv')
 npm run wails:build:debug   # versione con symbol info
 npm run wails:dev           # hot-reload Vite + Go (richiede `wails3` CLI)
+npm run wails:run           # build + esegui il binario subito
 npm run wails:bindings      # rigenera binding TS dai Service Go
 
 # Build + pacchetto Linux (auto-detect distro host)
@@ -322,7 +324,7 @@ L'applicazione è completamente controllabile via tastiera per un'esperienza "Le
 
 ### Stato migrazione Wails v3
 
-La rotta da Electron a Wails v3 (Go) è descritta in `docs/plan-go-wails-migration.md` (rev. 5). Stato corrente:
+La rotta da Electron a Wails v3 (Go) è descritta in `docs/plan-go-wails-migration.md` (rev. 6). Per usare la build Wails localmente vedi [`docs/wails-quickstart.md`](docs/wails-quickstart.md). Stato corrente (2026-05-22):
 
 | Fase | Ambito | Stato |
 |------|--------|-------|
@@ -332,11 +334,14 @@ La rotta da Electron a Wails v3 (Go) è descritta in `docs/plan-go-wails-migrati
 | 3 | Cast Service (castv2 Go + DLNA SOAP + AirPlay) | ✅ |
 | 4 | Remote WebSocket + UDP broadcast + Netstatus bridge | ✅ |
 | 5 | Proxy stream (TLS skip, header rewrite, cleartext) | ✅ |
-| 6 | Player bridge (Video.js + nativo Android) | ☐ |
-| 7 | Lifecycle, single-instance ✅, tray, media keys, data migration IndexedDB v1→v2 | 🔄 |
+| 6 | Player nativo libmpv → canvas WebGL2 (HwAccelInfo ✅, SPIKE-1 smoke ✅; render-context + zero-copy ⏳) | ◐ |
+| 7 | Compat layer `hostBridge` + 54 metodi Wails binding TS | ✅ |
+| 7-bis | Lifecycle (single-instance, tray, MPRIS2, crashguard, powersave) | ✅ |
 | 8 | Packaging Wails per-distro + firma GPG | ☐ |
 | 9 | Rimozione `main.js` / `preload.js` Electron | ☐ |
 | 10 | E2E test casting cross-vendor + collaudo TV box | ☐ |
+
+Binario Wails attuale: ~19 MB, cold-start ~140 ms (vs ~2-3 s Electron). Libmpv 2.5.0 + VA-API/NVDEC verificati funzionanti sul dev host (vedi [`docs/spike1-results-2026-05-22.md`](docs/spike1-results-2026-05-22.md)).
 
 Per i dettagli implementativi e l'inventario completo Electron → Wails (43 voci E1–E43) consulta [`docs/plan-go-wails-migration.md`](docs/plan-go-wails-migration.md).
 

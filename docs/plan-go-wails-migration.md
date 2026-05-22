@@ -1213,12 +1213,23 @@ singolo binario fat. Pipeline CI `macos-release.yml`:
   *(scaffolding 2026-05-21 — harness Go `cmd/spike-mpv-render/` +
   PoC TS `frontend/spike/mpv-webgl2/` + bench
   `scripts/spike1-bench.sh` + methodology doc
-  `docs/spike1-methodology.md`. Smoke run su NVIDIA RTX 3050 Ti Laptop
-  (sorgente sintetica `av://lavfi:testsrc2`, RGBA8 readback): 1080p60
-  p95=16.91 ms (**warn**), 4K60 p95=18.75 ms (**fail**) — RGBA8 readback
-  CPU è il bottleneck atteso → SPIKE-5 DRM-PRIME zero-copy va promosso a
-  mandatory per Linux 4K. Misure con codec reale (HEVC/H.264) pendono su
-  installazione repo Packman ffmpeg-full. Porting Windows/macOS:
+  `docs/spike1-methodology.md`. **Run #2 2026-05-22** su NVIDIA RTX 3050
+  Ti + driver 580.159.03 + libmpv 2.5.0 — sorgente sintetica
+  `av://lavfi:testsrc2`, matrice 2×2 (hwdec={no, auto-safe} × res={1080p,
+  4K}, vedi `docs/spike1-results-2026-05-22.md`):
+  - **1080p60 hwdec=auto-safe**: p95=**16.95 ms** (−9.7 % vs SW), p99=18.04
+    ms, 0/481 drop → NVDEC istanziato correttamente, OK per produzione.
+  - **4K60 hwdec=auto-safe**: p95=18.19 ms, 15/470 drop (3.2 %) → **fail**.
+    Bottleneck identificato: readback RGBA8 GPU→CPU (~2 GB/s a 4K@60).
+  - **Decisione**: Fase 6.1 esce con cap **1080p60** su T1 (readback);
+    4K richiede T2 (DMA-BUF zero-copy) → SPIKE-5 DRM-PRIME **promosso
+    a mandatory** per Linux 4K (era opzionale).
+  - **Refactor KPI (non blocking)**: separare GPU work da vsync wait con
+    `glFenceSync` + `eglSwapInterval(0)`; soglie attuali (p95 ≤ 8 ms
+    1080p) includono i ~16.6 ms di vsync e producono "warn" anche con
+    60.1 fps e 0 drop.
+  - Misure con codec reale (HEVC/H.264 BBB 4K) pendono su installazione
+    repo Packman ffmpeg-full. Porting Windows/macOS:
   SPIKE-1-WIN / SPIKE-1-MAC.)*
   - PoC Go: aprire `mpv_render_context` MPV_RENDER_API_TYPE_OPENGL,
     renderizzare HEVC 10-bit 3840×2160@60 su FBO, output formato NV12 /
