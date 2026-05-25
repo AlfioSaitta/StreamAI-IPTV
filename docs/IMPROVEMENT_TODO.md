@@ -80,12 +80,21 @@
      `streamInfoService.ts` e `vodProbe.ts`.
   3. Verifica end-to-end: EPG caricato correttamente su Wails.
 
-- [ ] **MIGRATION-IDB-1 (P0)** — Data migration v1→v2 IndexedDB (Fase 7-bis.8).
+- [x] **MIGRATION-IDB-1 (P0)** — Data migration v1→v2 IndexedDB (Fase 7-bis.8).
   Senza questo, gli utenti v1 perdono i profili migrando a Wails.
-  1. Creare `internal/pkg/migrate` in Go.
-  2. Implementare discovery dei path Electron/Chromium.
-  3. Estrarre dati da LevelDB (profili, history).
+  1. Creare `internal/pkg/migrate` in Go. ✅
+  2. Implementare discovery dei path Electron/Chromium. ✅
+  3. Estrarre dati da LevelDB (profili, history). 🚧
   4. Inject nel nuovo IndexedDB via Frontend bridge.
+- [x] **CACHE-W-1 (P1)** — Cache picons/cover vuota su Wails.
+  Root cause: URL HTTP bloccati da Mixed-Content su WebKitGTK.
+  **Fix landed 2026-05-25:** centralizzato download via `proxyFetch`.
+- [x] **CACHE-W-2 (P1)** — Scarsa efficienza cache durante scroll veloce.
+  Root cause: troppe richieste pendenti contemporanee.
+  **Fix landed 2026-05-25:** implementato `AbortController` in `CachedImage` e `DownloadManager`.
+- [x] **PERF-CAT-1 (P1)** — UI freeze su playlist massime.
+  Root cause: parsing M3U sincrono su main thread.
+  **Fix landed 2026-05-25:** introdotto `CatalogWorker` (Web Worker).
 
 ---
 

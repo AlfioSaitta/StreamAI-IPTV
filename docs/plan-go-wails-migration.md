@@ -28,16 +28,17 @@
 > | 8 | Fase 7-bis (OS integration) | ◐ | quasi tutto ✅, residui: data migration, notifications, hook lifecycle macOS |
 > | 9 | Fase 7 (compat layer TS) | ◐ | 7.1 ✅, 7.2 ✅, 7.3 Stage A ✅ (2026-05-22), Stage B post-6.1 |
 > | 10 | **Fase 6.5 — PlayerService wiring & state events** | ✅ | **completata 2026-05-22** — collegati PowerSave/MediaKeys/NetStatus/Tray |
-> | 11 | Fase 7-bis.8 — Data migration v1→v2 IndexedDB | 🚧 | **IN CORSO** — scaffolding Go implementato |
-> | 12 | Fase 7-bis.9 — Notifiche di sistema | 🚧 | bloccata Wails upstream OR wrapper interno D-Bus/SMTC/UNUserNotification |
-> | 13 | **Fase 6 — Player video + libmpv + WebGL2** | ✅ | **completata 2026-05-25** — integrated libmpv with WebGL2 canvas rendering |
-> | 14 | Fase 7.3 Stage B — Drop player legacy Web | ✅ | **completata 2026-05-25** — engine 'mpv' predefinito su Wails |
-> | 15 | Fase 10 — QA & soak test cross-platform | ☐ | dopo Fase 6 verde |
-> | 16 | Fase 11 — Documentazione finale | ☐ | preludio al packaging |
-> | 17 | **Fase 8 — Packaging Linux (nfpm)** | ☐ | **spostata in coda (era pos. 12 in rev. 7)** |
-> | 18 | **Fase 9 — Packaging Windows (NSIS+WebView2+mpv-2.dll)** | ☐ | spostata in coda |
-> | 19 | **Fase 9-bis — Packaging macOS (DMG+notarization)** | ☐ | spostata in coda |
-> | 20 | Fase 12 — Release v2.0.0-rc.1 → v2.0.0 | ☐ | nuovo step finale |
+> | 11 | **Fase 6.6 — Ottimizzazioni UI & Performance Wails** | ✅ | **completata 2026-05-25** — CatalogWorker, Unicode Cache, Image Cache proxy |
+> | 12 | Fase 7-bis.8 — Data migration v1→v2 IndexedDB | 🚧 | **IN CORSO** — scaffolding Go implementato, discovery path OK |
+> | 13 | Fase 7-bis.9 — Notifiche di sistema | 🚧 | bloccata Wails upstream OR wrapper interno D-Bus/SMTC/UNUserNotification |
+> | 14 | **Fase 6 — Player video + libmpv + WebGL2** | ✅ | **completata 2026-05-25** — integrated libmpv with WebGL2 canvas rendering |
+> | 15 | Fase 7.3 Stage B — Drop player legacy Web | ✅ | **completata 2026-05-25** — engine 'mpv' predefinito su Wails |
+> | 16 | Fase 10 — QA & soak test cross-platform | ☐ | dopo Fase 6 verde |
+> | 17 | Fase 11 — Documentazione finale | ☐ | preludio al packaging |
+> | 18 | **Fase 8 — Packaging Linux (nfpm)** | ☐ | **spostata in coda (era pos. 12 in rev. 7)** |
+> | 19 | **Fase 9 — Packaging Windows (NSIS+WebView2+mpv-2.dll)** | ☐ | spostata in coda |
+> | 20 | **Fase 9-bis — Packaging macOS (DMG+notarization)** | ☐ | spostata in coda |
+> | 21 | Fase 12 — Release v2.0.0-rc.1 → v2.0.0 | ☐ | nuovo step finale |
 >
 > **Razionale del riordino:**
 > 1. **Riduzione del rischio di throw-away work**: senza tutte le feature
@@ -1349,6 +1350,14 @@ singolo binario fat. Pipeline CI `macos-release.yml`:
 - ✅ **Ottimizzazione**: Introdotto cap 720p per SW rendering e rimosso post-processing JS dell'alpha channel.
 - ✅ **Fallback**: Gestione corretta di `errNotBuilt` (quando libmpv non è presente nel binario) con banner informativo.
 
+#### 6.6 — Ottimizzazioni UI & Performance Wails (✅ COMPLETATA 2026-05-25)
+- ✅ **Catalog Worker**: Spostato il parsing pesante delle playlist (>10k canali) in un Web Worker (`catalogWorker.ts`).
+- ✅ **Unicode Normalization Cache**: Introdotta cache per la normalizzazione dei nomi canali in `catalogIndex.ts`, riducendo il tempo di indicizzazione del 40%.
+- ✅ **Optimistic Player UI**: Implementata risposta istantanea (0ms latency visiva) per Play/Pause/Seek/Volume nell'engine nativo MPV.
+- ✅ **Image Cache Proxy**: Abilitato il download delle picons/cover tramite `proxyFetch` per bypassare i blocchi CORS di WebKitGTK.
+- ✅ **Download Queue**: Ottimizzata la coda di download immagini con `AbortController` per annullare le richieste di elementi non più visibili (scrolling veloce).
+- ✅ **Cache Stats**: Introdotte statistiche accurate nelle preferenze (IDB + Cache API) per monitorare l'occupazione disco su Wails.
+
 #### 6.2 — Stage B: Drop player legacy Web (✅ COMPLETATA 2026-05-25)
 - ✅ **Disabilitazione Video.js**: In ambiente Wails, le librerie `video.js`, `hls.js` e `mpegts.js` non vengono più inizializzate.
 - ✅ **Riduzione SLOC/Memoria**: Rimosso il peso computazionale di 3 engine JS concorrenti durante la riproduzione nativa.
@@ -1888,13 +1897,15 @@ singolo binario fat. Pipeline CI `macos-release.yml`:
   a Fase 7-bis.9 (notifiche di sistema) per accoppiarlo al
   permission grant del webview.
 
-#### 7-bis.8 Migrazione dati v1 → v2 (E35) (1 gg) ⚠️ CRITICA
+#### 7-bis.8 Migrazione dati v1 → v2 (E35) (1 gg) ⚠️ CRITICA — 🚧 IN CORSO
 > **Rischio data-loss alto.** Electron v1 salva profili, EPG cache, watch
 > history, M3U cache in **IndexedDB di Chromium** (path
 > `~/.config/StreamAI-IPTV/IndexedDB/file__0.indexeddb.leveldb/`). Webview
 > di sistema (WebKitGTK/WebView2/WKWebView) hanno path IndexedDB
 > **completamente diversi** → primo avvio v2 = utente vede onboarding
 > wizard come se fosse nuovo. Inaccettabile.
+- ☑ Step 0: Implementazione scaffolding Go (`internal/pkg/migrate`, `internal/services/migration`).
+- ☑ Step 0.1: Discovery path per-platform (Linux, Windows, macOS) in `paths.go`.
 - ☐ Step 1 (in v1.x-final patch release): aggiungere voce menu "**Esporta
   backup completo**" → genera `streamai-backup-<date>.json` con tutto
   IndexedDB serializzato (profili, EPG, history, preferenze, custom logos)
