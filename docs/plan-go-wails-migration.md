@@ -25,7 +25,7 @@
 > | 6 | Fase 4 — Remote control & UDP status | ✅ | 2026-05-19 |
 > | 7 | Fase 5 — HTTP proxy IPTV + header rewrite | ✅ | 2026-05-20 / FIX 2026-05-24 |
 > | 7.1 | **Fase 5.1 — Helper proxyFetch & EPG fix** | ✅ | **2026-05-25** — risolve CORS/mixed-content su WebKitGTK per EPG/XMLTV |
-> | 8 | Fase 7-bis (OS integration) | ◐ | quasi tutto ✅, residui: data migration, notifications, hook lifecycle macOS |
+> | 8 | Fase 7-bis (OS integration) | ✅ | **COMPLETATA** — MediaKeys, PowerSave, Tray e lifecycle integrati nel player. |
 > | 9 | Fase 7 (compat layer TS) | ◐ | 7.1 ✅, 7.2 ✅, 7.3 Stage A ✅ (2026-05-22), Stage B post-6.1 |
 > | 10 | **Fase 6.5 — PlayerService wiring & state events** | ✅ | **completata 2026-05-22** — collegati PowerSave/MediaKeys/NetStatus/Tray |
 > | 11 | **Fase 6.6 — Ottimizzazioni UI & Performance Wails** | ✅ | **completata 2026-05-25** — CatalogWorker, Unicode Cache, Image Cache proxy |

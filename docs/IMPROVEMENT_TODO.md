@@ -12,8 +12,14 @@
 
 ---
 
-## 🆕 Sessione 2026-05-25 — MPV Backend Fixes & Data Migration
+## 🆕 Sessione 2026-05-25 — MPV Backend Fixes, Data Migration & OS Integration
 
+- [x] **WAILS-BUILD-FIX** — Errore build Vite `react-window` (FixedSizeList non esportato). **Fix landed 2026-05-25:** aggiornato `VideoPlayerNew.tsx` all'API di `react-window` v2.2.3 (usando `List` invece di `FixedSizeList`).
+- [x] **MPV-OS-INTEGRATION** — Integrazione sistema OS (Fase 7-bis). **Landed 2026-05-25:**
+  1. Creato hook `usePlayerSystemIntegration.ts` per Wails.
+  2. Implementato Power Save Blocker (prevent display sleep) in player.
+  3. Implementato Media Keys (MPRIS/D-Bus) bidirezionale (metadati + controlli hardware).
+  4. Disabilitato `navigator.mediaSession` su Wails per evitare conflitti.
 - [x] **MPV-CREATE-1** — Errore `mpv_create returned nil` su Linux con locale `it-IT`.
   Root cause: libmpv fallisce il parsing delle opzioni se la locale numerica
   usa la virgola. **Fix landed 2026-05-25:** forzato `LC_NUMERIC=C` via
