@@ -44,12 +44,27 @@ func ChromiumIndexedDBPath() string {
 	return filepath.Join(base, "IndexedDB", "file__0.indexeddb.leveldb")
 }
 
+// ChromiumLocalStoragePath ritorna il path del database Local Storage di Chromium (Electron)
+func ChromiumLocalStoragePath() string {
+	base := ElectronAppData()
+	if base == "" {
+		return ""
+	}
+	return filepath.Join(base, "Local Storage", "leveldb")
+}
+
 // LegacyExists verifica se esiste la directory dei dati della versione 1.x (Electron)
 func LegacyExists() bool {
-	path := ChromiumIndexedDBPath()
-	if path == "" {
-		return false
+	idb := ChromiumIndexedDBPath()
+	ls := ChromiumLocalStoragePath()
+
+	exists := func(p string) bool {
+		if p == "" {
+			return false
+		}
+		info, err := os.Stat(p)
+		return err == nil && info.IsDir()
 	}
-	info, err := os.Stat(path)
-	return err == nil && info.IsDir()
+
+	return exists(idb) || exists(ls)
 }

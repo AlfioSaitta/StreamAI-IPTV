@@ -76,6 +76,7 @@ import { Category, Channel, XtreamCredentials, StreamType, Profile, XtreamConten
 import { Server, Wifi, Sparkles, X } from 'lucide-react';
 import { platformService } from './services/platformService.ts';
 import { host } from './services/hostBridge.ts';
+import { MigrationService } from './services/migrationService.ts';
 import { hasAiApiKey, isAiAvailable, isAiTemporarilySuspended } from './services/geminiService.ts';
 import { EpgReminderService, type ReminderFiredEvent } from './services/epg/reminderService.ts';
 import { useBackStack } from './hooks/useBackStack.ts';
@@ -254,6 +255,7 @@ function App() {
   // login Xtream a `ChannelList` per mostrare EmptyState dedicato sui blocchi
   // in errore (es. "Catalogo film non disponibile" + CTA Riscarica).
   const [catalogHealth, setCatalogHealth] = useState<XtreamContent['health'] | null>(null);
+  const [isMigrating, setIsMigrating] = useState(platformService.isWails);
   // Ref per chiamare refreshContentFromServer da handleXtreamLogin senza TDZ.
   const refreshContentFromServerRef = useRef<((options?: { background?: boolean }) => Promise<unknown>) | null>(null);
 
@@ -411,11 +413,25 @@ function App() {
     },
   });
 
-  // Initialize Cache Persistence
+  // Initialize Cache Persistence and Migration
   useEffect(() => {
-    CacheService.init();
-    platformService.init();
-    EpgReminderService.ensureScheduler();
+    const init = async () => {
+      await CacheService.init();
+      platformService.init();
+      
+      // Fase 7-bis.8: Check migration from Electron v1
+      if (platformService.isWails) {
+        try {
+          await MigrationService.checkAndMigrate();
+        } finally {
+          setIsMigrating(false);
+        }
+      }
+      
+      EpgReminderService.ensureScheduler();
+    };
+
+    init();
 
     // In-app toast on reminder fire.
     const offFired = EpgReminderService.onFired(({ reminder }) => {
@@ -869,6 +885,16 @@ function App() {
       setSelectedSeries(null);
       lastProfileIdRef.current = null;
   };
+
+  // 0. If migrating data, show loading screen
+  if (isMigrating) {
+      return (
+          <div className="flex-1 flex flex-col items-center justify-center bg-[var(--bg-primary)] h-screen">
+              <div className="w-16 h-16 border-4 border-brand-accent/20 border-t-brand-accent rounded-full animate-spin mb-4"></div>
+              <p className="text-xl text-gray-400 font-medium">Migrazione dati in corso…</p>
+          </div>
+      );
+  }
 
   // 1. If no profile selected, show selection screen
   if (!activeProfile) {

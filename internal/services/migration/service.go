@@ -32,6 +32,15 @@ func (s *Service) GetLegacyPath() string {
 	return migrate.ChromiumIndexedDBPath()
 }
 
+// GetLegacyData estrae e ritorna i dati legacy in formato JSON.
+func (s *Service) GetLegacyData() (string, error) {
+	data, err := migrate.ExtractLegacyData()
+	if err != nil {
+		return "", err
+	}
+	return data.ToJSON(), nil
+}
+
 // ImportSnapshot riceve un dump JSON dei dati e dovrebbe iniettarli nel database corrente.
 // Al momento è uno stub per il wiring del frontend.
 func (s *Service) ImportSnapshot(jsonData string) (bool, error) {

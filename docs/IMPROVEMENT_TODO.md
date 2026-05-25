@@ -81,11 +81,14 @@
   3. Verifica end-to-end: EPG caricato correttamente su Wails.
 
 - [x] **MIGRATION-IDB-1 (P0)** — Data migration v1→v2 IndexedDB (Fase 7-bis.8).
-  Senza questo, gli utenti v1 perdono i profili migrando a Wails.
   1. Creare `internal/pkg/migrate` in Go. ✅
   2. Implementare discovery dei path Electron/Chromium. ✅
-  3. Estrarre dati da LevelDB (profili, history). 🚧
-  4. Inject nel nuovo IndexedDB via Frontend bridge.
+  3. Estrarre dati da LevelDB (profili, history). ✅
+  4. Inject nel nuovo IndexedDB via Frontend bridge. ✅
+- [x] **NOTIF-NATIVE-1 (P1)** — Notifiche desktop native cross-platform (Fase 7-bis.9).
+  1. Implementare backend D-Bus (Linux). ✅
+  2. Implementare fallback PowerShell (Windows) e osascript (macOS). ✅
+  3. Integrare in `reminderService.ts` per promemoria EPG. ✅
 - [x] **CACHE-W-1 (P1)** — Cache picons/cover vuota su Wails.
   Root cause: URL HTTP bloccati da Mixed-Content su WebKitGTK.
   **Fix landed 2026-05-25:** centralizzato download via `proxyFetch`.
