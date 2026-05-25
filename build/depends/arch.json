@@ -13,7 +13,8 @@
     "mesa",
     "alsa-lib",
     "libcups",
-    "libxkbcommon"
+    "libxkbcommon",
+    "mpv"
   ]
 }
 

@@ -1,12 +1,11 @@
 // DLNA/UPnP Device Discovery and Media Casting Service
-// Uses the desktop host bridge (Electron or Wails) for native network
-// scanning when available — vedi services/hostBridge.ts (Fase 7.2).
+// Uses the desktop host bridge (Wails v3) for native network scanning
+// when available — vedi services/hostBridge.ts.
 
 import { platformService } from './platformService';
 import { host } from './hostBridge';
 import type { GpuStatus } from './hwAccelService';
 
-// Type for Electron API
 interface NetworkInterface {
   ip: string;
   netmask: string;
@@ -17,32 +16,24 @@ interface NetworkInterface {
   cidr: number;
 }
 
-interface ElectronAPI {
+// Shape esposta dal host bridge desktop (Wails v3, vedi `wailsBridge.ts`).
+export interface DesktopHostAPI {
   discoverDevices: () => Promise<DiscoveredDevice[]>;
   getLocalIPs: () => Promise<NetworkInterface[]>;
   onDeviceFound: (callback: (device: DiscoveredDevice) => void) => () => void;
-  castToDevice: (options: {
-    ip: string;
-    port: number;
-    mediaUrl: string;
-    title: string;
-    contentType?: string;
-    protocol?: string;
-  }) => Promise<{ success: boolean; error?: string; status?: string }>;
   scanIp: (ipOrSubnet: string) => Promise<DiscoveredDevice[]>;
   probeDeviceServices: (ip: string) => Promise<CastService[]>;
   updatePlaybackStatus?: (status: unknown) => void;
   onNetworkPlaybackStatus?: (callback: (status: { deviceId: string; channelName: string }) => void) => () => void;
   onRemoteControlCommand?: (callback: (command: unknown) => void) => () => void;
   onRequestStatusBroadcast?: (callback: () => void) => () => void;
-  /** Stato dell'accelerazione HW vista da Chromium (R22). */
+  /** Stato dell'accelerazione HW (libmpv hwdec) lato Wails. */
   getGpuStatus?: () => Promise<GpuStatus>;
-  isElectron: boolean;
 }
 
 declare global {
   interface Window {
-    electronAPI?: ElectronAPI;
+    electronAPI?: DesktopHostAPI;
   }
 }
 
@@ -96,18 +87,16 @@ class DeviceDiscoveryService {
   private isSearching = false;
   private searchTimeout: number | null = null;
   private error: string | null = null;
-  private electronUnsubscribe: (() => void) | null = null;
+  private desktopUnsubscribe: (() => void) | null = null;
   private abortController: AbortController | null = null;
   private cache: CachedDiscovery | null = null;
   private progress = { phase: 'Inattivo', scannedHosts: 0, totalHosts: 0 };
   private discoveryRunId = 0;
 
   /**
-   * Check if a desktop bridge (Electron or Wails) is available.
-   * Mantiene il nome `isElectron` per minimizzare diff sui call site; copre
-   * entrambi i runtime desktop dopo la Fase 7.2.
+   * Check if a desktop bridge (Wails v3) is available.
    */
-  private get isElectron(): boolean {
+  private get isDesktopBridge(): boolean {
     return platformService.isDesktop && !!host;
   }
 
@@ -235,12 +224,12 @@ class DeviceDiscoveryService {
     }, DISCOVERY_TIMEOUT_MS);
 
     console.log('[Discovery] Starting device discovery...');
-    console.log('[Discovery] Electron API available:', this.isElectron);
+    console.log('[Discovery] Desktop bridge available:', this.isDesktopBridge);
 
     try {
-      if (this.isElectron) {
+      if (this.isDesktopBridge) {
         // Use Electron native discovery
-        await this.discoverViaElectron();
+        await this.discoverViaDesktop();
       } else {
         // Fallback to browser-based discovery
         await this.discoverViaBrowser();
@@ -265,9 +254,9 @@ class DeviceDiscoveryService {
           window.clearTimeout(this.searchTimeout);
           this.searchTimeout = null;
         }
-        if (this.electronUnsubscribe) {
-          this.electronUnsubscribe();
-          this.electronUnsubscribe = null;
+        if (this.desktopUnsubscribe) {
+          this.desktopUnsubscribe();
+          this.desktopUnsubscribe = null;
         }
         this.abortController = null;
         this.progress = {
@@ -282,14 +271,14 @@ class DeviceDiscoveryService {
   /**
    * Use Electron IPC for native network discovery
    */
-  private async discoverViaElectron(): Promise<void> {
+  private async discoverViaDesktop(): Promise<void> {
     if (!host) return;
 
     // Subscribe to incremental updates
-    this.electronUnsubscribe = host!.onDeviceFound((device: DiscoveredDevice) => {
+    this.desktopUnsubscribe = host!.onDeviceFound((device: DiscoveredDevice) => {
       this.addOrMergeDevice(device);
       this.notify();
-      console.log('[Discovery] Found via Electron:', device.name);
+      console.log('[Discovery] Found via desktop bridge:', device.name);
     });
 
     // Start discovery
@@ -302,7 +291,7 @@ class DeviceDiscoveryService {
 
       this.notify();
     } catch (err) {
-      console.error('[Discovery] Electron discovery error:', err);
+      console.error('[Discovery] Desktop discovery error:', err);
       // Fallback to browser method
       await this.discoverViaBrowser();
     }
@@ -315,7 +304,7 @@ class DeviceDiscoveryService {
     const scannedBases = new Set<string>();
 
     // First, try to get real network interfaces from Electron
-    if (this.isElectron && host) {
+    if (this.isDesktopBridge && host) {
       try {
         const localIPs = await host!.getLocalIPs();
         console.log('[Discovery] Got network interfaces from Electron:', localIPs);
@@ -494,9 +483,9 @@ class DeviceDiscoveryService {
       this.searchTimeout = null;
     }
 
-    if (this.electronUnsubscribe) {
-      this.electronUnsubscribe();
-      this.electronUnsubscribe = null;
+    if (this.desktopUnsubscribe) {
+      this.desktopUnsubscribe();
+      this.desktopUnsubscribe = null;
     }
 
     this.notify();
@@ -523,7 +512,7 @@ class DeviceDiscoveryService {
    */
   async addManualDevice(ip: string, name?: string, port: number = 8008): Promise<DiscoveredDevice> {
     // If Electron is available, try to scan the IP first
-    if (this.isElectron && host) {
+    if (this.isDesktopBridge && host) {
       try {
         console.log('[Discovery] Scanning manual IP via Electron:', ip);
         const devices = await host!.scanIp(ip);
@@ -608,7 +597,7 @@ class DeviceDiscoveryService {
     }
 
     // Fallback: Try Cast V2 on port 8008 if Electron is available
-    if (this.isElectron && host) {
+    if (this.isDesktopBridge && host) {
       console.log('[Discovery] Fallback: trying Electron Cast V2');
       try {
         const result = await host!.castToDevice({
@@ -638,7 +627,7 @@ class DeviceDiscoveryService {
    */
   private async probeDeviceServices(ip: string): Promise<CastService[]> {
     // If Electron is available, use native probing
-    if (this.isElectron && host?.probeDeviceServices) {
+    if (this.isDesktopBridge && host?.probeDeviceServices) {
       try {
         return await host!.probeDeviceServices(ip);
       } catch (err) {
@@ -693,7 +682,7 @@ class DeviceDiscoveryService {
    * Send via Cast V2 protocol (native Electron)
    */
   private async sendViaCastV2(device: DiscoveredDevice, port: number, mediaUrl: string, title: string): Promise<boolean> {
-    if (!this.isElectron || !host) {
+    if (!this.isDesktopBridge || !host) {
       return false;
     }
 

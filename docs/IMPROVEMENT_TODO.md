@@ -6,9 +6,86 @@
 > `docs/IMPROVEMENT_PLAN.md` rev. 2026-05-18 (versione `/.version` 1.0.0).
 >
 > 📌 Convenzione: `[ ]` = aperto. Quando chiudi un task qui, **chiudilo
-> anche** nella sezione corrispondente del piano (riferimento `§x.y`).
-> Stime: `g` = giorno-uomo. P0 = urgente bloccante · P1 = alta priorità ·
-> P2 = pianificato · P3 = nice-to-have.
+> anche** nella sezione corrispondente del piano (riferimento `x.y`).
+> Stime: `g` = giorno-uomo. P0 = urgente bloccante  P1 = alta priorità 
+> P2 = pianificato  P3 = nice-to-have.
+
+---
+
+## 🆕 Sessione 2026-05-25 — MPV Backend Fixes & Data Migration
+
+- [x] **MPV-CREATE-1** — Errore `mpv_create returned nil` su Linux con locale `it-IT`.
+  Root cause: libmpv fallisce il parsing delle opzioni se la locale numerica
+  usa la virgola. **Fix landed 2026-05-25:** forzato `LC_NUMERIC=C` via
+  CGO in `internal/services/player/mpv_cgo.go` e `spike-mpv-render`.
+- [x] **MPV-VERSION-1** — Check versione API errato. Faceva comparazione
+  diretta con `107` invece di `(1 << 16) | 107`. Fixato in `mpv_cgo.go`.
+- [x] **MPV-DIAG-1** — Migliorata diagnostica errore backend. Ora include
+  `errno` e versione API formattata (es. `2.5`) nel messaggio d'errore.
+- [x] **MPV-HWDEC-1** — Accelerazione HW non attiva o non rilevata.
+  Root cause: `hwdec=auto-safe` troppo conservativo e diagnostica basata
+  su tag `<video>` (assente con MPV). **Fix landed 2026-05-25:**
+  1. Passato a `hwdec=auto` e aggiunto `hwdec-codecs=all` in Go.
+  2. Esposto `HwAccelInfo` da MPV al frontend via Wails binding.
+  3. Integrati dati MPV in `StreamDiagnostics.tsx`, eliminando i falsi negativi.
+- [x] **MPV-CLEANUP-1** — Audio persiste in sottofondo dopo chiusura player.
+  Root cause: `VideoPlayerNew` non fermava l'engine MPV all'unmount.
+  **Fix landed 2026-05-25:** aggiunto `stopMpv()` nel cleanup di unmount.
+  Rifattorizzate callback per stabilità (destructuring stable functions).
+- [x] **MPV-AUTOPLAY-1** — Autoriproduzione film/VOD non funzionante su Wails.
+  Root cause: `VideoPlayerNew` caricava il file ma non chiamava `playMpv()`.
+  **Fix landed 2026-05-25:** aggiunto `playMpv()` esplicito dopo il caricamento.
+- [x] **PLAYER-RESUME-1** — Ripresa visione (seek iniziale) mancante/errata per MPV.
+  Root cause: `initialProgress` (percentuale) non veniva applicato a MPV.
+  **Fix landed 2026-05-25:** implementato seek automatico in `VideoPlayerNew` al caricamento dei metadati MPV.
+- [x] **PLAYER-PROGRESS-1** — Incoerenza globale dati progresso (secondi vs percentuale).
+  Root cause: `App.tsx` salvava secondi invece di 0..1, causando seek errati o mancanti.
+  **Fix landed 2026-05-25:** centralizzato il calcolo della percentuale (0..1) in `App.tsx → handleVideoProgress`.
+
+## 🆕 Sessione 2026-05-23/24 — Xtream + EPG dopo drop Electron
+
+- [x] **WAILS-PROXY-1** — Xtream non si connette su Wails (CORS/mixed-content
+  WebKitGTK). Sintomi: `Network error: Load failed` o catalogo vuoto.
+  Root cause: `frontend/services/xtream.ts` faceva `fetch()` diretto al
+  server IPTV; WebKitGTK blocca cross-origin da `wails://` a `http://`.
+  **Fix landed 2026-05-24:** proxy IPTV esposto come middleware
+  dell'asset server Wails sul path same-origin `/iptv-proxy`
+  (`internal/services/proxy/service.go → AssetMiddleware`, wiring in
+  `cmd/streamai/main.go` via `AssetOptions.Middleware`). Frontend
+  costruisce URL `/iptv-proxy?u=<base64url>&ua=...` client-side senza
+  IPC per chiamata. Vedi AGENTS.md punto 12.
+
+- [x] **WAILS-DETECT-1** — `platformService.isWails` ritornava sempre
+  `false` perché controllava `window.wails` mentre il runtime v3
+  inietta `window._wails`. Inoltre il pacchetto `@wailsio/runtime`
+  setta `window._wails = {}` come side-effect dell'import: usare
+  `window._wails.environment` come marker. Fix in
+  `frontend/services/platformService.ts → detectWailsRuntime()` (lazy
+  re-eval). Vedi AGENTS.md punto 11.
+
+- [x] **ELECTRON-PURGE-1** — Rimossi tutti i call site `isElectron`/
+  `electronAPI` dal frontend (rev. 7.4, 2026-05-23). Rinominati:
+  `isElectron → isDesktopBridge`, `electronUnsubscribe → desktopUnsubscribe`,
+  `discoverViaElectron → discoverViaDesktop`, interfaccia `ElectronAPI`
+  → `DesktopHostAPI`. `hostBridge.host` è ora un `Proxy` lazy
+  (re-resolve ogni accesso) — NON usare `if (host)` truthy check.
+
+- [x] **EPG-PROXY-1 (P1)** — EPG non si carica dopo il fix Xtream.
+  Sospetto: `frontend/services/epg/*` (in particolare `epg/index.ts:153`,
+  `const res = await fetch(url, ...)`) bypassa il proxy `/iptv-proxy`
+  e cade nello stesso CORS/mixed-content. **Fix landed 2026-05-25:**
+  1. Estratto helper condiviso `frontend/services/proxyFetch.ts` con
+     `proxyFetch(url, init?)`.
+  2. Sostituite le `fetch()` dirette IPTV in `epg/index.ts`,
+     `streamInfoService.ts` e `vodProbe.ts`.
+  3. Verifica end-to-end: EPG caricato correttamente su Wails.
+
+- [ ] **MIGRATION-IDB-1 (P0)** — Data migration v1→v2 IndexedDB (Fase 7-bis.8).
+  Senza questo, gli utenti v1 perdono i profili migrando a Wails.
+  1. Creare `internal/pkg/migrate` in Go.
+  2. Implementare discovery dei path Electron/Chromium.
+  3. Estrarre dati da LevelDB (profili, history).
+  4. Inject nel nuovo IndexedDB via Frontend bridge.
 
 ---
 
@@ -96,12 +173,18 @@
 - [ ] Normalizzare errori IPC in risposte strutturate.
 - [ ] Mantenere `contextIsolation: true`, `nodeIntegration: false`.
 
-### G.4 — CI GitHub Actions su PR (P0 dopo TEST-1, 0.5 g) — `§G.4`
+### G.4 — CI GitHub Actions su PR (P0 dopo TEST-1, 0.5 g) — `§G.4` ✅ chiuso 2026-05-22
 
-- [ ] Creare `.github/workflows/ci.yml` su `push` + `pull_request`:
-      `npm ci && npm run typecheck && npm run test:run &&
-      npm run check:media3 && npm run build` su Ubuntu 24.04 + Node 20 LTS.
-- [ ] Pubblicare badge nel README.
+- [x] Creato `.github/workflows/ci.yml` su `push` + `pull_request`:
+      `npm ci && npm run check:deps && npm run typecheck && npm run test:run &&
+      npm run check:media3 && npm run check:wails && npm run check:go &&
+      npm run build` su Ubuntu 24.04 + Node 20 LTS + Go 1.25 +
+      libwebkit2gtk-4.1-dev + libmpv-dev + libayatana-appindicator3-dev.
+      Aggiunto step finale `go test -tags 'gtk3' ./internal/...` per la
+      suite Go (gli e2e DBus skippano in assenza di gdbus/session bus,
+      lo stub backend libmpv è il default delle suite player).
+      Concurrency group cancel-in-progress per evitare run duplicati.
+- [x] Pubblicato badge CI nel README (`[![CI](.../ci.yml/badge.svg)]`).
 - [ ] `android.yml`: build APK debug su PR (artefatto) — dipende da
       JDK 17 completo + emulatore Android (gate MED-1 §4-bis).
 
@@ -569,4 +652,3 @@ Baseline da raccogliere con `scripts/bench-startup.mjs`
 8. **Settimane 11-12:** F.1/F.2 telemetria + crash reporter ·
    D.8 parental esteso · D.11 una integrazione esterna · P7.2
    ESLint/Prettier/Husky completo.
-

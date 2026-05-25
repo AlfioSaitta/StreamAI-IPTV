@@ -14,6 +14,7 @@ package main
 
 import (
 	"errors"
+	"net/http"
 	"os"
 	"time"
 
@@ -37,6 +38,7 @@ import (
 	powersavesvc "github.com/AlfioSaitta/StreamAI-IPTV/internal/services/powersave"
 	"github.com/AlfioSaitta/StreamAI-IPTV/internal/services/proxy"
 	"github.com/AlfioSaitta/StreamAI-IPTV/internal/services/remote"
+	"github.com/AlfioSaitta/StreamAI-IPTV/internal/services/migration"
 )
 
 
@@ -105,6 +107,15 @@ func main() {
 	advertisingSvc := advertising.New()
 	advertisingSvc.SetAppVersion(version)
 	netstatusSvc := netstatus.New(remoteSvc, advertisingSvc)
+	migrationSvc := migration.New()
+
+	// Fase 6.5 — Service Go aggregati come variabili per poterli
+	// "wirare" tra di loro dopo la registrazione (vedi blocco
+	// playerStateWiring sotto la chiamata a app.New).
+	playerSvc := player.New()
+	powerSaveSvc := powersavesvc.New()
+	mediaKeysSvc := mediakeyssvc.New()
+	proxySvc := proxy.New()
 
 	app := application.New(application.Options{
 		Name:        "StreamAI",
@@ -136,24 +147,136 @@ func main() {
 		// discovery non ha ServiceShutdown (scan on-demand), posizionato
 		// alla fine — non altera l'ordine sopra.
 		Services: []application.Service{
-			application.NewService(powersavesvc.New()),
-			application.NewService(mediakeyssvc.New()),
-			application.NewService(player.New()),
-			application.NewService(proxy.New()),
+			application.NewService(powerSaveSvc),
+			application.NewService(mediaKeysSvc),
+			application.NewService(playerSvc),
+			application.NewService(proxySvc),
 			application.NewService(advertisingSvc),
-			application.NewService(netstatusSvc),
-			application.NewService(remoteSvc),
+		application.NewService(netstatusSvc),
+		application.NewService(migrationSvc),
+		application.NewService(remoteSvc),
 			application.NewService(cast.New()),
 			application.NewService(discovery.New()),
 		},
-		Assets: application.AssetOptions{
-			Handler: application.AssetFileServerFS(rootassets.FS),
-		},
+			Assets: application.AssetOptions{
+				Handler: application.AssetFileServerFS(rootassets.FS),
+				// FIX 2026-05-24 — Xtream "Load failed" su WebKitGTK.
+				// La webview blocca le fetch cross-origin dal documento
+				// `wails://wails.localhost` verso il proxy HTTP locale su
+				// `http://127.0.0.1:<port>` per mixed-content. Esponiamo il
+				// proxy come middleware dell'asset server così il frontend
+				// può fare fetch a `/iptv-proxy?u=...` (same-origin),
+				// bypassando i vincoli CORS/mixed-content della webview.
+				//
+				// Fase 6.1 Stage A (2026-05-24) — stessa logica per i frame
+				// del native player: `/player/frame?w=W&h=H` ritorna i bytes
+				// RGBA del frame corrente di libmpv. I due middleware sono
+				// composti (proxy outer → player inner → assets); il match
+				// di path è esclusivo (`/iptv-proxy` vs `/player/frame`),
+				// quindi nessuna interferenza.
+				Middleware: application.Middleware(chainMiddlewares(
+					proxySvc.AssetMiddleware(),
+					playerSvc.AssetMiddleware(),
+				)),
+			},
 		// Linux: webview backend è scelto via build-tag (`gtk3` per
 		// webkit2gtk-4.1 fallback, default webkitgtk-6.0). Vedi
 		// plan §5.1 e build/depends/<distro>.json.
 	})
 	appRef = app // espone *App alla onFocus callback del single-instance lock
+
+	// Fase 6.5 — Wiring PlayerService → PowerSave/MediaKeys/NetStatus.
+	// Tutte le mutazioni di stato del player (Load/Play/Pause/Stop/Seek/
+	// SetVolume/SetMuted + watcher 1s) generano un PlayerStateEvent
+	// fanout-ato a 3 service Go integrazione-OS:
+	//
+	//   - PowerSave: inhibit display-sleep mentre lo stream e' in
+	//     riproduzione (loaded && !paused); release altrimenti.
+	//     Idempotente — PowerSave.Start ignora ErrAlreadyActive.
+	//
+	//   - MediaKeys: aggiorna lo stato MPRIS2 (Linux) / SMTC (Windows
+	//     futuro) / MPNowPlaying (macOS futuro) con title/artist/
+	//     position/duration → widget del DE mostra il titolo del canale
+	//     IPTV e i tasti hw play/pause/next funzionano.
+	//
+	//   - NetStatus: broadcast multicast UDP :1901 sulla LAN con il
+	//     payload IPTV → altri device StreamAI vedono "Cosa stai
+	//     guardando" e possono fare hand-off via QR code.
+	//
+	// Le callback girano sincrone nel goroutine che ha generato l'evento:
+	// teniamo il lavoro leggero (no I/O bloccante). PowerSave/MediaKeys/
+	// NetStatus gia' fanno dispatch async internamente (D-Bus async,
+	// UDP non-bloccante).
+	//
+	// Cleanup: gli unsubscribe non vengono chiamati esplicitamente
+	// (l'app vive per tutto il process lifetime). All'app.Run() ritorna,
+	// playerSvc.ServiceShutdown chiude il watcher e i subscriber
+	// vengono GC'd col Service stesso.
+	_ = playerSvc.Subscribe(func(evt player.PlayerStateEvent) {
+		// PowerSave: inhibit display sleep se in play attivo.
+		if evt.Loaded && !evt.Paused {
+			if err := powerSaveSvc.Start("Video playback"); err != nil {
+				// ErrAlreadyActive e' atteso quando il watcher 1s
+				// rie-emette lo stesso state — niente log spam.
+				log.Trace().Err(err).Msg("powersave.Start (already-active expected)")
+			}
+		} else {
+			if err := powerSaveSvc.Stop(); err != nil {
+				log.Trace().Err(err).Msg("powersave.Stop")
+			}
+		}
+
+		// MediaKeys: aggiorna lo stato MPRIS2 + metadata.
+		var status string
+		switch {
+		case !evt.Loaded:
+			status = "stopped"
+		case evt.Paused:
+			status = "paused"
+		default:
+			status = "playing"
+		}
+		if err := mediaKeysSvc.SetPlaybackStatus(status); err != nil {
+			log.Trace().Err(err).Msg("mediakeys.SetPlaybackStatus")
+		}
+		title := evt.TrackTitle
+		if title == "" {
+			title = "StreamAI"
+		}
+		_ = mediaKeysSvc.SetMetadata(mediakeyssvc.MetadataInput{
+			Title:           title,
+			Artist:          evt.TrackArtist,
+			ArtURL:          evt.TrackArtURL,
+			DurationSeconds: evt.Duration,
+			TrackID:         evt.SourceURL,
+		})
+
+		// NetStatus: broadcast LAN.
+		streamType := ""
+		if evt.Duration > 0 {
+			streamType = "movie" // duration > 0 → VOD/series
+		} else if evt.Loaded {
+			streamType = "live"
+		}
+		_ = netstatusSvc.UpdatePlaybackStatus(netstatus.PlaybackStatus{
+			StreamURL:   evt.SourceURL,
+			StreamTitle: evt.TrackTitle,
+			StreamType:  streamType,
+			Position:    evt.Position,
+			Duration:    evt.Duration,
+			IsPlaying:   evt.Loaded && !evt.Paused,
+		})
+
+		// Tray (Fase 6.5.3): aggiorna dinamicamente la label del menu
+		// item "Riproduci/Pausa". No-op se il tray non è ancora stato
+		// inizializzato (ApplicationStarted callback non ancora invocata)
+		// o se siamo su un OS senza tray support (degradazione graceful).
+		if evt.Loaded && !evt.Paused {
+			tray.SetPlayLabel("Pausa")
+		} else {
+			tray.SetPlayLabel("Riproduci")
+		}
+	})
 
 	// Fase 7-bis.1 — logging cold-start time. Wails dispatcha
 	// events.Common.ApplicationStarted quando l'app è inizializzata
@@ -218,3 +341,21 @@ func main() {
 	_ = logging.Close()
 }
 
+// chainMiddlewares compone più middleware HTTP nell'ordine fornito: il
+// primo middleware è il più esterno (il primo a vedere la request, l'ultimo
+// a vedere la response), l'ultimo è il più interno (chiama `next` = asset
+// server). Equivalente del pattern `func(next) → func(next) → ...`.
+//
+// Razionale Fase 6.1 Stage A: l'asset server Wails accetta UN solo
+// middleware (`application.AssetOptions{ Middleware: ... }`). Per esporre
+// sia `/iptv-proxy` (proxy.AssetMiddleware) sia `/player/frame`
+// (player.AssetMiddleware) dobbiamo comporli in catena qui.
+func chainMiddlewares(mws ...func(http.Handler) http.Handler) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		// Applica in ordine inverso così il primo `mws[0]` resta più esterno.
+		for i := len(mws) - 1; i >= 0; i-- {
+			next = mws[i](next)
+		}
+		return next
+	}
+}

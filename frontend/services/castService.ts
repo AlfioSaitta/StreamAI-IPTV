@@ -513,18 +513,13 @@ class CastServiceClass {
     try {
       const encodedTitle = encodeURIComponent(media.title);
 
-      // Detect if we're in Electron
-      const isElectron = typeof window !== 'undefined' &&
-        (window as any).process?.type === 'renderer' ||
-        navigator.userAgent.toLowerCase().includes('electron');
-
-      // Prova a rilevare il dispositivo/piattaforma
+      // Detect platform: desktop (Wails) vs mobile native vs web.
       const userAgent = navigator.userAgent.toLowerCase();
       const isAndroid = userAgent.includes('android');
       const isIOS = /ipad|iphone|ipod/.test(userAgent);
 
-      // Per Electron o Desktop: crea file m3u scaricabile
-      if (isElectron || (!isAndroid && !isIOS)) {
+      // Per desktop (Wails) o web non-mobile: crea file m3u scaricabile
+      if (!isAndroid && !isIOS) {
         // Crea contenuto M3U
         const m3uContent = `#EXTM3U
 #EXTINF:-1 tvg-name="${media.title}",${media.title}

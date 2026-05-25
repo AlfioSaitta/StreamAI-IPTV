@@ -14,7 +14,8 @@
     "mesa-libgbm",
     "alsa-lib",
     "cups-libs",
-    "libxkbcommon"
+    "libxkbcommon",
+    "mpv-libs"
   ]
 }
 

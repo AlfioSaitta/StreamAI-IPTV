@@ -1,71 +1,72 @@
 /**
- * Host bridge — unico punto d'ingresso che astrae il backend desktop
- * sottostante. Switcha a runtime tra il bridge Electron (legacy
- * `window.electronAPI`) e il bridge Wails v3 (`services/wailsBridge.ts`).
+ * Host bridge — unico punto d'ingresso per chiamare il backend desktop.
  *
- * I componenti UI e i custom hook DEVONO importare `host` da qui invece di
- * leggere `window.electronAPI` direttamente — questo permette di migrare
- * incrementalmente i call site (plan rev. 6, Fase 7.2) senza branch
- * platform-specific sparsi.
+ * Da rev. 7 del plan (Fase 7.3, 2026-05-22): Electron è stato rimosso.
+ * Il bridge è ora una semplice ri-esportazione di `wailsBridge`,
+ * disponibile su runtime Wails v3 e `null` su web/mobile (Capacitor).
+ * I call site devono fare guard runtime via `if (host) { ... }` o
+ * usare `requireHost()` quando assumono un bridge presente.
  *
- * Comportamento:
- *   - `platformService.isWails` ⇒ usa `wailsBridge`
- *   - `platformService.isElectron` ⇒ usa `window.electronAPI`
- *   - altri runtime (web, mobile) ⇒ `host` è `null` e i chiamanti DEVONO
- *     fare guardia (esistono già check `isElectron`/`isWeb` nei componenti
- *     interessati).
+ * Vedi `docs/plan-go-wails-migration.md` §3.1 e §14 (inventario rimozione
+ * Electron) per il razionale.
  *
- * Vedi `docs/plan-go-wails-migration.md` §3.1 e §3.3.
+ * NOTE — tipizzazione transitoria: la shape di `wailsBridge` (`HostAPI`)
+ * è ancora un sottoinsieme stretto dell'API che servirà al frontend
+ * (mancano alcuni metodi come `castToDevice`, payload tipizzati, ecc.).
+ * Per evitare di forzare grossi refactor immediati dei call site, `host`
+ * espone una vista *loose* (`any`). La tipizzazione stretta arriverà
+ * insieme al completamento di `wailsBridge` (Fase 6/7-bis).
  */
-
 import platformService from './platformService';
-import wailsBridge from './wailsBridge';
-
-/**
- * Tipo loose intenzionale durante la Fase 7.2: il branch Electron espone
- * più metodi (es. `castToDevice`) di quanto `wailsBridge` modelli oggi.
- * I call site mantengono i loro guard runtime (`if (host)`) — la tipizzazione
- * stretta arriverà in Fase 7.3 quando Electron sarà rimosso.
- */
+import wailsBridge, { type HostAPI } from './wailsBridge';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type HostLike = any | null;
 
-let cached: HostLike | undefined;
-
+/**
+ * Risolve il bridge host al volo. NON cachiamo `null` perché
+ * `platformService.isWails` può diventare `true` dopo l'iniezione tardiva
+ * di `window._wails` da parte di `@wailsio/runtime` (race del bundler).
+ * Cachiamo solo quando il bridge è effettivamente disponibile.
+ */
+let cached: NonNullable<HostLike> | undefined;
 function resolveHost(): HostLike {
   if (cached !== undefined) return cached;
-
   if (platformService.isWails) {
-    cached = wailsBridge;
+    cached = wailsBridge as HostLike;
     return cached;
   }
-  if (platformService.isElectron && typeof window !== 'undefined') {
-    cached = (window as unknown as { electronAPI?: unknown }).electronAPI ?? null;
-    return cached;
-  }
-  cached = null;
-  return cached;
+  return null;
 }
-
 /**
- * Accessor pigro: cristallizzato alla prima call.
- * `null` su web/mobile — i call site devono fare guardia.
+ * Accessor lazy: ritorna `null` su web/mobile.
+ * NB: ogni accesso richiama `resolveHost()` — non cachiamo il valore in
+ * un'export costante per evitare di "congelare" il `null` iniziale.
  */
-export const host: HostLike = resolveHost();
-
+export const host: HostLike = new Proxy(
+  {},
+  {
+    get(_target, prop) {
+      const h = resolveHost();
+      if (!h) return undefined;
+      return (h as any)[prop];
+    },
+    has(_target, prop) {
+      const h = resolveHost();
+      return h ? prop in (h as any) : false;
+    },
+  },
+) as HostLike;
 /**
- * Variante strict: lancia se nessun bridge desktop è disponibile.
- * Preferibile post-Fase 7.2 nei chiamanti che oggi assumono Electron sempre presente.
+ * Variante strict: lancia se non siamo su Wails desktop.
  */
 export function requireHost(): NonNullable<HostLike> {
   const h = resolveHost();
   if (!h) {
     throw new Error(
-      '[hostBridge] No desktop bridge available (running in web/mobile? expected Electron or Wails)',
+      '[hostBridge] No desktop bridge available (running in web/mobile? expected Wails v3)',
     );
   }
   return h;
 }
-
+export type { HostAPI };
 export default host;
-

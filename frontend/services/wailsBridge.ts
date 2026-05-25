@@ -24,6 +24,7 @@ import * as Discovery from '../bindings/github.com/AlfioSaitta/StreamAI-IPTV/int
 import * as Cast from '../bindings/github.com/AlfioSaitta/StreamAI-IPTV/internal/services/cast/service';
 import * as NetStatus from '../bindings/github.com/AlfioSaitta/StreamAI-IPTV/internal/services/netstatus/service';
 import * as Player from '../bindings/github.com/AlfioSaitta/StreamAI-IPTV/internal/services/player/service';
+import * as Proxy from '../bindings/github.com/AlfioSaitta/StreamAI-IPTV/internal/services/proxy/service';
 
 /**
  * Sottoinsieme dell'API `window.electronAPI` esposta a `services/hostBridge.ts`.
@@ -31,7 +32,6 @@ import * as Player from '../bindings/github.com/AlfioSaitta/StreamAI-IPTV/intern
  * (alcune funzioni accettano oggetti opaco-typed dalla parte Electron).
  */
 export interface HostAPI {
-  readonly isElectron: false;
   readonly isWails: true;
 
   // Discovery (1:1 con Electron `electronAPI.{discoverDevices,getLocalIPs,scanIp,probeDeviceServices}`)
@@ -60,6 +60,17 @@ export interface HostAPI {
   // mantenere la shape allineata con `window.electronAPI.getGpuStatus()`
   // (vedi `services/hwAccelService.ts`).
   getGpuStatus: () => Promise<unknown>;
+
+  // Proxy HTTP locale (header rewrite + CORS bypass + TLS skip opzionale).
+  // Necessario su WebKitGTK perché la webview blocca le `fetch()` cross-origin
+  // verso server IPTV `http://` senza header CORS (Xtream player_api.php,
+  // HLS/MPEG-TS, ecc.). Vedi `internal/services/proxy/`.
+  buildProxyUrl: (
+    streamUrl: string,
+    userAgent?: string,
+    headers?: Record<string, string>,
+  ) => Promise<string>;
+  proxyPort: () => Promise<number>;
 }
 
 /**
@@ -79,7 +90,6 @@ function onEvent<T>(name: string, cb: (payload: T) => void): () => void {
 }
 
 export const wailsBridge: HostAPI = {
-  isElectron: false,
   isWails: true,
 
   // --- Discovery ---
@@ -167,6 +177,11 @@ export const wailsBridge: HostAPI = {
       };
     }
   },
+
+  // --- Proxy IPTV ---
+  buildProxyUrl: (streamUrl, userAgent, headers) =>
+    Proxy.BuildProxyURL(streamUrl, userAgent ?? '', headers ?? {}) as unknown as Promise<string>,
+  proxyPort: () => Proxy.Port() as unknown as Promise<number>,
 };
 
 export default wailsBridge;

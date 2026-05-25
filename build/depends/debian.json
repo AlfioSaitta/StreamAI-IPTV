@@ -14,7 +14,8 @@
     "libgbm1",
     "libasound2",
     "libcups2",
-    "libxkbcommon0"
+    "libxkbcommon0",
+    "libmpv2 | libmpv1"
   ]
 }
 

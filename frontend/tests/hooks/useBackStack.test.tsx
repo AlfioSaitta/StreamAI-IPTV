@@ -12,7 +12,7 @@ vi.mock('@capacitor/app', () => ({
 }));
 
 vi.mock('../../services/platformService.ts', () => ({
-  platformService: { isNative: false, isElectron: false, isAndroid: false, isWeb: true, init: vi.fn() },
+  platformService: { isNative: false, isWails: false, isDesktop: false, isAndroid: false, isWeb: true, init: vi.fn() },
 }));
 
 function dispatchEsc() {

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // BUG-1 §2.3 Step 5 — Tests for services/xtream.ts loginXtream cache hardening.
 // Copre: parsing alternativo, retry, no-cache su risultati parziali,
 // preservazione "best-of" della cache, fallback su cache su errore di rete.

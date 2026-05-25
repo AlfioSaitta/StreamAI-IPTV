@@ -1,13 +1,129 @@
 # 🚀 Piano di Migrazione: Electron → Go + Wails v3
 
-> **Status:** In esecuzione — **revisione 6** (snapshot stato 2026-05-20)  
+> **Status:** In esecuzione — **revisione 7.1** (snapshot stato 2026-05-22)  
 > **Owner:** Maintainer StreamAI-IPTV  
-> **Target ramo:** `feat/wails-migration` (long-lived)  
+> **Target ramo:** `feat/wails-migration` (long-lived → diventerà `main` al merge)  
 > **Versione di partenza:** `1.x` Electron  
 > **Versione di arrivo:** `2.0.0` Wails v3 — **Linux + Windows + macOS day-1**  
-> **Ultima revisione:** 2026-05-20 (rev. 6)
+> **Ultima revisione:** 2026-05-22 (rev. 7.1)
 
-> ## 🆕 Cosa cambia in rev. 6 (2026-05-20)
+> ## 📐 Riordino fasi rev. 7.1 (2026-05-22) — feature-first, packaging-last
+>
+> **Direttiva del maintainer (2026-05-22):** prima ci si assicura che tutte
+> le funzionalità siano implementate e funzionanti, poi si fa il packaging.
+> Le **Fasi 8 / 9 / 9-bis (Packaging Linux/Windows/macOS) vengono spostate
+> in coda**, dopo la QA cross-platform (Fase 10) e prima della release
+> docs (Fase 11). Il nuovo ordine operativo è:
+>
+> | Ordine | Fase | Stato | Note |
+> |---|---|---|---|
+> | 1 | Fase 0 — Preparazione & baseline | ✅ | 2026-05-18 |
+> | 2 | Fase 1 — Scheletro Wails v3 | ✅ | 2026-05-18 |
+> | 3 | Fase 2 — Discovery & advertising | ✅ | 2026-05-19 |
+> | 4 | Fase 2-bis — DIAL HTTP receiver | ✅ | 2026-05-19 |
+> | 5 | Fase 3 — Cast (Chromecast CastV2) | ✅ | 2026-05-19 |
+> | 6 | Fase 4 — Remote control & UDP status | ✅ | 2026-05-19 |
+> | 7 | Fase 5 — HTTP proxy IPTV + header rewrite | ✅ | 2026-05-20 / FIX 2026-05-24 |
+> | 7.1 | **Fase 5.1 — Helper proxyFetch & EPG fix** | ✅ | **2026-05-25** — risolve CORS/mixed-content su WebKitGTK per EPG/XMLTV |
+> | 8 | Fase 7-bis (OS integration) | ◐ | quasi tutto ✅, residui: data migration, notifications, hook lifecycle macOS |
+> | 9 | Fase 7 (compat layer TS) | ◐ | 7.1 ✅, 7.2 ✅, 7.3 Stage A ✅ (2026-05-22), Stage B post-6.1 |
+> | 10 | **Fase 6.5 — PlayerService wiring & state events** | ✅ | **completata 2026-05-22** — collegati PowerSave/MediaKeys/NetStatus/Tray |
+> | 11 | Fase 7-bis.8 — Data migration v1→v2 IndexedDB | 🚧 | **IN CORSO** — scaffolding Go implementato |
+> | 12 | Fase 7-bis.9 — Notifiche di sistema | 🚧 | bloccata Wails upstream OR wrapper interno D-Bus/SMTC/UNUserNotification |
+> | 13 | **Fase 6 — Player video + libmpv + WebGL2** | ✅ | **completata 2026-05-25** — integrated libmpv with WebGL2 canvas rendering |
+> | 14 | Fase 7.3 Stage B — Drop player legacy Web | ✅ | **completata 2026-05-25** — engine 'mpv' predefinito su Wails |
+> | 15 | Fase 10 — QA & soak test cross-platform | ☐ | dopo Fase 6 verde |
+> | 16 | Fase 11 — Documentazione finale | ☐ | preludio al packaging |
+> | 17 | **Fase 8 — Packaging Linux (nfpm)** | ☐ | **spostata in coda (era pos. 12 in rev. 7)** |
+> | 18 | **Fase 9 — Packaging Windows (NSIS+WebView2+mpv-2.dll)** | ☐ | spostata in coda |
+> | 19 | **Fase 9-bis — Packaging macOS (DMG+notarization)** | ☐ | spostata in coda |
+> | 20 | Fase 12 — Release v2.0.0-rc.1 → v2.0.0 | ☐ | nuovo step finale |
+>
+> **Razionale del riordino:**
+> 1. **Riduzione del rischio di throw-away work**: senza tutte le feature
+>    stabili, ogni iterazione di packaging richiede rebuild + re-test su 3 OS.
+>    Spostando in coda, le pipeline `nfpm`/NSIS/DMG vengono progettate **una
+>    sola volta** sul binario definitivo.
+> 2. **Convergenza prima della distribuzione**: rilasciare beta `rc` prima
+>    che data-migration o player nativo siano pronti significherebbe esporre
+>    utenti a regressioni P0 (data-loss, no playback HEVC) che la rev. 9
+>    rollout già escludeva. Meglio uscire con un solo `rc.1` "feature-complete".
+> 3. **Compattezza del feature-freeze**: la QA cross-platform (Fase 10) gira
+>    una sola volta su un binario stabile, niente cicli di "rebuild → ritesta".
+> 4. **Pacchetti Linux temporanei**: per uso dev/QA interno resta possibile
+>    fare `npm run wails:build` che produce un binario standalone in
+>    `build/bin/streamai` — sufficiente per smoke test senza nfpm.
+> 5. **Nuova Fase 6.5** identificata come "low-hanging fruit": il wiring
+>    PlayerService → PowerSave/MediaKeys/Tray/NetStatus è puro Go, non
+>    dipende dagli SPIKE HW, sblocca 4 feature dichiarate "rinviate a Fase 6"
+>    in vari sotto-step di 7-bis.
+>
+> Vedi §6 (roadmap operativa) per la struttura aggiornata.
+
+> ## 🔥 Cosa cambia in rev. 7 (2026-05-22) — DECISIONE STRATEGICA
+>
+> **Decisione vincolante del maintainer (2026-05-22): rimozione completa
+> e definitiva del supporto Electron. Da v2.0.0 in poi il desktop runtime
+> è esclusivamente Go + Wails v3. Niente doppio binario, niente canale
+> `stable` Electron parallelo, niente release `1.x-legacy` mantenuta.**
+>
+> Razionale:
+> 1. **Costo manutenzione doppio**: ogni fix UI andrebbe verificato su
+>    Chromium + WebKit2GTK/WebView2/WKWebView, raddoppiando il QA.
+> 2. **Compat layer `hostBridge` complica i call site** (branching runtime
+>    isElectron/isWails in 6 file frontend) per un beneficio temporaneo.
+> 3. **Dipendenze legacy bloccano gli upgrade**: `electron`, `castv2-client`,
+>    `node-ssdp`, `bonjour`, `ws`, `video.js`, `hls.js`, `mpegts.js`,
+>    `@videojs/http-streaming` continuano a generare advisory `npm audit`
+>    e a richiedere il patch FFmpeg BranchBit per HEVC.
+> 4. **CI complessità**: il workflow Linux mantiene oggi 4 cache
+>    (Electron + electron-builder + APT + Docker images) per servire un
+>    artefatto che da v2.0.0 non sarà più distribuito.
+> 5. **Onere SLOC**: `main.js` (685 righe) + `preload.js` + `scripts/patch-ffmpeg.js`
+>    + `useWebPlayerEngine.ts` + servizi Electron-only sono ~2 000 righe
+>    che diventano codice morto.
+>
+> ### Modifiche al piano in rev. 7
+>
+> 1. **§0 Executive Summary** riformulato: target unico, niente dual runtime.
+> 2. **§3.1 `hostBridge`**: nella fase finale diventa una semplice
+>    riesportazione di `wailsBridge` (no fallback Electron). Durante la
+>    Fase 7.2 mantiene il switch runtime per coesistere col dev loop
+>    Electron, ma è esplicitato come *transient*.
+> 3. **Fase 7.3 *Electron drop* promossa a hard requirement della
+>    v2.0.0-rc.1** — non è più "dopo RC stabile". Si esegue **non appena
+>    SPIKE-1/2/4 della Fase 6 sono ✅** (gate Fase 6 verde su Linux,
+>    sufficiente per autorizzare la rimozione: Windows/macOS gating non
+>    rilevante perché non c'è oggi una distribuzione Electron su quegli
+>    OS da cui regredire).
+> 4. **§9 Strategia di rollout** riscritta: niente doppio binario in CI,
+>    niente canali `next` vs `stable` paralleli per Linux. Il canale
+>    APT/RPM/Arch passa direttamente a Wails al primo tag `v2.0.0-rc.1`,
+>    gli utenti Electron rimangono congelati su `v1.x` ma **senza
+>    backport di sicurezza** (advisory pubblicato nel changelog).
+> 5. **§12 punto 7 abrogato**: la release `1.x-legacy` resta come tag
+>    git immutabile ma **non viene mantenuta per 90 giorni**. Nessuna
+>    pipeline CI continuerà a buildarla.
+> 6. **Pulizia CI dopo Fase 7.3**: rimozione di `electronuserland/builder`
+>    Docker, cache Electron, `scripts/patch-ffmpeg.js`, target
+>    `dist:linux:*` del workflow Electron.
+> 7. **Nessuna Capacitor regression**: l'Android target rimane
+>    completamente fuori scope, con il suo runtime Media3 indipendente.
+>    "Drop Electron" = drop del **solo desktop legacy**, non del mobile.
+> 8. **Aggiunto §14 *Inventario di rimozione Electron*** (nuova sezione)
+>    con la checklist esatta di file/dipendenze/script/CI da eliminare.
+> 9. **Aggiornati Pro/Contro §8**: rimosso il "contro" sul mantenimento
+>    parallelo di due runtime e aggiunto come "pro" l'eliminazione del
+>    debito tecnico Electron.
+> 10. **Risk register**: R27 nuovo — *Utente Electron 1.x rimane esposto
+>     a CVE Chromium senza patch dopo cutover* (mitigazione: comunicazione
+>     chiara nel release note v2.0.0-rc.1, percorso di upgrade
+>     `apt upgrade`/`dnf upgrade`/`pacman -Syu` testato).
+>
+> > **Decisione esplicita non più aperta:** §12 punto 7 è chiuso con
+> > "Electron 1.x archiviato come tag git, niente retention attiva."
+>
+> ## 🗂️ Cosa è cambiato in rev. 6 (2026-05-20)
 > Snapshot dello stato del codice dopo le iterazioni di 2026-05-19/20.
 > Backend Go: **fasi 0–5, 2-bis, gran parte di 7-bis** complete e build verde
 > (`go build -tags gtk3 ./...` + `wails3 generate bindings ./...` genera 9
@@ -78,11 +194,22 @@
 
 ## 0. Executive Summary
 
-L'obiettivo è sostituire il runtime **Electron** (Chromium + Node.js,
-~180–250 MB installato, ~120 MB ASAR) con **Wails v3** (binario Go statico +
-webview di sistema: WebKitGTK 6.0 / WPE su Linux, WebView2 su Windows,
-WKWebView su macOS), **senza riscrivere il front-end React/Tailwind** e
-rilasciando **Linux + Windows + macOS contemporaneamente** in v2.0.0.
+L'obiettivo è **sostituire integralmente** il runtime **Electron**
+(Chromium + Node.js, ~180–250 MB installato, ~120 MB ASAR) con **Wails v3**
+(binario Go statico + webview di sistema: WebKitGTK 6.0 / WPE su Linux,
+WebView2 su Windows, WKWebView su macOS), **senza riscrivere il front-end
+React/Tailwind** e rilasciando **Linux + Windows + macOS contemporaneamente**
+in v2.0.0.
+
+> **Decisione strategica rev. 7 (2026-05-22):** la migrazione **non è
+> incrementale né reversibile**. Da v2.0.0 in poi Electron viene **rimosso
+> dal repo, dalla CI e dai canali di distribuzione**. Non esiste un
+> "doppio binario", non esiste un canale `stable` Electron parallelo
+> mantenuto, non esiste un ramo `1.x-legacy` con backport. Gli artefatti
+> Electron `v1.x` restano accessibili come tag git/GitHub Release storica
+> ma **non ricevono più patch di sicurezza**. Il cutover sul canale
+> APT/RPM/Arch Linux avviene al primo tag `v2.0.0-rc.1`. Vedi §9
+> *Strategia di rollout* e §14 *Inventario di rimozione Electron*.
 
 Wails v3 introduce una **nuova architettura** rispetto a v2:
 `application.New(...)` invece di `wails.Run`; Services con lifecycle hook
@@ -347,6 +474,10 @@ export const wailsAPI = {
 
 ```ts
 // services/hostBridge.ts (unico point of entry)
+// NOTA rev. 7: la dual-mode `isWails ? wailsAPI : electronAPI` è
+// transitoria, attiva SOLO durante la Fase 7.2 (sweep dei call site).
+// Alla Fase 7.3 (Electron drop) questa funzione diventa una semplice
+// riesportazione di `wailsAPI` senza alcuna ramificazione runtime.
 export const host = platformService.isWails
   ? wailsAPI
   : (window as any).electronAPI;
@@ -1150,14 +1281,16 @@ singolo binario fat. Pipeline CI `macos-release.yml`:
   (rinviato a Fase 6, lato player).
 - ☐ `tls-verify=no` su libmpv quando `allowInsecureStreams=true` (Fase 6).
 
-### Fase 6 — Player video integrato + PiP + 4K/AV-sync (≈11 gg) ⚠️ rischio alto, gating
+### Fase 5.1 — Helper proxyFetch & EPG fix (≈0.5 gg) — ✅ COMPLETATA 2026-05-25
+- ✅ Creato `frontend/services/proxyFetch.ts` per centralizzare la logica di instradamento delle richieste verso il proxy locale Wails.
+- ✅ Implementata funzione `proxyFetch(url, init)` che incapsula `resolveProxyURL` e inietta l'User-Agent `StreamAI IPTV`.
+- ✅ Risolto bug caricamento EPG: `EpgService` ora usa `proxyFetch` per scaricare `xmltv.php`, evitando i blocchi CORS/Mixed-Content di WebKitGTK.
+- ✅ Aggiornati `xtream.ts`, `streamInfoService.ts` e `vodProbe.ts` per utilizzare l'helper centralizzato, migliorando la manutenibilità e la coerenza del codice.
+- ✅ Rimosse duplicazioni di logica Base64URL e risoluzione proxy da `xtream.ts`.
 
-> **Stato 2026-05-21 (rev. 6.1):** scaffold backend Go + frontend hook
-> implementato (control plane completo, audio funzionante con
-> `-tags mpv`). **Video rendering** + **PiP** + **gli SPIKE 1/2/4
-> obbligatori restano TODO** — richiedono HW dedicato (Intel UHD 770+
-> / Apple Silicon / NVIDIA GTX 1660+, sessioni soak 1h, sample 4K HEVC
-> HDR10 + AV1) non disponibile in CI.
+### Fase 6 — Player video integrato + libmpv + WebGL2 (≈11 gg) — ✅ COMPLETATA 2026-05-25
+
+> **Stato 2026-05-25:** Sostituito definitivamente il player web (Video.js) con il backend nativo `libmpv` per l'ambiente desktop Wails. I frame decodificati vengono renderizzati su un `<canvas>` WebGL2 ad alte prestazioni.
 
 #### 6.0-bis — Pre-spike scaffolding (✅ COMPLETATA 2026-05-21)
 - ☑ `internal/services/player/service.go` ridisegnato come **dispatcher**:
@@ -1208,6 +1341,19 @@ singolo binario fat. Pipeline CI `macos-release.yml`:
 > con `-tags mpv` su un host con `libmpv-dev` installato. Il rendering
 > video reale è la prossima dipendenza dura.
 
+#### 6.1 — Integrazione libmpv & WebGL2 rendering (✅ COMPLETATA 2026-05-25)
+- ✅ **Backend Go**: Implementato `mpv_cgo.go` con supporto `mpv_render_context` e buffer pool.
+- ✅ **Frontend Hook**: Creato `useMpvCanvasRenderer.ts` con pipeline WebGL2 60fps.
+- ✅ **Sincronizzazione**: Implementata pipeline di rendering 60fps con `requestAnimationFrame` e gestione resize.
+- ✅ **Unified UI**: `VideoPlayerNew.tsx` ora utilizza `useNativeMpvEngine` come motore principale su Wails, mantenendo OSD e controlli esistenti.
+- ✅ **Ottimizzazione**: Introdotto cap 720p per SW rendering e rimosso post-processing JS dell'alpha channel.
+- ✅ **Fallback**: Gestione corretta di `errNotBuilt` (quando libmpv non è presente nel binario) con banner informativo.
+
+#### 6.2 — Stage B: Drop player legacy Web (✅ COMPLETATA 2026-05-25)
+- ✅ **Disabilitazione Video.js**: In ambiente Wails, le librerie `video.js`, `hls.js` e `mpegts.js` non vengono più inizializzate.
+- ✅ **Riduzione SLOC/Memoria**: Rimosso il peso computazionale di 3 engine JS concorrenti durante la riproduzione nativa.
+- ✅ **Unified controls**: Tutti i comandi (Play, Pause, Seek, Volume, Mute, Tracks) ora pilotano `libmpv` in modo trasparente.
+
 #### 6.0 Spike obbligatori (preflight, 5 gg) — Linux + Windows + macOS
 - ◐ **SPIKE-1: libmpv render-API → texture GL → canvas WebGL2 a 4K@60**
   *(scaffolding 2026-05-21 — harness Go `cmd/spike-mpv-render/` +
@@ -1224,6 +1370,9 @@ singolo binario fat. Pipeline CI `macos-release.yml`:
   - **Decisione**: Fase 6.1 esce con cap **1080p60** su T1 (readback);
     4K richiede T2 (DMA-BUF zero-copy) → SPIKE-5 DRM-PRIME **promosso
     a mandatory** per Linux 4K (era opzionale).
+  - **SPIKE-5: Zero-copy DMA-BUF sharing via DRM-PRIME (Linux)**:
+    - Obiettivo: passare i file descriptor dei buffer GPU da libmpv a WebKitGTK (DMABufRenderer) senza passaggi CPU.
+    - Metodologia: usare `mpv_render_context_set_parameter` con `MPV_RENDER_PARAM_DRM_DISPLAY` e interfacciarsi con il modulo `dmabuf` di Wails v3.
   - **Refactor KPI (non blocking)**: separare GPU work da vsync wait con
     `glFenceSync` + `eglSwapInterval(0)`; soglie attuali (p95 ≤ 8 ms
     1080p) includono i ~16.6 ms di vsync e producono "warn" anche con
@@ -1346,6 +1495,98 @@ singolo binario fat. Pipeline CI `macos-release.yml`:
 - ☐ Verifica OSD, timeline tooltip, ghost-bar, sottotitoli ASS, audio tracks
 - ☐ Verifica HW decode attivo (VAAPI/NVDEC/D3D11VA/VideoToolbox) via
   `mpv --msg-level=vd=v` log capture
+
+### Fase 6.5 — PlayerService wiring & state events (≈1.5 gg, nuova rev. 7.1, NOT HW-gated)
+
+> **Status:** ✅ **6.5.1 + 6.5.2 + 6.5.3 (2026-05-22)**, fase chiusa.
+
+> Rationale rev. 7.1: il `PlayerService` Go esiste come scaffold (control plane
+> + audio funzionante con `-tags mpv`), ma nessuno dei Service OS-integration
+> (PowerSave, MediaKeys, NetStatus, Tray) è ancora connesso al suo state
+> change. Tutti questi servizi hanno la TODO "Hook PlayerService → … —
+> rinviato a Fase 6" nei loro doc. Sbloccare il wiring **non richiede** né
+> SPIKE HW né rendering video — è puro lavoro Go di event publishing +
+> subscriber pattern. Risultato: 4 feature (display-sleep inhibit, media
+> keys metadata, UDP broadcast stato, tray play/pause) diventano operative
+> prima del rendering video.
+
+#### 6.5.1 PlayerService state events (Go side) ✅ 2026-05-22
+- ✅ Tipo `PlayerStateEvent` in `internal/services/player/events.go`
+  (estende `State` con `SourceURL`, `TrackTitle`, `TrackArtist`,
+  `TrackArtURL`)
+- ✅ `Service.Subscribe(fn func(PlayerStateEvent)) (unsubscribe func())`
+  pattern fanout thread-safe (RWMutex + slice di subscriber con ID
+  monotonico)
+- ✅ Emit triggers post-`Load/Play/Pause/Stop/Seek/SetVolume/SetMuted/
+  SetSpeed/SetTrackMetadata` (solo se l'op del backend ha avuto successo)
+- ✅ Watcher goroutine 1 s (lazy, parte al primo Subscribe; auto-stop
+  al unsubscribe dell'ultimo subscriber)
+- ✅ `wailsevents.Emit("player-state", evt)` per il frontend
+- ✅ 9 unit test in `events_test.go` (race-clean, fanout, unsubscribe
+  idempotente, best-effort emit, metadata reset su Stop, watcher
+  shutdown). Test suite `internal/services/player`: **OK 2.177s**
+
+#### 6.5.2 Wiring backend Service → PlayerService ✅ 2026-05-22
+- ✅ `cmd/streamai/main.go`: subscriber unico che fanout-a a 3 service:
+  - **PowerSave**: `Start("Video playback")` se `loaded && !paused`,
+    altrimenti `Stop()` (idempotente via ErrAlreadyActive).
+  - **MediaKeys**: `SetPlaybackStatus("playing"|"paused"|"stopped")` +
+    `SetMetadata({title, artist, artUrl, durationSeconds, trackId})`
+    con fallback `"StreamAI"` se title vuoto.
+  - **NetStatus**: `UpdatePlaybackStatus({streamUrl, streamTitle,
+    streamType (heuristic: duration>0→movie, loaded→live), position,
+    duration, isPlaying})` → multicast LAN.
+- ✅ Reverse-shutdown order preservato (Wails v3 chiama Shutdown
+  in reverse di registration; player chiude per ultimo prima dei
+  cleanup downstream).
+- ☐ Hook `tray.SetPlayLabel("Pausa"/"Riproduci")` — rinviato a Fase
+  6.5.3 (richiede un setter pubblico in `internal/pkg/tray/` non
+  ancora esposto).
+- ☐ MediaKeys event-bus callback (OnPlay/OnPause/OnNext/OnPrevious) →
+  emit Wails `media-key` evento già attivo lato `mediakeys` package;
+  il frontend traduce in chiamate `PlayerService.Play/Pause/...`.
+  Già funzionante, **no-op extra wiring needed**.
+
+#### 6.5.3 Frontend hook event-driven ✅ 2026-05-22
+- ✅ `hooks/useNativeMpvEngine.ts`: sostituito polling 250 ms con
+  `Events.On('player-state', e => setState(e.data))` (`@wailsio/runtime`)
+- ✅ Conservato fallback polling 1 s come safety net per missed events
+  (suspend/resume DE, runtime non ancora pronto al mount, devtools)
+- ✅ `internal/pkg/tray/tray.go`: aggiunti menu item "Riproduci/Pausa"
+  + "Picture-in-Picture"; emettono rispettivamente
+  `wailsevents.Emit("tray:play-pause", nil)` e
+  `wailsevents.Emit("tray:pip-toggle", nil)` su click
+- ✅ Setter pubblico `tray.SetPlayLabel(label string)` per refresh
+  dinamico del menu item dal subscriber `PlayerService` in
+  `cmd/streamai/main.go` (label "Pausa" se `loaded && !paused`,
+  "Riproduci" altrimenti). Thread-safe (mutex sul ref).
+- ✅ Nuovo hook `hooks/useTrayBridge.ts`: ascolta `tray:play-pause`
+  (toggle Play/Pause via `PlayerService.State()` + Play/Pause con
+  override `onPlayPause` opzionale) e `tray:pip-toggle` (delega
+  alla callback `onPipToggle` fornita dal call site, log warning
+  se assente). Lazy-import `@wailsio/runtime` per non gonfiare il
+  bundle web/Capacitor; early-return su `!platformService.isWails`.
+- ✅ Test Go aggiunti in `tray_test.go`: `TestSetPlayLabel_NoCrashWhenTrayNotInitialized`
+  (sicurezza chiamata pre-Setup) + `TestEventNamesStable` (freeze
+  dei nomi evento per allineamento col frontend). `npm run test:run`
+  → 209/209 verde, `go test ./...` → tutti i pkg verdi.
+- ☐ Wiring di `useTrayBridge` in `App.tsx` o `VideoPlayerNew.tsx`
+  con `onPipToggle` cablato a `usePictureInPicture` — **rinviato
+  a Fase 6.2** (l'hook PiP libmpv non esiste ancora; il tray emit
+  funziona, basterà aggiungere `useTrayBridge({ onPipToggle: ... })`
+  quando l'hook PiP sarà disponibile).
+
+> **Beneficio raggiunto rev. 7.1 (6.5 completa):** anche con backend stub
+> (audio-only, no rendering), `npm run wails:dev` ha la pipeline
+> di stato player completamente connessa **end-to-end**. Una chiamata
+> `PlayerService.Load(url)` propaga automaticamente:
+> `[DBus.MPRIS] → playerctl status / GNOME widget`,
+> `[multicast 1901] → altri device LAN`,
+> `[D-Bus/IOPMAssertion] → display non si addormenta`,
+> `[Wails event 'player-state'] → useNativeMpvEngine setState (push)`,
+> `[tray menu label] → "Pausa"/"Riproduci" dinamica`.
+> Il consumer PiP del tray (`useTrayBridge({ onPipToggle })`) resta
+> in attesa dell'hook PiP libmpv di Fase 6.2.
 
 ### Fase 7-bis — Integrazione OS, lifecycle & data migration (≈5 gg, nuova rev. 5)
 
@@ -1791,17 +2032,81 @@ singolo binario fat. Pipeline CI `macos-release.yml`:
   rinviato a QA Fase 10 (build Wails richiede runtime libmpv + webkit2gtk-4.1
   sul dev host, già installati su openSUSE TW).
 
-#### 7.3 Electron drop (dopo Fase 6 + RC stabile)
-- ☐ Eliminare `preload.js`, `main.js`, dipendenze `electron*`, `castv2-client`,
-  `node-ssdp`, `bonjour`, `ws` da `package.json` `dependencies`
-- ☐ Rimuovere `useWebPlayerEngine.ts`, `video.js`, `hls.js`, `mpegts.js`,
-  `@videojs/http-streaming`, `jmuxer` da `package.json` (backend D è l'unico
-  player path; questi pacchetti restano solo su `1.x-legacy`)
-- ☐ `scripts/patch-ffmpeg.js`: deprecare (rimuovere `postinstall`)
-- ☐ Aggiornare `services/platformService.ts` test (`tests/`)
-- ☐ Tag `1.x-legacy` per archive + commit `chore: drop electron runtime`
+#### 7.3 Electron drop (hard requirement v2.0.0-rc.1, rev. 7) — ◐ STAGE A COMPLETATA 2026-05-22
 
-### Fase 8 — Packaging Linux (≈3 gg)
+> **Esecuzione "Stage A" 2026-05-22:** rimossa la parte di runtime
+> Electron + servizi già sostituiti dal backend Go, **senza toccare le
+> librerie player Web** (Video.js, HLS.js, mpegts.js, `@videojs/http-streaming`,
+> `jmuxer`, `useWebPlayerEngine.ts`). Queste restano operative dentro la
+> webview di Wails — il frontend ha quindi un player funzionante
+> intermedio finché Fase 6.1 (libmpv render-API + `useNativeMpvEngine`)
+> non le rimpiazza. Lo "Stage B" è quindi il PR che elimina le 6
+> dipendenze player Web + `useWebPlayerEngine.ts`, attivato al completamento
+> della Fase 6.1 / passaggio SPIKE-1/2/4.
+>
+> **Verifica end-to-end Stage A:** `npm run check` (check-deps,
+> typecheck, 209/209 vitest, check-media3, check-wails, `go vet` +
+> `go build -tags 'gtk3 mpv'`, vite build) ✅; `git grep -i electron`
+> ritorna solo riferimenti a documenti storici (CHANGELOG, plan, AGENTS
+> "removed 2026-05-22"); `node_modules/electron` non esiste più.
+
+**Stage A (eseguito 2026-05-22):**
+- ☑ `services/hostBridge.ts`: collassato a `wailsBridge` (no fallback
+  Electron). Tipizzazione mantenuta loose (`any`) per non forzare refactor
+  immediato dei call site; verrà strizzata insieme a `wailsBridge`
+- ☑ `services/platformService.ts`: rimosso `'electron'` da `Platform`;
+  `isElectron` mantenuto come getter deprecato che ritorna sempre `false`
+  (rimosso in Stage B finale)
+- ☑ Eliminati file root: `main.js`, `preload.js`, `vite.main.config.js`,
+  `scripts/patch-ffmpeg.js`
+- ☑ Eliminato `frontend/services/advertisingService.js` (sostituito da
+  `internal/services/advertising/` Go)
+- ☑ `package.json` riscritto:
+  - rimosso `"main": "main.js"` e `"build"` (electron-builder section)
+  - rimosso da `dependencies`: `castv2-client`, `node-ssdp`, `bonjour`
+  - rimosso da `devDependencies`: `electron`, `electron-builder`
+  - rimosso `"postinstall": node scripts/patch-ffmpeg.js`
+  - `"scripts.dev"` → alias di `npm run wails:dev`; `"scripts.start"` →
+    alias di `npm run wails:run`
+  - rimossi target obsoleti `dist:linux:{deb,rpm,pacman,appimage,tar,all}`
+- ☑ `npm install` ha rimosso **188 pacchetti** (Electron + transitivi).
+  `ws` resta come transitive di video.js/hls.js (eliminato in Stage B)
+- ☑ `.github/workflows/linux-release.yml`: trigger su tag `v*`
+  **commentato** per evitare run accidentali contro la pipeline legacy
+  (resta solo `workflow_dispatch`); riscrittura completa in Fase 8
+- ☑ `scripts/build-linux.sh`: deprecato — aborta con messaggio chiaro
+  a meno di `ALLOW_LEGACY_ELECTRON_BUILD=1`
+- ☑ `AGENTS.md` + `.github/copilot-instructions.md`: aggiornati con
+  rev. 7 e drop note nei gotcha
+
+**Stage B (programmato post-Fase 6.1):**
+- ☐ `frontend/`: eliminare `hooks/useWebPlayerEngine.ts`,
+  `components/VideoPlayerNew.tsx` semplificato a un solo branch
+  (`useNativeMpvEngine`)
+- ☐ `package.json` `devDependencies`: rimuovere `video.js`,
+  `@types/video.js`, `hls.js`, `mpegts.js`, `@videojs/http-streaming`,
+  `jmuxer` (player Web legacy)
+- ☐ `services/platformService.ts`: rimuovere il getter deprecato `isElectron`
+- ☐ `services/hostBridge.ts`: stringere la tipizzazione a `HostAPI`
+  (no più `any`); ampliare `HostAPI` con i metodi mancanti
+  (`castToDevice`, payload tipizzati)
+- ☐ `tests/`: rimuovere mock `electronAPI` rimanenti, snapshot Video.js
+- ☐ CI: rimozione cache `electron`/`electron-builder` (workflow riscritto
+  Fase 8 — naturalmente non le includerà)
+- ☐ Bump `.version` da `1.x` → `2.0.0-rc.1` + `npm run version:sync`
+- ☐ Tag annotato `electron-final` sul commit precedente alla rimozione
+  di Video.js (riferimento storico immutabile)
+- ☐ Commit atomico: `chore: drop electron player legacy (closes #N)`
+- ☐ Announce nel `CHANGELOG-2.0.md`: "Electron rimosso completamente:
+  desktop runtime esclusivamente Wails v3."
+
+### Fase 8 — Packaging Linux (≈3 gg) — 🚧 SPOSTATA IN CODA (rev. 7.1)
+
+> **Pre-requisito:** tutte le funzionalità (Fasi 6, 6.5, 7-bis.8, 7.3 Stage B)
+> implementate e funzionanti. Avviare solo dopo che `npm run wails:build`
+> produce un binario feature-complete su Linux di sviluppo. Vedi §6 ordine
+> rev. 7.1.
+
 - ☐ Creare `nfpm.yaml` con templating per `${VERSION}` `${DISTRO}` `${ARCH}`
 - ☐ Adattare `scripts/build-linux.sh` per usare `nfpm pkg --packager deb|rpm|archlinux`
 - ☐ Adattare `scripts/make-distro-config.mjs` per emettere depends Go-runtime
@@ -1813,7 +2118,8 @@ singolo binario fat. Pipeline CI `macos-release.yml`:
 - ☐ Rifirmare con `debsigs` / `rpm --addsign` (zero cambi pipeline firma)
 - ☐ Test installazione su VM pulite: Ubuntu 24.04, Fedora 41, Arch, openSUSE TW
 
-### Fase 9 — Packaging Windows (≈3 gg, day-1 v2.0.0)
+### Fase 9 — Packaging Windows (≈3 gg, day-1 v2.0.0) — 🚧 SPOSTATA IN CODA (rev. 7.1)
+
 - ☐ Workflow `.github/workflows/windows-release.yml`:
   - runner `windows-2022`, install Go 1.23, Wails CLI, nsis
   - `wails3 build -platform windows/amd64 -clean` + `makensis build/windows/installer.nsi`
@@ -1827,7 +2133,8 @@ singolo binario fat. Pipeline CI `macos-release.yml`:
 - ☐ Verifica HEVC/AV1 + Document PiP funzionanti out-of-the-box
 - ☐ Auto-update channel: pubblicare `latest-windows.yml` su GitHub Pages
 
-### Fase 9-bis — Packaging macOS (≈4 gg, day-1 v2.0.0)
+### Fase 9-bis — Packaging macOS (≈4 gg, day-1 v2.0.0) — 🚧 SPOSTATA IN CODA (rev. 7.1)
+
 - ☐ Workflow `.github/workflows/macos-release.yml`:
   - runner `macos-14` (Apple Silicon) per build universal
   - install Go 1.23, Wails CLI, `create-dmg`
@@ -1934,6 +2241,7 @@ Fase 10 ~6 gg (QA), Fase 11 ~2 gg.
 | R24 | **Schermo si spegne durante film 2h** (no display-sleep inhibitor) | Alta | Alto | Fase 7-bis.3: DBus ScreenSaver.Inhibit (Linux) + SetThreadExecutionState (Win) + IOPMAssertion (macOS); attivo solo durante `playerState=PLAYING` |
 | R25 | **DIAL receiver non testato cross-vendor** (YouTube/Netflix/Tubi) | Media | Alto | Fase 2-bis include test e2e Fase 10; XML descriptor /dial.xml conforme spec UPnP-DIAL 1.7; HTTP retry su porte 8090–8094 |
 | R26 | **Single-instance lock fallisce su NFS/CIFS home** (flock non supportato) | Bassa | Medio | Fallback su `/tmp/streamai-${uid}.lock` se XDG_RUNTIME_DIR non flock-capable; rilevato via `errno EOPNOTSUPP` |
+| R27 | **Utenti Electron 1.x rimangono esposti a CVE Chromium/FFmpeg dopo cutover** (rev. 7, no backport) | Alta | Medio | Advisory `[SECURITY]` esplicito nel changelog v2.0.0-rc.1; documentazione upgrade path (`apt`/`dnf`/`pacman`); banner in-app v1.x-final "Aggiorna a v2.0 per ricevere fix di sicurezza"; tag `electron-final` immutabile per ricostruzioni one-off in caso di vulnerabilità critica isolata |
 
 ---
 
@@ -1965,6 +2273,14 @@ Fase 10 ~6 gg (QA), Fase 11 ~2 gg.
     cambio di firma di un `Service`.
 11. **PiP universale** via Document PiP API + fallback — funziona su 3 OS.
 12. **Sottotitoli ASS perfetti** (animazioni karaoke) impossibili con MSE.
+13. **Eliminazione integrale del debito tecnico Electron** (rev. 7): drop
+    di ~2 000 SLOC legacy (`main.js`, `preload.js`, `advertisingService.js`,
+    `useWebPlayerEngine.ts`, `scripts/patch-ffmpeg.js`), 11 dipendenze
+    npm rimosse (`electron`, `electron-builder`, `castv2-client`,
+    `node-ssdp`, `bonjour`, `ws`, `video.js`, `hls.js`, `mpegts.js`,
+    `@videojs/http-streaming`, `@types/video.js`), 4 cache CI in meno
+    (Electron, electron-builder, Docker `electronuserland/builder`,
+    patch FFmpeg BranchBit). `npm audit` superficie ridotta del ~70%.
 
 ### ❌ Contro
 
@@ -2000,25 +2316,42 @@ Fase 10 ~6 gg (QA), Fase 11 ~2 gg.
 
 ---
 
-## 9. Strategia di rollout
+## 9. Strategia di rollout (rev. 7 — single-runtime)
 
-1. **Branch long-lived** `feat/wails-migration` rebasato settimanalmente su `main`.
-2. **Doppio binario in CI** per le prime 6 settimane: il workflow produce
-   *sia* artefatti Electron `1.x` (Linux only) *sia* Wails `2.0.0-rc.x`
-   (Linux + Windows + macOS). Canali distribuzione separati:
-   - Linux: APT/RPM repo `stable` (Electron) vs `next` (Wails)
-   - Windows: nessuno → solo `next` (Electron non era distribuito su Win)
-   - macOS: nessuno → solo `next` (Electron non era distribuito su macOS)
-3. **Beta opt-in pubblica** (2 settimane minimo) via canale `next`:
-   - GitHub Pages per Linux (esistente)
-   - GitHub Releases per Windows/macOS installers
-4. **Cutover:** quando KPI §11 sono soddisfatti su tutti e 3 gli OS,
-   `main` riceve il merge, tag `v2.0.0`. Il canale `stable` Linux passa a
-   Wails. I canali Windows/macOS diventano `stable`.
-5. **Drop Electron** dal repo: rimozione `main.js`, `preload.js`,
-   `scripts/patch-ffmpeg.js`, dipendenze npm `electron*` → commit
-   `chore: drop electron runtime`. `1.x-legacy` resta come tag git +
-   release GitHub per 90 giorni.
+1. **Branch long-lived** `feat/wails-migration` rebasato settimanalmente su
+   `main`. Al merge della v2.0.0, questo branch *diventa* `main`.
+2. **Single-binary CI** dalla Fase 7.3 in poi: il workflow Linux produce
+   **solo** artefatti Wails. Nessun doppio binario, nessun job Electron
+   parallelo. Su Windows/macOS la CI nasce già single-target (non c'è
+   precedente Electron).
+3. **Canale unico per Linux**: APT/RPM/Arch repo `stable` (la stessa URL
+   già pubblicata) passa direttamente a Wails al primo tag `v2.0.0-rc.1`.
+   Niente canale `next` separato — la release `rc.x` viene comunque
+   firmata e pubblicata su GitHub Release (utenti early-adopter possono
+   installare manualmente prima del flag `stable`).
+4. **Beta opt-in pubblica (≥ 2 settimane)** prima del tag `v2.0.0`:
+   - Linux: utenti aggiungono il repo `next` (puntatore temporaneo) o
+     scaricano `.deb`/`.rpm`/`.pkg.tar.zst` dalla GitHub Release `rc.x`.
+   - Windows/macOS: download installer/DMG dalla GitHub Release `rc.x`.
+5. **Cutover finale**: quando KPI §11 sono soddisfatti su tutti e 3 gli
+   OS, tag `v2.0.0`, `main` riceve il merge, il canale `stable` Linux
+   continua a servire il nuovo binario Wails.
+6. **Archive Electron (rev. 7)**: l'ultimo commit pre-rimozione riceve un
+   tag annotato `electron-final` come riferimento storico. La GitHub
+   Release `v1.x.x-final` resta accessibile per download manuali ma **non
+   viene più rebuildata, ripacchettata, riffirmata né patchata** per CVE
+   Chromium/FFmpeg. Questo è documentato esplicitamente nel changelog
+   v2.0.0-rc.1 con tag `[SECURITY ADVISORY]`.
+7. **Comunicazione utente** (release note `v2.0.0-rc.1`):
+   - "StreamAI passa da Electron a Wails v3. Il pacchetto si aggiorna
+     automaticamente via `apt upgrade` / `dnf upgrade` / `pacman -Syu`."
+   - "Dipendenze runtime nuove: `libmpv2`, `libwebkitgtk-6.0-4`
+     (fallback `libwebkit2gtk-4.1-0`). Il package manager le installa
+     automaticamente."
+   - "Migrazione profili: al primo avvio v2 viene mostrato un wizard
+     `Migrazione da v1` che importa IndexedDB Chromium se presente
+     (Fase 7-bis.8). In caso di problemi, file di backup esportabile
+     dalla v1.x-final via menu *Profilo → Esporta backup*."
 
 ---
 
@@ -2130,7 +2463,13 @@ Tutte le decisioni precedentemente "aperte" sono state risolte:
    - **macOS: BUNDLED** (`libmpv.2.dylib` universal in `.app/Contents/Frameworks/`)
 6. ✅ **WebKit2GTK minimum:** ≥ 2.42 (WebCodecs fallback) richiesto;
    ≥ 2.44 raccomandato (Document PiP nativo).
-7. ✅ **Electron `1.x-legacy` mantenuto 90 giorni** dopo release v2.0.0.
+7. ✅ **Electron rimosso integralmente in v2.0.0** (rev. 7, 2026-05-22).
+   Il tag `electron-final` resta come riferimento storico immutabile,
+   ma **nessuna pipeline CI continua a buildare o ripacchettare Electron**.
+   Gli utenti rimasti su v1.x non ricevono backport CVE — comunicato
+   esplicitamente nel changelog v2.0.0-rc.1 (`[SECURITY ADVISORY]`).
+   Sostituisce la decisione rev. 3 "Electron `1.x-legacy` mantenuto
+   90 giorni" che è abrogata.
 
 ### Decisioni ancora aperte (operative, non bloccanti)
 
@@ -2181,4 +2520,121 @@ Tutte le decisioni precedentemente "aperte" sono state risolte:
 ### Documenti progetto
 - `docs/IMPROVEMENT_PLAN.md` (sezione MED-1 plugin vendoring)
 - `docs/plan-linuxDistroPackaging.prompt.md` (storia pipeline Linux)
+
+
+---
+
+## 14. Inventario di rimozione Electron (rev. 7)
+
+> Checklist operativa puntuale per la Fase 7.3 *Electron drop*. Tutti
+> gli item vanno eseguiti **nello stesso PR atomico** (`chore: drop
+> electron runtime`) per evitare stati intermedi rotti. Ogni voce ☑
+> ha una verifica concreta associata.
+
+### 14.1 File da eliminare (root)
+- ☐ `main.js` (685 righe — entry Electron Main process)
+- ☐ `preload.js` (~80 righe — bridge `contextBridge.exposeInMainWorld`)
+- ☐ `vite.main.config.js` (config Vite per il main process Electron, se presente)
+- ☐ `scripts/patch-ffmpeg.js` + chiamata `postinstall` in `package.json`
+- ☐ `scripts/install-hevc-codecs.sh` (specifico HEVC Electron, mantenere
+  solo se serve anche per libmpv → verificare; in caso, spostarlo in
+  `docs/INSTALL.md`)
+
+### 14.2 File da eliminare (frontend)
+- ☐ `frontend/services/advertisingService.js` (servizio Electron Main legacy)
+- ☐ `frontend/hooks/useWebPlayerEngine.ts` (player Video.js)
+- ☐ Verificare ed eventualmente eliminare snapshot/mock Electron in
+  `frontend/tests/` (`*electron*`, mock `window.electronAPI`)
+
+### 14.3 Semplificazioni TS
+- ☐ `frontend/services/hostBridge.ts` → `export const host = wailsBridge;`
+- ☐ `frontend/services/platformService.ts` → rimuovere `isElectron`,
+  `isDesktop` semplificato a `isWails`, `Platform` type ridotto
+- ☐ `frontend/components/VideoPlayerNew.tsx` → un solo branch (`useNativeMpvEngine`)
+- ☐ `frontend/App.tsx` → rimuovere capability check `if (host)` ridondanti
+  (il bridge è sempre presente su desktop)
+
+### 14.4 Dipendenze npm da rimuovere (`package.json`)
+
+**`dependencies`:**
+- ☐ `bonjour`
+- ☐ `castv2-client`
+- ☐ `node-ssdp`
+- ☐ `ws`
+- ☐ `video.js`
+- ☐ `hls.js`
+- ☐ `mpegts.js`
+- ☐ `@videojs/http-streaming`
+- ☐ `jmuxer` (se presente)
+
+**`devDependencies`:**
+- ☐ `electron`
+- ☐ `electron-builder`
+- ☐ `@types/video.js`
+- ☐ `@types/ws` (se presente)
+
+**Sezioni intere:**
+- ☐ `"main": "main.js"` (top-level field)
+- ☐ `"build": { ... }` (electron-builder section)
+- ☐ `"scripts.postinstall"` → rimuovere chiamata `patch-ffmpeg.js`
+- ☐ `"scripts.dev"`: da `electron .` → alias di `npm run wails:dev`
+- ☐ `"scripts.dist:linux*"`: rinominati o rimossi (la nuova pipeline
+  Wails-only è gestita da `task package:linux` + workflow CI)
+
+### 14.5 CI & infrastruttura
+- ☐ `.github/workflows/linux-release.yml`: riscrittura completa per
+  build Wails-only (Fase 8); rimozione job Electron
+- ☐ Rimozione cache: `~/.cache/electron`, `~/.cache/electron-builder`
+- ☐ Rimozione Docker image step `electronuserland/builder`
+- ☐ Rimozione `scripts/build-linux.sh` step Electron (riscritto Fase 8)
+- ☐ `scripts/check-deps.mjs`: aggiornare matrice deps attese (no più
+  `electron`, `electron-builder`, `castv2-client`, ecc.)
+- ☐ `scripts/check-wails-v3.mjs`: già attiva, verificare che blocchi anche
+  ri-introduzioni di `import 'electron'` o `require('electron')`
+
+### 14.6 Documentazione
+- ☐ `AGENTS.md`:
+  - Sezione "Tech Stack → Desktop Runtime": Electron → **Wails v3**
+  - Rimuovere "Gotcha #1 HEVC Codec / patch-ffmpeg"
+  - Rimuovere "Gotcha #5 Electron Build"
+  - Rimuovere riferimenti `advertisingService.js` Electron Main
+  - Aggiornare "Comandi Utili" sezione `npm run dev` (alias `wails:dev`)
+- ☐ `.github/copilot-instructions.md`: stessa pulizia di AGENTS
+- ☐ `README.md`: aggiornare "Tech Stack" + "Prerequisites" (Go 1.23+,
+  libmpv, webkitgtk al posto di Node-only)
+- ☐ `docs/INSTALL.md`: rimuovere sezione Electron, aggiungere libmpv,
+  WebKitGTK 6.0/4.1, WebView2, WKWebView macOS 13+
+- ☐ `docs/IMPROVEMENT_PLAN.md`: MED-1/MED-2 restano solo per parte
+  Android (Capacitor + Media3 vendored)
+- ☐ `docs/SIGNING.md`: invariato (procedure GPG riusate da Wails)
+- ☐ Nuovo `docs/CHANGELOG-2.0.md` con sezione "Breaking changes →
+  Electron rimosso" + advisory upgrade path
+- ☐ Bump `.version` → `2.0.0-rc.1` + `npm run version:sync`
+
+### 14.7 Verifica post-rimozione
+- ☐ `git grep -i electron` ritorna **0 risultati** (eccetto changelog/
+  docs storici esplicitamente labellati "legacy")
+- ☐ `git grep "electronAPI"` ritorna **0 risultati**
+- ☐ `npm install` non installa più Electron (verifica `node_modules`)
+- ☐ `npm run check` verde (incluso `check:wails`, `check:media3`,
+  `check:deps`)
+- ☐ `vitest run` 100% verde
+- ☐ `go test ./... -race` verde
+- ☐ `wails3 dev` apre la finestra, frontend visualizza catalogo,
+  discovery/cast/remote operativi (audio + control plane via libmpv
+  `-tags mpv`, video rendering completo dopo Fase 6.1)
+- ☐ `wails3 build -clean` produce binario funzionante (≤ 40 MB stripped)
+- ☐ Tag annotato `electron-final` applicato al commit precedente al PR
+
+### 14.8 Cosa NON viene rimosso (mantenuto)
+- ✅ Tutto il codice **frontend React/TS** (sotto `frontend/`) — riusato
+  invariato dal nuovo runtime Wails
+- ✅ Tutta la pipeline **Android Capacitor + Media3** (`android/`) —
+  fuori scope, runtime separato indipendente
+- ✅ Toolchain condiviso (`Vite`, `Vitest`, `Tailwind`, `TypeScript`)
+- ✅ Pipeline firma GPG (debsigs/rpm --addsign/gpg detach-sign)
+- ✅ GitHub Pages APT/RPM/Arch repo deployment (riusato per Wails)
+- ✅ `.version` single source of truth + `sync-version.mjs`
+- ✅ `scripts/build-android.sh`, `scripts/android-build-release.sh`,
+  `scripts/install-apk.sh` (target Android)
 

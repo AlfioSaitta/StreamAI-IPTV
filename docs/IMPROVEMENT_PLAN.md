@@ -150,7 +150,7 @@ Per ogni tranche idealmente chiudere con:
 | E.5 Cache API + gzip TMDB | ✅ | |
 | F.3 Health-check Xtream | ✅ | badge + alert 7gg |
 | G.1 vitest + test moduli puri | ✅ | TEST-1 chiuso 2026-05-20; suite 209/209 |
-| G.4 CI GitHub Actions | 🚧 | Job `linux-release` completo (PKG-1); manca job di typecheck/test/build su PR |
+| G.4 CI GitHub Actions | ✅ | `ci.yml` su push + PR (typecheck + test + check:media3 + check:wails + check:go + build), badge in README. Closed 2026-05-22 |
 | K Quick wins | 🚧 | 7/10 (mancano bonjour-service, content-visibility) |
 
 **Test suite (rilevazione 2026-05-18):** **167 test passati su 207 attesi**;
@@ -377,9 +377,11 @@ Totale test bloccati: **~40** (delta con il claim 207/207 precedente).
 
 ### 2-bis.5 Prevenzione regressioni
 
-- [ ] **G.4 — Job CI dedicato** (vedi §11.4): su ogni PR eseguire
-  `npm ci && npm run check` su Ubuntu 24.04 + Node 20 LTS. Senza
-  questo, ogni dipendenza con peer dep instabile può riemergere.
+- [x] **G.4 — Job CI dedicato** (vedi §11.4): `.github/workflows/ci.yml`
+  esegue `npm ci && npm run check` (check:deps + typecheck + test:run +
+  check:media3 + check:wails + check:go + build) + `go test ./internal/...`
+  su Ubuntu 24.04 + Node 20 LTS + Go 1.25 + libwebkit2gtk-4.1 + libmpv.
+  Badge CI nel README. **Chiuso 2026-05-22.**
 - [x] `scripts/check-deps.mjs` ora intercetta companion mancanti
   prima dei test (eseguito da `npm run check`).
 - [ ] Eseguire `npm explain @testing-library/dom` periodicamente per
@@ -1555,10 +1557,11 @@ Tag `v*` push → `.github/workflows/linux-release.yml` esegue tutto.
   esclusi (commit `be8bfc5`). Riabilitare se serve un canale portable.
 - [ ] **Notarization Windows + .dmg macOS** — fuori scope corrente
   (oggi solo Linux). Se aperto, allineare struttura `build/depends/`.
-- [ ] **Job typecheck/test/build su PR** (G.4): la pipeline `v*` testa
-  solo i tag. Aggiungere `.github/workflows/ci.yml` su `push` + `pull_request`.
-  Bloccante per chiudere TEST-1 §2-bis senza rischio di rigressioni
-  future invisibili.
+- [x] **Job typecheck/test/build su PR** (G.4): `.github/workflows/ci.yml`
+  attivo su `push` + `pull_request` esegue `npm run check` completo
+  (deps + typecheck + 209 vitest + media3 + wails + go vet/build +
+  vite build) + `go test ./internal/...`. Chiude TEST-1 §2-bis come
+  gate stabile contro regressioni future. **Closed 2026-05-22.**
 
 ---
 
