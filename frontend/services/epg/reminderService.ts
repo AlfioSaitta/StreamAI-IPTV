@@ -8,6 +8,7 @@
 // Storage shape: `streamai_epg_reminders` → EpgReminder[].
 
 import type { EpgProgramme } from '../../types';
+import { host } from '../hostBridge';
 
 export interface EpgReminder {
   /** Stable id: `${channelId}|${start}`. */
@@ -210,13 +211,24 @@ class EpgReminderServiceClass {
   }
 
   private fireNativeNotification(reminder: EpgReminder): void {
+    const minutes = Math.max(0, Math.round((reminder.start - Date.now()) / 60000));
+    const body = minutes <= 0
+      ? `In onda ora su ${reminder.channelName}`
+      : `Tra ${minutes} minuti su ${reminder.channelName}`;
+
+    // Prefer native host notification (Wails)
+    if (host?.sendNotification) {
+      try {
+        host.sendNotification(reminder.title, body);
+        return; // Success, don't fallback to browser API
+      } catch (err) {
+        console.warn('[EpgReminder] Host notification failed, falling back', err);
+      }
+    }
+
     if (typeof Notification === 'undefined') return;
     if (Notification.permission !== 'granted') return;
     try {
-      const minutes = Math.max(0, Math.round((reminder.start - Date.now()) / 60000));
-      const body = minutes <= 0
-        ? `In onda ora su ${reminder.channelName}`
-        : `Tra ${minutes} minuti su ${reminder.channelName}`;
       const notif = new Notification(reminder.title, {
         body,
         tag: reminder.id,

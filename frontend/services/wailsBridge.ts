@@ -25,6 +25,8 @@ import * as Cast from '../bindings/github.com/AlfioSaitta/StreamAI-IPTV/internal
 import * as NetStatus from '../bindings/github.com/AlfioSaitta/StreamAI-IPTV/internal/services/netstatus/service';
 import * as Player from '../bindings/github.com/AlfioSaitta/StreamAI-IPTV/internal/services/player/service';
 import * as Proxy from '../bindings/github.com/AlfioSaitta/StreamAI-IPTV/internal/services/proxy/service';
+import * as Migration from '../bindings/github.com/AlfioSaitta/StreamAI-IPTV/internal/services/migration/service';
+import * as Notifications from '../bindings/github.com/AlfioSaitta/StreamAI-IPTV/internal/services/notifications/service';
 
 /**
  * Sottoinsieme dell'API `window.electronAPI` esposta a `services/hostBridge.ts`.
@@ -71,6 +73,15 @@ export interface HostAPI {
     headers?: Record<string, string>,
   ) => Promise<string>;
   proxyPort: () => Promise<number>;
+
+  // Migration (Fase 7-bis.8: Electron v1 -> Wails v2)
+  HasLegacyData: () => Promise<boolean>;
+  GetLegacyData: () => Promise<string>;
+  GetLegacyPath: () => Promise<string>;
+  ImportSnapshot: (jsonData: string) => Promise<boolean>;
+
+  // Notifications (Fase 7-bis.9)
+  sendNotification: (title: string, message: string) => void;
 }
 
 /**
@@ -182,6 +193,19 @@ export const wailsBridge: HostAPI = {
   buildProxyUrl: (streamUrl, userAgent, headers) =>
     Proxy.BuildProxyURL(streamUrl, userAgent ?? '', headers ?? {}) as unknown as Promise<string>,
   proxyPort: () => Proxy.Port() as unknown as Promise<number>,
+
+  // --- Migration ---
+  HasLegacyData: () => Migration.HasLegacyData() as unknown as Promise<boolean>,
+  GetLegacyData: () => Migration.GetLegacyData() as unknown as Promise<string>,
+  GetLegacyPath: () => Migration.GetLegacyPath() as unknown as Promise<string>,
+  ImportSnapshot: (jsonData) => Migration.ImportSnapshot(jsonData) as unknown as Promise<boolean>,
+
+  // --- Notifications ---
+  sendNotification: (title, message) => {
+    Notifications.Send(title, message).catch((err) => {
+      console.warn('[wailsBridge] sendNotification failed:', err);
+    });
+  },
 };
 
 export default wailsBridge;

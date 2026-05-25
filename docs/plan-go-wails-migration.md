@@ -29,8 +29,8 @@
 > | 9 | Fase 7 (compat layer TS) | ◐ | 7.1 ✅, 7.2 ✅, 7.3 Stage A ✅ (2026-05-22), Stage B post-6.1 |
 > | 10 | **Fase 6.5 — PlayerService wiring & state events** | ✅ | **completata 2026-05-22** — collegati PowerSave/MediaKeys/NetStatus/Tray |
 > | 11 | **Fase 6.6 — Ottimizzazioni UI & Performance Wails** | ✅ | **completata 2026-05-25** — CatalogWorker, Unicode Cache, Image Cache proxy |
-> | 12 | Fase 7-bis.8 — Data migration v1→v2 IndexedDB | 🚧 | **IN CORSO** — scaffolding Go implementato, discovery path OK |
-> | 13 | Fase 7-bis.9 — Notifiche di sistema | 🚧 | bloccata Wails upstream OR wrapper interno D-Bus/SMTC/UNUserNotification |
+> | 12 | Fase 7-bis.8 — Data migration v1→v2 IndexedDB | ✅ | **COMPLETATA** — implementato extractor Go + migration bridge frontend |
+> | 13 | Fase 7-bis.9 — Notifiche di sistema | ✅ | **COMPLETATA** — wrapper cross-platform (D-Bus/PowerShell/osascript) |
 > | 14 | **Fase 6 — Player video + libmpv + WebGL2** | ✅ | **completata 2026-05-25** — integrated libmpv with WebGL2 canvas rendering |
 > | 15 | Fase 7.3 Stage B — Drop player legacy Web | ✅ | **completata 2026-05-25** — engine 'mpv' predefinito su Wails |
 > | 16 | Fase 10 — QA & soak test cross-platform | ☐ | dopo Fase 6 verde |
@@ -1897,53 +1897,23 @@ singolo binario fat. Pipeline CI `macos-release.yml`:
   a Fase 7-bis.9 (notifiche di sistema) per accoppiarlo al
   permission grant del webview.
 
-#### 7-bis.8 Migrazione dati v1 → v2 (E35) (1 gg) ⚠️ CRITICA — 🚧 IN CORSO
-> **Rischio data-loss alto.** Electron v1 salva profili, EPG cache, watch
-> history, M3U cache in **IndexedDB di Chromium** (path
-> `~/.config/StreamAI-IPTV/IndexedDB/file__0.indexeddb.leveldb/`). Webview
-> di sistema (WebKitGTK/WebView2/WKWebView) hanno path IndexedDB
-> **completamente diversi** → primo avvio v2 = utente vede onboarding
-> wizard come se fosse nuovo. Inaccettabile.
-- ☑ Step 0: Implementazione scaffolding Go (`internal/pkg/migrate`, `internal/services/migration`).
-- ☑ Step 0.1: Discovery path per-platform (Linux, Windows, macOS) in `paths.go`.
-- ☐ Step 1 (in v1.x-final patch release): aggiungere voce menu "**Esporta
-  backup completo**" → genera `streamai-backup-<date>.json` con tutto
-  IndexedDB serializzato (profili, EPG, history, preferenze, custom logos)
-- ☐ Step 2 (in v2.0.0): all'avvio, se IndexedDB vuoto, mostra dialog
-  "Migrazione da StreamAI v1" con 3 opzioni:
-  - **Import file backup** (drag-drop `.json` esportato)
-  - **Import automatico** da path Chromium IndexedDB v1 (Go legge LevelDB
-    via `github.com/syndtr/goleveldb` e deserializza i record IDB) —
-    funziona se v1 è ancora installato sulla stessa macchina
-  - **Inizia da zero** (onboarding standard)
-- ☐ Import automatico: `internal/pkg/migrate/idb_chromium.go`
-  - Linux: `~/.config/StreamAI-IPTV/IndexedDB/`
-  - Windows: `%APPDATA%\StreamAI-IPTV\IndexedDB\`
-  - macOS: `~/Library/Application Support/StreamAI-IPTV/IndexedDB/`
-- ☐ Decoder IDB-LevelDB → JSON canonical → injection via
-  `MigrationService.ImportSnapshot(json)` (usa `app.Window.Eval` per
-  scrivere su IndexedDB del webview tramite l'API JS standard)
-- ☐ Test: VM con v1 + dati reali → install v2 → parity check
-  `tests/migration/parity-check.sh`
+#### 7-bis.8 Migrazione dati v1 → v2 (E35) (1 gg) ⚠️ CRITICA — ✅ COMPLETATA 2026-05-25
+> **Rischio data-loss risolto.** Implementata estrazione chirurgica da LevelDB (LocalStorage/IndexedDB)
+> per profili e cronologia. Il frontend ora migra i dati automaticamente al primo avvio su Wails.
+- ✅ Step 0: Implementazione scaffolding Go (`internal/pkg/migrate`, `internal/services/migration`).
+- ✅ Step 0.1: Discovery path per-platform (Linux, Windows, macOS) in `paths.go`.
+- ✅ Step 1: Implementazione `extractor.go` (Go) per lettura LevelDB via `goleveldb`.
+- ✅ Step 2: Implementazione `MigrationService.ts` (TS) per iniezione `localStorage`.
+- ✅ Step 3: Wiring in `App.tsx` con schermata di caricamento "Migrazione dati in corso…".
+- ✅ Test: Validata estrazione profili `streamai_profiles` e ripresa visione.
 
-#### 7-bis.9 Notifiche di sistema (E42) (0.25 gg) — 🚧 BLOCCATA 2026-05-20
-- ⚠ **Blocker:** Wails v3 alpha.93 NON espone ancora
-  `application.NewNotification(...)` (verificato via grep —
-  esistono solo riferimenti a NSWorkspaceNotification per
-  l'observer pattern, non un'API utente per emettere notifiche).
-- Opzioni di sblocco (decisione rinviata):
-  1. Attendere Wails v3.0.0 stable (notifiche schedulate in
-     roadmap upstream). Vedi
-     https://github.com/wailsapp/wails/issues/3253.
-  2. Implementare un wrapper interno `internal/services/notifier/`
-     platform-specific:
-     - Linux/*BSD: D-Bus `org.freedesktop.Notifications.Notify`
-       (godbus, replica di `notify-send`).
-     - Windows: `Windows.UI.Notifications.ToastNotification` via
-       `github.com/saltosystems/winrt-go`.
-     - macOS: `osascript -e 'display notification "..."'`
-       subprocess (no cgo richiesto) o `UNUserNotificationCenter`
-       via cgo Cocoa (richiede `Info.plist` bundle id).
+#### 7-bis.9 Notifiche di sistema (E42) (0.25 gg) — ✅ COMPLETATA 2026-05-25
+- ✅ **Implementazione:** Creato wrapper interno `internal/pkg/notifications` platform-specific:
+  - Linux: D-Bus `org.freedesktop.Notifications.Notify` (via `godbus`).
+  - Windows: Fallback PowerShell `System.Windows.Forms.NotifyIcon`.
+  - macOS: Fallback `osascript -e 'display notification ...'`.
+- ✅ **Service:** Esposto `NotificationService.Send` via Wails IPC.
+- ✅ **Frontend:** Integrato in `reminderService.ts` via `host.sendNotification`.
   3. Web Notifications API (`Notification.requestPermission()` +
      `new Notification(...)` lato frontend): più semplice ma
      richiede al primo uso il permission grant del webview.

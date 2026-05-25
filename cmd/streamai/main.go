@@ -39,6 +39,7 @@ import (
 	"github.com/AlfioSaitta/StreamAI-IPTV/internal/services/proxy"
 	"github.com/AlfioSaitta/StreamAI-IPTV/internal/services/remote"
 	"github.com/AlfioSaitta/StreamAI-IPTV/internal/services/migration"
+	notificationssvc "github.com/AlfioSaitta/StreamAI-IPTV/internal/services/notifications"
 )
 
 
@@ -108,6 +109,7 @@ func main() {
 	advertisingSvc.SetAppVersion(version)
 	netstatusSvc := netstatus.New(remoteSvc, advertisingSvc)
 	migrationSvc := migration.New()
+	notificationsSvc := notificationssvc.New()
 
 	// Fase 6.5 — Service Go aggregati come variabili per poterli
 	// "wirare" tra di loro dopo la registrazione (vedi blocco
@@ -154,6 +156,7 @@ func main() {
 			application.NewService(advertisingSvc),
 		application.NewService(netstatusSvc),
 		application.NewService(migrationSvc),
+		application.NewService(notificationsSvc),
 		application.NewService(remoteSvc),
 			application.NewService(cast.New()),
 			application.NewService(discovery.New()),
