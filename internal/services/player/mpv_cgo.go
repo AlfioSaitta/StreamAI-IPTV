@@ -410,13 +410,16 @@ func (b *cgoBackend) AddSub(path string) error {
 }
 
 func (b *cgoBackend) Resize(width, height int) error {
-	// No-op fino a SPIKE-1: il render context non esiste ancora.
-	// Quando attiveremo `mpv_render_context_create`, qui invocheremo
-	// `mpv_render_context_set_parameter(MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME)`
-	// + ridimensioneremo l'FBO interno. Per ora ignoriamo silenziosamente:
-	// il frontend chiama Resize anche prima del Load, non vogliamo errori.
-	_ = width
-	_ = height
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.handle == nil || b.renderCtx == nil {
+		return nil
+	}
+
+	// Per ora in modalità SW il ridimensionamento è gestito dinamicamente ad ogni
+	// chiamata di RenderFrame(w, h). Tuttavia, prepariamo il backend per
+	// lo Stage B (OpenGL) dove qui inizializzeremo l'FBO.
+	// Logghiamo il resize come informazione di debug se necessario.
 	return nil
 }
 

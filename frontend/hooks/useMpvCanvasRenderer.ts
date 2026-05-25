@@ -58,6 +58,8 @@ export interface UseMpvCanvasRendererOptions {
   width?: number;
   height?: number;
   targetFPS?: number;
+  /** Callback chiamata quando le dimensioni del canvas cambiano. */
+  onResize?: (w: number, h: number) => void;
 }
 
 export interface UseMpvCanvasRendererResult {
@@ -168,19 +170,49 @@ export function useMpvCanvasRenderer(
       if (localError) setError(localError);
     }, 500);
 
+    let lastW = 0;
+    let lastH = 0;
+
     const renderLoop = async () => {
+      if (state.cancelled) return;
+
+      // Recupero dimensioni correnti del canvas nel DOM.
+      let w = canvas.clientWidth;
+      let h = canvas.clientHeight;
+      
+      // Fallback: se clientWidth è 0 (es. appena montato o nascosto), proviamo getBoundingClientRect
+      if (w === 0 || h === 0) {
+        const rect = canvas.getBoundingClientRect();
+        w = rect.width;
+        h = rect.height;
+      }
+
+      // Estremo fallback: se siamo ancora a 0 (layout non pronto), usiamo window size
+      // cappata a 720p per non sovraccaricare il backend SW se siamo in fullscreen 4K.
+      if (w === 0 || h === 0) {
+        w = Math.min(window.innerWidth, 1280);
+        h = Math.min(window.innerHeight, 720);
+      }
+
+      // Notifica il cambio di dimensioni al chiamante (debounced internamente nel backend/hook).
+      if (w !== lastW || h !== lastH) {
+        lastW = w;
+        lastH = h;
+        if (opts.onResize) opts.onResize(w, h);
+      }
+
       let frameW = width;
       let frameH = height;
       if (!frameW || !frameH) {
-        const rect = canvas.getBoundingClientRect();
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
         // Stage A (SW render) cap a 720p per garantire 60fps fluidi.
-        frameW = Math.min(Math.max(64, Math.round(rect.width * dpr)), 1280);
-        frameH = Math.min(Math.max(64, Math.round(rect.height * dpr)), 720);
+        frameW = Math.min(Math.max(64, Math.round(w * dpr)), 1280);
+        frameH = Math.min(Math.max(64, Math.round(h * dpr)), 720);
       }
       frameW = Math.min(frameW, 7680);
       frameH = Math.min(frameH, 4320);
 
+      // Sincronizzazione dimensioni buffer canvas.
       if (canvas.width !== frameW) canvas.width = frameW;
       if (canvas.height !== frameH) canvas.height = frameH;
       gl.viewport(0, 0, frameW, frameH);
@@ -223,11 +255,17 @@ export function useMpvCanvasRenderer(
       if (!state.cancelled) requestAnimationFrame(() => void renderLoop());
     };
 
-    void renderLoop();
+    // Avvio loop di rendering con un piccolo ritardo per permettere al DOM
+    // di stabilizzarsi, specialmente in modalità fullscreen dove i calcoli
+    // delle dimensioni iniziali potrebbero fallire (restituendo 0).
+    const startDelay = window.setTimeout(() => {
+      void renderLoop();
+    }, 100);
 
     return () => {
       state.cancelled = true;
       state.running = false;
+      window.clearTimeout(startDelay);
       abortController.abort();
       window.clearInterval(flush);
     };

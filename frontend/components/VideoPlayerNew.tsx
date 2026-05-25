@@ -51,7 +51,26 @@ import {
   Subtitles, Upload, CheckCircle2, Copy, Check
 } from 'lucide-react';
 // @ts-ignore
-import { List as VirtualList } from 'react-window';
+import { FixedSizeList as VirtualList } from 'react-window';
+
+// --- COMPONENTS ---
+
+const PlaylistRow = ({ index, style, data }: any) => {
+  const c = data.playlist[index];
+  const isActive = c.id === data.currentChannelId;
+  return (
+    <div style={style} className="px-1 py-1">
+      <button 
+        key={c.id}
+        onClick={() => data.onChannelSelect && data.onChannelSelect(c)}
+        className={`tv-focus w-full text-left p-3 rounded-lg flex items-center gap-3 transition-colors ${isActive ? 'bg-brand-primary text-white' : 'hover:bg-white/10 text-gray-300'}`}
+      >
+          {c.logo && <img src={c.logo} alt={c.name} className="w-8 h-8 object-contain bg-black rounded" loading="lazy" />}
+          <span className="truncate text-sm font-medium">{c.cleanName || c.name}</span>
+      </button>
+    </div>
+  );
+};
 
 // --- TYPES ---
 
@@ -172,13 +191,14 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     setMuted: setMutedMpv,
     setAid: setAidMpv,
     refresh: refreshMpv,
+    resize: resizeMpv,
     error: mpvError
   } = useNativeMpvEngine({
     poll: isMpv,
   });
 
   // Start the RAF loop to draw libmpv frames to canvas.
-  useMpvCanvasRenderer(canvasRef, isMpv);
+  useMpvCanvasRenderer(canvasRef, isMpv, { onResize: resizeMpv });
 
   // EPG (D.1) — only loads when the channel is Live and we have a tvgId + creds.
   const isLive = channel?.type === 'live';
@@ -1477,31 +1497,17 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
                 <h3 className="font-bold text-white">Canali ({playlist.length})</h3>
                 <button onClick={() => setShowPlaylist(false)} aria-label="Chiudi lista canali" className="tv-focus touch-target p-2 rounded-full hover:bg-white/10"><X className="w-5 h-5" /></button>
             </div>
-            <div className="flex-1 p-2">
+            <div className="flex-1 p-2 overflow-hidden">
                 <VirtualList
                   height={window.innerHeight - 100}
                   width="100%"
-                  rowCount={playlist.length}
-                  rowHeight={64}
+                  itemCount={playlist.length}
+                  itemSize={64}
                   className="scrollbar-hide"
-                  rowComponent={({ index, style, playlist, currentChannelId, onChannelSelect }: any) => {
-                    const c = playlist[index];
-                    const isActive = c.id === currentChannelId;
-                    return (
-                      <div style={style} className="px-1">
-                        <button 
-                          key={c.id}
-                          onClick={() => onChannelSelect && onChannelSelect(c)}
-                          className={`tv-focus w-full text-left p-3 rounded-lg flex items-center gap-3 transition-colors ${isActive ? 'bg-brand-primary text-white' : 'hover:bg-white/10 text-gray-300'}`}
-                        >
-                            {c.logo && <img src={c.logo} alt={c.name} className="w-8 h-8 object-contain bg-black rounded" loading="lazy" />}
-                            <span className="truncate text-sm font-medium">{c.cleanName || c.name}</span>
-                        </button>
-                      </div>
-                    );
-                  }}
-                  rowProps={{ playlist, currentChannelId: channel.id, onChannelSelect }}
-                />
+                  itemData={{ playlist, currentChannelId: channel.id, onChannelSelect }}
+                >
+                  {PlaylistRow}
+                </VirtualList>
             </div>
         </div>
       )}
