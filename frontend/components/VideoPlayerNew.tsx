@@ -51,18 +51,18 @@ import {
   Subtitles, Upload, CheckCircle2, Copy, Check
 } from 'lucide-react';
 // @ts-ignore
-import { FixedSizeList as VirtualList } from 'react-window';
+import { List as VirtualList } from 'react-window';
 
 // --- COMPONENTS ---
 
-const PlaylistRow = ({ index, style, data }: any) => {
-  const c = data.playlist[index];
-  const isActive = c.id === data.currentChannelId;
+const PlaylistRow = ({ index, style, playlist, currentChannelId, onChannelSelect }: any) => {
+  const c = playlist[index];
+  const isActive = c.id === currentChannelId;
   return (
     <div style={style} className="px-1 py-1">
       <button 
         key={c.id}
-        onClick={() => data.onChannelSelect && data.onChannelSelect(c)}
+        onClick={() => onChannelSelect && onChannelSelect(c)}
         className={`tv-focus w-full text-left p-3 rounded-lg flex items-center gap-3 transition-colors ${isActive ? 'bg-brand-primary text-white' : 'hover:bg-white/10 text-gray-300'}`}
       >
           {c.logo && <img src={c.logo} alt={c.name} className="w-8 h-8 object-contain bg-black rounded" loading="lazy" />}
@@ -1499,15 +1499,13 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
             </div>
             <div className="flex-1 p-2 overflow-hidden">
                 <VirtualList
-                  height={window.innerHeight - 100}
-                  width="100%"
-                  itemCount={playlist.length}
-                  itemSize={64}
+                  style={{ height: window.innerHeight - 100 }}
                   className="scrollbar-hide"
-                  itemData={{ playlist, currentChannelId: channel.id, onChannelSelect }}
-                >
-                  {PlaylistRow}
-                </VirtualList>
+                  rowCount={playlist.length}
+                  rowHeight={64}
+                  rowComponent={PlaylistRow}
+                  rowProps={{ playlist, currentChannelId: channel.id, onChannelSelect }}
+                />
             </div>
         </div>
       )}
