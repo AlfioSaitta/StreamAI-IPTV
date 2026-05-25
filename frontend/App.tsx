@@ -94,19 +94,37 @@ interface ContentRefreshStatus {
 const NetworkStatusBanner = () => {
   const [networkStatus, setNetworkStatus] = useState<{ deviceId: string; channelName: string } | null>(null);
   const timeoutRef = useRef<number | null>(null);
+  const lastShownRef = useRef<{ deviceId: string; channelName: string; at: number } | null>(null);
 
   useEffect(() => {
-    // Fase 7.2: usa il bridge host (Electron o Wails). I componenti UI non
-    // devono più toccare `window.electronAPI` direttamente.
     if (platformService.isDesktop && host?.onNetworkPlaybackStatus) {
-      const unsubscribe = host.onNetworkPlaybackStatus((status: { deviceId: string; channelName: string }) => {
-        setNetworkStatus(status);
+      const unsubscribe = host.onNetworkPlaybackStatus((status: any) => {
+        const now = Date.now();
+        const { deviceId, channelName, isPlaying } = status;
         
-        // Nascondi il banner dopo 10 secondi
+        if (isPlaying === false) {
+          setNetworkStatus(null);
+          return;
+        }
+
+        const isSameContent = lastShownRef.current && 
+                             lastShownRef.current.deviceId === deviceId && 
+                             lastShownRef.current.channelName === channelName;
+        
+        // Se è lo stesso contenuto ed è già stato mostrato di recente,
+        // non resettiamo il timer e non lo mostriamo di nuovo se è già sparito.
+        if (isSameContent && (now - lastShownRef.current!.at < 60000)) {
+          return;
+        }
+
+        setNetworkStatus({ deviceId, channelName });
+        lastShownRef.current = { deviceId, channelName, at: now };
+        
+        // Mostra il banner per 8 secondi
         if (timeoutRef.current) clearTimeout(timeoutRef.current);
         timeoutRef.current = window.setTimeout(() => {
           setNetworkStatus(null);
-        }, 10000);
+        }, 8000);
       });
 
       return () => {
