@@ -3,6 +3,7 @@
 // Extracted from components/VideoPlayerNew.tsx during refactor B.1.
 
 import { useEffect } from 'react';
+import { platformService } from '../services/platformService';
 import type { Channel } from '../types';
 
 export interface UsePlayerMediaSessionParams {
@@ -26,9 +27,12 @@ export function usePlayerMediaSession({
   onPrev,
   onNext,
 }: UsePlayerMediaSessionParams) {
+  // Disabilita navigator.mediaSession su Wails in favore dell'integrazione nativa Go (Fase 7-bis)
+  const isWails = platformService.isWails;
+
   // Metadata + action handlers
   useEffect(() => {
-    if (!('mediaSession' in navigator) || !channel) return;
+    if (isWails || !('mediaSession' in navigator) || !channel) return;
 
     navigator.mediaSession.metadata = new window.MediaMetadata({
       title: channel.cleanName || channel.name,
@@ -64,7 +68,7 @@ export function usePlayerMediaSession({
 
   // Position state
   useEffect(() => {
-    if (!('mediaSession' in navigator)) return;
+    if (isWails || !('mediaSession' in navigator)) return;
     try {
       if (duration > 0) {
         navigator.mediaSession.setPositionState({ duration, playbackRate: 1, position: currentTime });

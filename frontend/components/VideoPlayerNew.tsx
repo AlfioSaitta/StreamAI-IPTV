@@ -25,6 +25,7 @@ import { useEpg } from '../hooks/useEpg';
 import { useAutoNextEpisode } from '../hooks/useAutoNextEpisode';
 import { usePlayerErrorRing } from '../hooks/usePlayerErrorRing';
 import { useSleepTimer, formatSleepRemaining } from '../hooks/useSleepTimer';
+import { usePlayerSystemIntegration } from '../hooks/usePlayerSystemIntegration';
 import CastDevicePicker from './CastDevicePicker';
 import MiniEpgOverlay from './MiniEpgOverlay';
 import AutoNextOverlay from './player/AutoNextOverlay';
@@ -591,6 +592,32 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   // `hooks/usePlayerErrorRing.ts`. Lo stato è derivato da `playbackError`
   // (snapshot + dedup per identità) e consumato da `StreamDiagnostics`.
 
+  // Handlers atomici per integrazione di sistema (MediaKeys/OS)
+  const handlePlay = useCallback(() => {
+    if (isMpv) void playMpv();
+    else if (isUsingNativePlayer) void nativeVideoPlayer.resume();
+    else playerRef.current?.play();
+  }, [isMpv, playMpv, isUsingNativePlayer]);
+
+  const handlePause = useCallback(() => {
+    if (isMpv) void pauseMpv();
+    else if (isUsingNativePlayer) void nativeVideoPlayer.pause();
+    else playerRef.current?.pause();
+  }, [isMpv, pauseMpv, isUsingNativePlayer]);
+
+  const handleStop = useCallback(() => {
+    if (isMpv) void stopMpv();
+    else if (isUsingNativePlayer) void nativeVideoPlayer.stop();
+    else playerRef.current?.dispose();
+    onBack?.();
+  }, [isMpv, stopMpv, isUsingNativePlayer, onBack]);
+
+  const handleSeek = useCallback((time: number) => {
+    if (isMpv) void seekMpv(time);
+    else if (isUsingNativePlayer) void nativeVideoPlayer.seekTo(time);
+    else if (playerRef.current) playerRef.current.currentTime(time);
+  }, [isMpv, seekMpv, isUsingNativePlayer]);
+
   // Refresh buffer stats periodically while the diagnostics panel is open.
   useEffect(() => {
     if (!showInfoPanel || isMpv) return;
@@ -671,7 +698,24 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         showOsd(<Pause className="w-12 h-12 text-white" fill="white" />, "Pausa");
       }
     }
-  }, [isPlaying, isUsingNativePlayer, isMpv, pauseMpv, playMpv, showOsd]);
+  }, [isPlaying, isUsingNativePlayer, isMpv, pauseMpv, playMpv, showOsd, channel, loadMpv]);
+
+  // System Integration (MediaKeys, PowerSave) per ambiente Wails
+  usePlayerSystemIntegration({
+    channel,
+    isPlaying,
+    isPaused: isMpv ? (mpvState?.paused ?? false) : !isPlaying,
+    currentTime,
+    duration,
+    volume,
+    togglePlay,
+    play: handlePlay,
+    pause: handlePause,
+    stop: handleStop,
+    seek: handleSeek,
+    onPrev,
+    onNext,
+  });
 
   const skip = useCallback((seconds: number) => {
     if (isUsingNativePlayer) {
