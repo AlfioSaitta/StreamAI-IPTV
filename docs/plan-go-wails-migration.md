@@ -1,13 +1,13 @@
 # 🚀 Piano di Migrazione: Electron → Go + Wails v3
 
-> **Status:** Release Candidate 1 — **revisione 8.0** (stato 2026-05-25)  
+> **Status:** Stable Release Candidate 1 — **revisione 9.0** (stato 2026-05-25)  
 > **Owner:** Maintainer StreamAI-IPTV  
 > **Target ramo:** `feat/wails-migration` (pronto per merge su `main`)  
 > **Versione di partenza:** `1.x` Electron  
-> **Versione di arrivo:** `2.0.0` Wails v3 — **Linux + Windows + macOS day-1**  
-> **Ultima revisione:** 2026-05-25 (rev. 8.0)
+> **Versione di arrivo:** `2.0.0` Wails v3 — **Linux (✅) + Windows (⏳) + macOS (⏳)**  
+> **Ultima revisione:** 2026-05-25 (rev. 9.0)
 
-> ## 📐 Riordino fasi rev. 8.0 (2026-05-25) — core migration completata
+> ## 📐 Riordino fasi rev. 9.0 (2026-05-25) — core migration completata
 
 | Ordine | Fase | Stato | Note |
 |---|---|---|---|
@@ -30,9 +30,10 @@
 | 16 | Fase 10 — QA & soak test cross-platform | ✅ | **COMPLETATA** — risolti freeze shutdown e fullscreen black screen. |
 | 17 | Fase 11 — Documentazione finale | ✅ | **COMPLETATA** — 2026-05-25 |
 | 18 | **Fase 8 — Packaging Linux (nfpm)** | ✅ | **COMPLETATA** — .deb, .rpm, .pkg.tar.zst pronti. |
-| 19 | **Fase 9 — Packaging Windows** | ☐ | In attesa di testing su Windows |
-| 20 | **Fase 9-bis — Packaging macOS** | ☐ | In attesa di testing su macOS |
-| 21 | Fase 12 — Release v2.0.0-rc.1 | ✅ | **PRONTA** |
+| 19 | **Fase 9 — Packaging Windows** | 🚧 | Integrazioni OS specifiche in corso. |
+| 20 | **Fase 9-bis — Packaging macOS** | 🚧 | Integrazioni OS specifiche in corso. |
+| 21 | Fase 12 — Release v2.0.0-rc.1 | ✅ | **RILASCIATA** |
+| 22 | **Fase 13 — Roadmap Post-Migrazione** | ⏳ | Vedi `docs/IMPROVEMENT_PLAN.md` v2.0 |
 >
 > **Razionale del riordino:**
 > 1. **Riduzione del rischio di throw-away work**: senza tutte le feature
