@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/godbus/dbus/v5"
 	"github.com/godbus/dbus/v5/introspect"
@@ -230,8 +231,22 @@ func platformStop(c *Controller) error {
 	}
 	conn := c.state.conn
 	c.state = ctrlState{}
-	log.Info().Msg("mediakeys: closing dbus connection")
-	return conn.Close()
+
+	// La chiusura di godbus può bloccarsi se ci sono segnali pendenti
+	// o problemi col bus di sessione. Usiamo un timeout per evitare freeze.
+	done := make(chan error, 1)
+	go func() {
+		log.Info().Msg("mediakeys: closing dbus connection")
+		done <- conn.Close()
+	}()
+
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(500 * time.Millisecond):
+		log.Warn().Msg("mediakeys: dbus connection close timed out, skipping")
+		return nil
+	}
 }
 
 // buildPropsSpec costruisce la mappa props per prop.Export.

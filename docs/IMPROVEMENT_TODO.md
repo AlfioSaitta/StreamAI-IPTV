@@ -107,13 +107,11 @@
 - [x] **PERF-CAT-1 (P1)** — UI freeze su playlist massime.
   Root cause: parsing M3U sincrono su main thread.
   **Fix landed 2026-05-25:** introdotto `CatalogWorker` (Web Worker).
-- [ ] **SHUTDOWN-FREEZE-1 (P1)** — Freeze dell'app alla chiusura su Wails.
-  Root cause (sospetta): Deadlock o attesa infinita in `libmpv` o `DBus` durante lo shutdown.
-  **Azioni intraprese 2026-05-25:**
-  1. Aggiunti log chirurgici in tutti i `ServiceShutdown`.
-  2. Implementato timeout protettivo in `singleinstance.Release`.
-  3. Aggiunti log intorno a `mpv_terminate_destroy`.
-  4. Monitoraggio log richiesto per identificare il colpevole.
+- [x] **SHUTDOWN-FREEZE-1 (P1)** — Freeze dell'app alla chiusura su Wails.
+  Root cause: `conn.Close()` di `godbus` si blocca se ci sono segnali pendenti (MPRIS).
+  **Fix landed 2026-05-25:** implementato timeout di 500ms per la chiusura della
+  connessione D-Bus in `mediakeys_linux.go` e aggiunto un watchdog globale di
+  5 secondi in `main.go` per forzare l'uscita in caso di deadlock estremi.
 
 ---
 
