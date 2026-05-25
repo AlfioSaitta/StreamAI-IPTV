@@ -345,12 +345,10 @@ function App() {
       }
       // 'F' / 'f' → toggle window fullscreen (Fase 7.2)
       if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-        const s = stateRef.current;
-        // Se il player è aperto, se ne occupa lui (per mostrare l'OSD nel container corretto).
-        // Altrimenti lo facciamo noi globalmente.
-        if (!s.currentChannel && platformService.isWails && host?.toggleFullscreen) {
+        if (platformService.isWails && host?.toggleFullscreen) {
           e.preventDefault();
           host.toggleFullscreen().catch(console.error);
+          return;
         }
       }
 
@@ -757,14 +755,16 @@ function App() {
           setCurrentChannel(channel);
           setSelectedSeries(null);
           
-          // Fase 7.2: se siamo nella tab 'home', getCurrentCategories() ritorna []
-          // perché la Home ha una logica di caroselli custom. In questo caso,
-          // se l'utente clicca un canale, popoliamo la coda con l'intera lista
-          // globale di quel tipo per permettere il cambio canale (prev/next).
+          // Fase 7.2: se siamo nella tab 'home' o se la coda è vuota, 
+          // popoliamo la coda con l'intera lista globale di quel tipo 
+          // per permettere il cambio canale (prev/next).
           let queue = getCurrentCategories().flatMap(cat => cat.channels);
-          if (queue.length === 0) {
-            if (channel.type === 'live') queue = liveCategories.flatMap(c => c.channels);
-            else if (channel.type === 'movie') queue = vodCategories.flatMap(c => c.channels);
+          if (queue.length <= 1) {
+            if (channel.type === 'live') {
+              queue = liveCategories.flatMap(c => c.channels);
+            } else if (channel.type === 'movie') {
+              queue = vodCategories.flatMap(c => c.channels);
+            }
           }
           setPlayQueue(queue);
       }

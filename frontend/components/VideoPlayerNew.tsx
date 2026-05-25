@@ -51,7 +51,7 @@ import {
   Subtitles, Upload, CheckCircle2, Copy, Check
 } from 'lucide-react';
 // @ts-ignore
-import { FixedSizeList as VirtualList } from 'react-window';
+import { List as VirtualList } from 'react-window';
 
 // --- TYPES ---
 
@@ -1481,13 +1481,12 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
                 <VirtualList
                   height={window.innerHeight - 100}
                   width="100%"
-                  itemCount={playlist.length}
-                  itemSize={64}
+                  rowCount={playlist.length}
+                  rowHeight={64}
                   className="scrollbar-hide"
-                >
-                  {({ index, style }: { index: number, style: React.CSSProperties }) => {
+                  rowComponent={({ index, style, playlist, currentChannelId, onChannelSelect }: any) => {
                     const c = playlist[index];
-                    const isActive = c.id === channel.id;
+                    const isActive = c.id === currentChannelId;
                     return (
                       <div style={style} className="px-1">
                         <button 
@@ -1501,7 +1500,8 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
                       </div>
                     );
                   }}
-                </VirtualList>
+                  rowProps={{ playlist, currentChannelId: channel.id, onChannelSelect }}
+                />
             </div>
         </div>
       )}
