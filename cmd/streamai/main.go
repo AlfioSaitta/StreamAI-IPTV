@@ -165,7 +165,15 @@ func main() {
 			application.NewService(cast.New()),
 			application.NewService(discovery.New()),
 		},
-			Assets: application.AssetOptions{
+		OnShutdown: func() {
+			log.Info().Msg("StreamAI: application shutdown triggered (watchdog active)")
+			// Watchdog: forza l'uscita se i ServiceShutdown si bloccano per più di 5 secondi.
+			time.AfterFunc(5*time.Second, func() {
+				log.Error().Msg("StreamAI: shutdown timeout reached! forcing exit to avoid freeze")
+				os.Exit(1)
+			})
+		},
+		Assets: application.AssetOptions{
 				Handler: application.AssetFileServerFS(rootassets.FS),
 				// FIX 2026-05-24 — Xtream "Load failed" su WebKitGTK.
 				// La webview blocca le fetch cross-origin dal documento

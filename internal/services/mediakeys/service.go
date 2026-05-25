@@ -129,7 +129,10 @@ func (s *Service) ServiceStartup(_ context.Context, _ application.ServiceOptions
 
 // ServiceShutdown rilascia il bus name + chiude conn.
 func (s *Service) ServiceShutdown() error {
-	return s.ctrl.Stop()
+	log.Info().Msg("mediakeys: ServiceShutdown started")
+	err := s.ctrl.Stop()
+	log.Info().Err(err).Msg("mediakeys: ServiceShutdown finished")
+	return err
 }
 
 // --- API bindable al frontend ---

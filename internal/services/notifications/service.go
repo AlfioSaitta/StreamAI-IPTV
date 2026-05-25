@@ -3,6 +3,7 @@ package notifications
 import (
 	"context"
 
+	"github.com/rs/zerolog/log"
 	"github.com/wailsapp/wails/v3/pkg/application"
 
 	"github.com/AlfioSaitta/StreamAI-IPTV/internal/pkg/notifications"
@@ -19,6 +20,13 @@ func New() *Service {
 
 // ServiceStartup viene chiamato da Wails all'avvio dell'applicazione.
 func (s *Service) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
+	return nil
+}
+
+// ServiceShutdown viene chiamato da Wails alla chiusura dell'applicazione.
+func (s *Service) ServiceShutdown() error {
+	log.Info().Msg("notifications: ServiceShutdown started")
+	log.Info().Msg("notifications: ServiceShutdown finished")
 	return nil
 }
 

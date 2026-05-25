@@ -2,6 +2,7 @@ package migration
 
 import (
 	"context"
+	"github.com/rs/zerolog/log"
 	"github.com/AlfioSaitta/StreamAI-IPTV/internal/pkg/migrate"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -19,6 +20,8 @@ func (s *Service) ServiceStartup(_ context.Context, _ application.ServiceOptions
 }
 
 func (s *Service) ServiceShutdown() error {
+	log.Info().Msg("migration: ServiceShutdown started")
+	log.Info().Msg("migration: ServiceShutdown finished")
 	return nil
 }
 

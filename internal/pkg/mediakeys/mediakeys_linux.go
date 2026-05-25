@@ -230,7 +230,7 @@ func platformStop(c *Controller) error {
 	}
 	conn := c.state.conn
 	c.state = ctrlState{}
-	log.Debug().Msg("mediakeys: closing dbus connection")
+	log.Info().Msg("mediakeys: closing dbus connection")
 	return conn.Close()
 }
 
