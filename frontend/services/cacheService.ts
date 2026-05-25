@@ -5,11 +5,12 @@ const STORE_API = 'api_responses';
 const STORE_IMAGES = 'images';
 
 const IMAGE_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-const IMAGE_CACHE_MAX_ENTRIES = 1500;
-const IMAGE_CACHE_MAX_BYTES = 512 * 1024 * 1024;
+const IMAGE_CACHE_MAX_ENTRIES = 5000;
+const IMAGE_CACHE_MAX_BYTES = 1024 * 1024 * 1024; // 1 GB
 const IMAGE_CACHE_PRESSURE_RATIO = 0.85;
 
 import { imageCacheApi } from './imageCacheApi';
+import { DownloadManager } from './downloadManager';
 import { decodeMaybeGzip, encodeMaybeGzip, gzipSupported } from './gzipUtil';
 
 // E.5 — prefer the Cache API for image storage. We still keep the IDB
@@ -610,16 +611,19 @@ export const CacheService = {
     const storageInfo = await CacheService.getStorageInfo();
     const imageCache = await CacheService.getImageCacheInfo();
     const cacheApiCount = USE_IMAGE_CACHE_API ? await imageCacheApi.count() : 0;
+    const cacheApiSize = USE_IMAGE_CACHE_API ? await imageCacheApi.estimateSize() : 0;
+    const totalBytes = imageCache.totalBytes + cacheApiSize;
 
     return {
       ...CacheService.stats,
+      ...DownloadManager.stats,
       memCacheSize: imageUrlCache.size,
       hitRate: CacheService.stats.hits + CacheService.stats.misses > 0
         ? Math.round(CacheService.stats.hits / (CacheService.stats.hits + CacheService.stats.misses) * 100)
         : 0,
       storage: storageInfo,
       totalImages: imageCache.count + cacheApiCount,
-      imageBytesMB: (imageCache.totalBytes / 1024 / 1024).toFixed(2),
+      imageBytesMB: (totalBytes / 1024 / 1024).toFixed(2),
       imageLimitMB: Math.round(imageCache.limitBytes / 1024 / 1024),
       imageLimitEntries: imageCache.limitEntries,
       imageTtlDays: imageCache.ttlDays,

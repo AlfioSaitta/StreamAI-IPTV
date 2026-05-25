@@ -135,25 +135,28 @@ export const imageCacheApi = {
       if (keys.length === 0) return { deleted: 0 };
       const now = Date.now();
       const stats: Array<{ url: string; lastAccess: number; cachedAt: number }> = [];
+      
+      // Batch processing for speed
       for (const req of keys) {
         const resp = await cache.match(req);
         if (!resp) continue;
         const cachedAt = Number(resp.headers.get(HEADER_CACHED_AT) ?? 0);
         const lastAccess = Number(resp.headers.get(HEADER_LAST_ACCESS) ?? cachedAt);
-        stats.push({ url: req.url, lastAccess, cachedAt });
+        
+        // Immediate TTL check
+        if (now - cachedAt > ttlMs) {
+          if (await cache.delete(req)) deleted++;
+        } else {
+          stats.push({ url: req.url, lastAccess, cachedAt });
+        }
       }
-      // Expire by TTL
-      const expired = stats.filter(s => now - s.cachedAt > ttlMs);
-      for (const e of expired) {
-        if (await cache.delete(e.url)) deleted++;
-      }
-      // Enforce max entries (LRU by lastAccess)
-      const remaining = stats.filter(s => !expired.includes(s));
-      if (remaining.length > maxEntries) {
-        remaining.sort((a, b) => a.lastAccess - b.lastAccess);
-        const overflow = remaining.length - maxEntries;
+
+      // Enforce max entries (LRU by lastAccess) on remaining
+      if (stats.length > maxEntries) {
+        stats.sort((a, b) => a.lastAccess - b.lastAccess);
+        const overflow = stats.length - maxEntries;
         for (let i = 0; i < overflow; i++) {
-          if (await cache.delete(remaining[i].url)) deleted++;
+          if (await cache.delete(stats[i].url)) deleted++;
         }
       }
     } catch (e) {
@@ -166,6 +169,28 @@ export const imageCacheApi = {
     const cache = await openCache();
     if (!cache) return 0;
     try { return (await cache.keys()).length; } catch { return 0; }
+  },
+
+  async estimateSize(): Promise<number> {
+    const cache = await openCache();
+    if (!cache) return 0;
+    try {
+      const keys = await cache.keys();
+      let total = 0;
+      // We only sample some keys to avoid blocking too long if the cache is huge,
+      // OR we just iterate all if we are in a context where it's okay (like settings).
+      // For now, let's iterate all as it's requested by the settings UI.
+      for (const req of keys) {
+        const resp = await cache.match(req);
+        if (resp) {
+          const size = Number(resp.headers.get('Content-Length') || 0);
+          total += size;
+        }
+      }
+      return total;
+    } catch {
+      return 0;
+    }
   },
 
   async clear(): Promise<void> {

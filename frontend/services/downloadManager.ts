@@ -1,18 +1,21 @@
 
 import { CacheService } from './cacheService.ts';
+import { proxyFetch } from './proxyFetch.ts';
 
 // Configurazione
-const MAX_CONCURRENT_DOWNLOADS = 6; // Download paralleli
-const DOWNLOAD_TIMEOUT_MS = 10000;
+const MAX_CONCURRENT_DOWNLOADS = 10; // Download paralleli aumentati per Wails
+const DOWNLOAD_TIMEOUT_MS = 15000; // Timeout leggermente aumentato
 
 // noinspection JSUnusedGlobalSymbols
 export const DownloadManager = {
   // Coda per download on-demand
   queue: new Map<string, {
-    resolve: (url: string | null) => void,
-    priority: number
+    resolves: Array<(url: string | null) => void>,
+    priority: number,
+    signal?: AbortSignal
   }>(),
   processing: new Set<string>(),
+  queued: new Set<string>(), // Nuova tracciabilità per evitare duplicati in attesa
   abortController: null as AbortController | null,
 
   // Stato pausa globale (per streaming live)
@@ -39,11 +42,12 @@ export const DownloadManager = {
       DownloadManager.abortController = null;
     }
     // Risolvi tutte le richieste in attesa con URL originale
-    DownloadManager.queue.forEach(({ resolve }, url) => {
-      resolve(url);
+    DownloadManager.queue.forEach(({ resolves }, url) => {
+      resolves.forEach(resolve => resolve(url));
     });
     DownloadManager.queue.clear();
     DownloadManager.processing.clear();
+    DownloadManager.queued.clear();
   },
 
   // Riprendi i download
@@ -56,8 +60,10 @@ export const DownloadManager = {
 
   // Richiedi un'immagine (chiamato da CachedImage)
   // Ritorna l'URL dell'immagine (da cache o scaricata)
-  requestImage: async (url: string, priority: number = 1): Promise<string | null> => {
+  requestImage: async (url: string, priority: number = 1, signal?: AbortSignal): Promise<string | null> => {
     if (!url || !url.startsWith('http')) return null;
+
+    if (signal?.aborted) return url;
 
     // Se in pausa, ritorna URL originale senza scaricare
     if (DownloadManager.paused) {
@@ -76,7 +82,7 @@ export const DownloadManager = {
 
     // 2. Check se già fallito di recente
     if (DownloadManager.failedUrls.has(url)) {
-      return url; // Ritorna URL originale, lascia che il browser gestisca
+      return url;
     }
 
     // 3. Check IndexedDB
@@ -87,124 +93,125 @@ export const DownloadManager = {
       return cached;
     }
 
-    // 4. Se già in download, attendi
-    if (DownloadManager.processing.has(url)) {
+    // 4. Se già in download o in coda, attendi
+    if (DownloadManager.processing.has(url) || DownloadManager.queued.has(url)) {
       return new Promise((resolve) => {
         const existing = DownloadManager.queue.get(url);
         if (existing) {
-          // Aggiorna priorità se maggiore
-          if (priority > existing.priority) {
-            existing.priority = priority;
-          }
-          const originalResolve = existing.resolve;
-          existing.resolve = (result) => {
-            originalResolve(result);
-            resolve(result);
-          };
+          if (priority > existing.priority) existing.priority = priority;
+          existing.resolves.push(resolve);
         } else {
-          DownloadManager.queue.set(url, { resolve, priority });
+          DownloadManager.queue.set(url, { resolves: [resolve], priority, signal });
         }
+        
+        // Se il nuovo segnale viene abortito, risolvi subito con fallback
+        signal?.addEventListener('abort', () => {
+          const stillThere = DownloadManager.queue.get(url);
+          if (stillThere) {
+            const idx = stillThere.resolves.indexOf(resolve);
+            if (idx !== -1) {
+              stillThere.resolves.splice(idx, 1);
+              resolve(url);
+            }
+          }
+        }, { once: true });
       });
     }
 
     // 5. Avvia download
-    return DownloadManager.download(url, priority);
+    return DownloadManager.download(url, priority, signal);
   },
 
   // Download effettivo
-  download: async (url: string, _priority: number): Promise<string | null> => {
-    // Se in pausa, ritorna URL originale
-    if (DownloadManager.paused) {
-      return url;
-    }
+  download: async (url: string, _priority: number, signal?: AbortSignal): Promise<string | null> => {
+    if (DownloadManager.paused || signal?.aborted) return url;
 
-    // Limita concorrenza
-    while (DownloadManager.processing.size >= MAX_CONCURRENT_DOWNLOADS) {
-      if (DownloadManager.paused) return url;
-      await new Promise(r => setTimeout(r, 50));
-    }
-
-    if (DownloadManager.paused) return url;
-
-    DownloadManager.processing.add(url);
-
-    if (!DownloadManager.abortController) {
-      DownloadManager.abortController = new AbortController();
-    }
+    DownloadManager.queued.add(url);
 
     try {
+      // Limita concorrenza
+      while (DownloadManager.processing.size >= MAX_CONCURRENT_DOWNLOADS) {
+        if (DownloadManager.paused || signal?.aborted) return url;
+        await new Promise(r => setTimeout(r, 50));
+      }
+
+      if (DownloadManager.paused || signal?.aborted) return url;
+
+      DownloadManager.queued.delete(url);
+      DownloadManager.processing.add(url);
+
       const resolveWaiting = (result: string | null) => {
         const waiting = DownloadManager.queue.get(url);
         if (waiting) {
-          waiting.resolve(result);
+          waiting.resolves.forEach(resolve => resolve(result));
           DownloadManager.queue.delete(url);
         }
       };
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
+      
+      // Abort interno se viene abortito il segnale esterno
+      const onAbort = () => controller.abort();
+      signal?.addEventListener('abort', onAbort);
 
-      const response = await fetch(url, {
-        mode: 'cors',
-        credentials: 'omit',
-        signal: controller.signal,
-        headers: {
-          'User-Agent': 'StreamAI IPTV',
-          'Accept': 'image/webp,image/*,*/*;q=0.8'
+      try {
+        const response = await proxyFetch(url, {
+          mode: 'cors',
+          credentials: 'omit',
+          signal: controller.signal,
+          headers: {
+            'Accept': 'image/webp,image/*,*/*;q=0.8'
+          }
+        });
+
+        clearTimeout(timeoutId);
+        signal?.removeEventListener('abort', onAbort);
+
+        if (DownloadManager.paused || signal?.aborted) return url;
+        if (!response.ok) {
+          DownloadManager.failedUrls.add(url);
+          DownloadManager.stats.failed++;
+          resolveWaiting(url);
+          return url;
         }
-      });
 
-      clearTimeout(timeoutId);
+        const blob = await response.blob();
+        if (DownloadManager.paused || signal?.aborted) return url;
 
-      if (DownloadManager.paused) return url;
-      if (!response.ok) {
-        DownloadManager.failedUrls.add(url);
-        DownloadManager.stats.failed++;
+        // Verifica che sia un'immagine valida
+        if (!blob.type.startsWith('image/') && blob.size < 100) {
+          DownloadManager.failedUrls.add(url);
+          DownloadManager.stats.failed++;
+          resolveWaiting(url);
+          return url;
+        }
+
+        // Salva in cache
+        await CacheService.saveImage(url, blob);
+        DownloadManager.cachedUrls.add(url);
+        DownloadManager.stats.downloaded++;
+        DownloadManager.stats.totalBytes += blob.size;
+
+        // Ottieni URL dalla cache
+        const cachedUrl = await CacheService.getImage(url);
+        resolveWaiting(cachedUrl);
+        return cachedUrl;
+
+      } catch (e: any) {
+        clearTimeout(timeoutId);
+        signal?.removeEventListener('abort', onAbort);
+        
+        if (e.name !== 'AbortError' && !signal?.aborted) {
+          DownloadManager.failedUrls.add(url);
+          DownloadManager.stats.failed++;
+        }
+
         resolveWaiting(url);
         return url;
       }
-
-      const blob = await response.blob();
-
-      if (DownloadManager.paused) return url;
-
-      // Verifica che sia un'immagine valida
-      if (!blob.type.startsWith('image/') && blob.size < 100) {
-        DownloadManager.failedUrls.add(url);
-        DownloadManager.stats.failed++;
-        resolveWaiting(url);
-        return url;
-      }
-
-      // Salva in cache
-      await CacheService.saveImage(url, blob);
-      DownloadManager.cachedUrls.add(url);
-      DownloadManager.stats.downloaded++;
-      DownloadManager.stats.totalBytes += blob.size;
-
-      // Ottieni URL dalla cache
-      const cachedUrl = await CacheService.getImage(url);
-
-      // Notifica chi sta aspettando
-      resolveWaiting(cachedUrl);
-
-      return cachedUrl;
-
-    } catch (e: any) {
-      if (e.name !== 'AbortError') {
-        DownloadManager.failedUrls.add(url);
-        DownloadManager.stats.failed++;
-      }
-
-      // Notifica chi sta aspettando
-      const waiting = DownloadManager.queue.get(url);
-      if (waiting) {
-        waiting.resolve(url); // Ritorna URL originale come fallback
-        DownloadManager.queue.delete(url);
-      }
-
-      return url; // Ritorna URL originale, il browser proverà a caricarla
     } finally {
+      DownloadManager.queued.delete(url);
       DownloadManager.processing.delete(url);
     }
   },
@@ -216,7 +223,7 @@ export const DownloadManager = {
       !DownloadManager.cachedUrls.has(u) &&
       !DownloadManager.processing.has(u) &&
       !DownloadManager.failedUrls.has(u)
-    ).slice(0, 10); // Max 10 preload
+    ).slice(0, 20); // Max 20 preload (aumentato da 10 dopo ottimizzazione abort)
 
     // Avvia download con priorità bassa (non bloccante)
     validUrls.forEach(url => {
@@ -237,6 +244,7 @@ export const DownloadManager = {
     }
     DownloadManager.queue.clear();
     DownloadManager.processing.clear();
+    DownloadManager.queued.clear();
     DownloadManager.failedUrls.clear();
   },
 

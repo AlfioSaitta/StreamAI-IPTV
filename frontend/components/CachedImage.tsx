@@ -50,13 +50,14 @@ const CachedImage: React.FC<CachedImageProps> = ({ src, className, alt, priority
     // Se DownloadManager è in pausa (es. durante streaming live), NON caricare nuove immagini
     // per non consumare banda
     if (DownloadManager.isPaused()) {
-      // Non impostare imgSrc - l'immagine mostrerà solo il placeholder
       return;
     }
 
+    const controller = new AbortController();
+
     // Richiedi l'immagine tramite DownloadManager
-    DownloadManager.requestImage(src, priority).then(cachedUrl => {
-      if (!mounted.current) return;
+    DownloadManager.requestImage(src, priority, controller.signal).then(cachedUrl => {
+      if (!mounted.current || controller.signal.aborted) return;
 
       // Ricontrolla se nel frattempo è stato messo in pausa
       if (DownloadManager.isPaused()) return;
@@ -71,6 +72,7 @@ const CachedImage: React.FC<CachedImageProps> = ({ src, className, alt, priority
 
     return () => {
       mounted.current = false;
+      controller.abort();
     };
   }, [src, priority, isNearViewport]);
 

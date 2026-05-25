@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Profile, ProfilePreferences, XtreamContent } from '../types.ts';
 import { ProfileService, DEFAULT_PREFERENCES } from '../services/profileService.ts';
 import { CacheService } from '../services/cacheService.ts';
+import { DownloadManager } from '../services/downloadManager.ts';
 import { useLanguage } from '../contexts/LanguageContext.tsx';
 import XtreamHealthBadge from './XtreamHealthBadge.tsx';
 import {
@@ -94,6 +95,8 @@ interface CacheStatsView {
   imageTtlDays: number;
   memCacheSize: number;
   hitRate: number;
+  downloaded: number;
+  failed: number;
   storage: {
     usageMB: string;
     quotaGB: string;
@@ -237,6 +240,7 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
 
   const handleOptimizeImageCache = async () => {
     const result = await CacheService.cleanupOldImages({ aggressive: true });
+    DownloadManager.clearFailed();
     await refreshCacheStats();
     setImageCacheMessage(
       `Cache immagini ottimizzata: ${result.deleted} elementi rimossi, ${(result.freedBytes / 1024 / 1024).toFixed(2)} MB liberati.`,
@@ -855,7 +859,10 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
                   </div>
                   <p className="mt-2 text-2xl font-bold text-content-primary">{cacheStats.totalImages}</p>
                   <p className="text-xs text-content-disabled">
-                    {cacheStats.imageBytesMB} MB / {cacheStats.imageLimitMB} MB · TTL {cacheStats.imageTtlDays} giorni
+                    {cacheStats.imageBytesMB} MB / {cacheStats.imageLimitMB} MB · TTL {cacheStats.imageTtlDays} gg
+                  </p>
+                  <p className="text-[10px] text-content-muted mt-1">
+                    Scaricati: {cacheStats.downloaded} · Falliti: {cacheStats.failed}
                   </p>
                 </Card>
                 <Card elevation="flat" padding="md">
