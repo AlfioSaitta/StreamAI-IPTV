@@ -10,6 +10,7 @@ package main
 // #cgo pkg-config: mpv egl gl
 // #include <stdlib.h>
 // #include <string.h>
+// #include <locale.h>
 // #include <EGL/egl.h>
 // #include <EGL/eglext.h>
 // #include <GL/gl.h>
@@ -144,9 +145,23 @@ func run(f cliFlags) error {
 	log.Printf("GL_VERSION  = %s", glGetString(C.GL_VERSION))
 
 	// 2) mpv create + set options + initialize.
-	mpv := C.mpv_create()
+	// libmpv richiede LC_NUMERIC=C per il parsing corretto di float/opzioni.
+	cloc := C.CString("C")
+	defer C.free(unsafe.Pointer(cloc))
+	C.setlocale(C.LC_NUMERIC, cloc)
+
+	apiVersion := int(C.mpv_client_api_version())
+	major := apiVersion >> 16
+	minor := apiVersion & 0xFFFF
+	minVersion := (1 << 16) | 107 // 1.107
+
+	if apiVersion < minVersion {
+		return fmt.Errorf("libmpv too old (api version %d.%d, expected >= 1.107)", major, minor)
+	}
+
+	mpv, err := C.mpv_create()
 	if mpv == nil {
-		return errors.New("mpv_create returned nil (libmpv missing / OOM)")
+		return fmt.Errorf("mpv_create returned nil (api version: %d.%d, errno: %v; OOM or mismatch)", major, minor, err)
 	}
 	defer C.mpv_terminate_destroy(mpv)
 

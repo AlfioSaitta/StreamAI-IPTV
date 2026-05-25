@@ -145,7 +145,7 @@ const SectionTitle: React.FC<{ icon: React.ElementType; children: React.ReactNod
   </h4>
 );
 
-const StreamDiagnostics: React.FC<StreamDiagnosticsProps> = ({
+const StreamDiagnostics: React.FC<StreamDiagnosticsProps> = React.memo(({
   open,
   onClose,
   channelName,
@@ -266,17 +266,17 @@ const StreamDiagnostics: React.FC<StreamDiagnosticsProps> = ({
           <Card padding="md" elevation="raised">
             <SectionTitle icon={Zap}>Host GPU &amp; HW decode</SectionTitle>
             <Row
-              label="Video decode (Chromium)"
+              label={gpu.platform === 'wails' ? "Video decode (libmpv)" : "Video decode (Chromium)"}
               value={
                 <span className={gpu.accelerated ? 'text-state-success' : 'text-state-warning'}>
                   {gpu.accelerated ? 'Hardware' : 'Software'}
                   <span className="ml-2 text-content-muted">({gpu.videoDecode})</span>
                 </span>
               }
-              hint="da app.getGPUFeatureStatus()"
+              hint={gpu.platform === 'wails' ? "da mpv property: hwdec-current" : "da app.getGPUFeatureStatus()"}
             />
             {gpu.switches.useGl && <Row label="GL backend" value={gpu.switches.useGl} />}
-erèp            {gpu.switches.useAngle && <Row label="ANGLE backend" value={gpu.switches.useAngle} />}
+            {gpu.switches.useAngle && <Row label="ANGLE backend" value={gpu.switches.useAngle} />}
             {gpu.switches.ozonePlatform && <Row label="Ozone platform" value={gpu.switches.ozonePlatform} />}
             {gpu.disabledByUser && (
               <Row label="Override utente" value={<span className="text-state-warning">STREAMAI_DISABLE_HW=1</span>} />
@@ -517,7 +517,7 @@ erèp            {gpu.switches.useAngle && <Row label="ANGLE backend" value={gpu
       </footer>
     </aside>
   );
-};
+});
 
 export default StreamDiagnostics;
 

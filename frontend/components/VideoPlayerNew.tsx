@@ -19,8 +19,11 @@ import { usePlayerMediaSession } from '../hooks/usePlayerMediaSession';
 import { useRemoteControl } from '../hooks/useRemoteControl';
 import { useNativePlayerEngine } from '../hooks/useNativePlayerEngine';
 import { useWebPlayerEngine } from '../hooks/useWebPlayerEngine';
+import { useNativeMpvEngine } from '../hooks/useNativeMpvEngine';
+import { useMpvCanvasRenderer } from '../hooks/useMpvCanvasRenderer';
 import { useEpg } from '../hooks/useEpg';
 import { useAutoNextEpisode } from '../hooks/useAutoNextEpisode';
+import { usePlayerErrorRing } from '../hooks/usePlayerErrorRing';
 import { useSleepTimer, formatSleepRemaining } from '../hooks/useSleepTimer';
 import CastDevicePicker from './CastDevicePicker';
 import MiniEpgOverlay from './MiniEpgOverlay';
@@ -28,7 +31,6 @@ import AutoNextOverlay from './player/AutoNextOverlay';
 import SleepTimerMenu from './player/SleepTimerMenu';
 import StreamDiagnostics, {
   type BufferStats,
-  type RecentPlaybackError,
 } from './player/StreamDiagnostics';
 import type { StreamCodecInfo } from '../services/streamInfoService';
 import {
@@ -90,6 +92,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
 }) => {
   // Refs
   const videoRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const playerRef = useRef<Player | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const controlsTimeoutRef = useRef<number | null>(null);
@@ -102,6 +105,8 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   const nativeProgressIntervalRef = useRef<number | null>(null);
   const playerEngineRef = useRef<PlayerEngine>('videojs');
   const lastSourceRef = useRef<string | null>(null);
+  const pauseTimeRef = useRef<number | null>(null);
+  const mpvHasSeekedRef = useRef(false);
 
   // State
   const [isPlaying, setIsPlaying] = useState(false);
@@ -126,7 +131,9 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   const [showInfoPanel, setShowInfoPanel] = useState(false);
   const [streamInfoData, setStreamInfoData] = useState<StreamCodecInfo | null>(null);
   const [bufferStats, setBufferStats] = useState<BufferStats | null>(null);
-  const [recentErrors, setRecentErrors] = useState<RecentPlaybackError[]>([]);
+  // Ring buffer ultimi 10 errori → hook standalone (REF-1.a). Lo stato
+  // è derivato da `playbackError`: useEffect interno appende/dedup.
+  const { recentErrors, clear: clearRecentErrors } = usePlayerErrorRing(playbackError);
   const [infoLoading, setInfoLoading] = useState(false);
   const [streamSourceInfo, setStreamSourceInfo] = useState<StreamSourceInfo | null>(null);
   const [nativePiPSupported, setNativePiPSupported] = useState(false);
@@ -147,6 +154,29 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
 
   // OSD (extracted hook)
   const { osd, showOsd } = usePlayerOsd();
+
+  // Native MPV (Wails v3 + libmpv) engine.
+  const isMpv = playerEngineRef.current === 'mpv';
+  const { 
+    state: mpvState, 
+    tracks: mpvTracks, 
+    hwInfo: mpvHwInfo, 
+    stop: stopMpv, 
+    load: loadMpv,
+    play: playMpv,
+    pause: pauseMpv,
+    seek: seekMpv,
+    setVolume: setVolumeMpv,
+    setMuted: setMutedMpv,
+    setAid: setAidMpv,
+    refresh: refreshMpv,
+    error: mpvError
+  } = useNativeMpvEngine({
+    poll: isMpv,
+  });
+
+  // Start the RAF loop to draw libmpv frames to canvas.
+  useMpvCanvasRenderer(canvasRef, isMpv);
 
   // EPG (D.1) — only loads when the channel is Live and we have a tvgId + creds.
   const isLive = channel?.type === 'live';
@@ -221,6 +251,13 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         .catch(err => console.warn('[Player] Native timeline seek failed:', err));
       return;
     }
+
+    if (isMpv) {
+      seekMpv(time).catch(err => console.warn('[Player] MPV timeline seek failed:', err));
+      setCurrentTime(time);
+      return;
+    }
+
     if (!playerRef.current) return;
     // Prefer videoEl.fastSeek() when available — lands on the nearest keyframe
     // without decoding the intermediate frames, which is dramatically faster
@@ -233,7 +270,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       playerRef.current.currentTime(time);
     }
     setCurrentTime(time);
-  }, [isUsingNativePlayer]);
+  }, [isUsingNativePlayer, isMpv, seekMpv]);
 
   const {
     timelineRef,
@@ -291,7 +328,12 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       }
       mpegtsRef.current = null;
     }
-  }, []);
+
+    // Wails libmpv engine cleanup.
+    if (playerEngineRef.current === 'mpv') {
+      stopMpv().catch(() => {});
+    }
+  }, [stopMpv]);
 
   const scheduleRetry = useCallback((reason: PlaybackErrorState) => {
     if (!reason.canRetry || retryTimerRef.current) return;
@@ -350,22 +392,35 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
 
   const updateStreamInfo = useCallback(async () => {
     if (!channel) return;
+    setShowInfoPanel(true);
     const videoElement = playerRef.current?.el()?.querySelector('video') as HTMLVideoElement | null;
     setInfoLoading(true);
     try {
+      if (isMpv) {
+        await refreshMpv();
+      }
       const info = await streamInfoService.collectInfoAsync(videoElement, hlsRef.current, mpegtsRef.current, channel.url);
+      
+      // Integrate MPV hardware info if using MPV engine (Fase 6.1).
+      if (isMpv && mpvHwInfo) {
+        info.hardwareAccelerated = mpvHwInfo.accelerated;
+        if (mpvHwInfo.videoCodec) info.videoCodec = mpvHwInfo.videoCodec;
+        if (mpvHwInfo.videoCodecId) info.videoCodecId = mpvHwInfo.videoCodecId;
+        if (mpvHwInfo.hwdecCurrent) {
+          info.supportDetails = `MPV: ${mpvHwInfo.hwdecCurrent}${mpvHwInfo.accelerated ? ' (HW)' : ' (SW)'}`;
+        }
+      }
+
       setStreamInfoData(info);
       setBufferStats(computeBufferStats(videoElement));
-      setShowInfoPanel(true);
     } catch (e) {
       console.warn('[Player] Stream diagnostics failed', e);
       setStreamInfoData(null);
       setBufferStats(computeBufferStats(videoElement));
-      setShowInfoPanel(true);
     } finally {
       setInfoLoading(false);
     }
-  }, [channel, computeBufferStats]);
+  }, [channel, computeBufferStats, isMpv, mpvHwInfo, refreshMpv]);
 
   // Build a human-readable bug report combining channel metadata, the
   // classified PlaybackError, the source detection and basic environment
@@ -377,8 +432,8 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     lines.push(`Timestamp: ${ts}`);
 
     // Environment
-    const platform = platformService.isElectron
-      ? 'electron'
+    const platform = platformService.isDesktop
+      ? 'wails'
       : platformService.isNative
         ? 'capacitor/native'
         : 'web';
@@ -510,34 +565,19 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     }
   }, [buildErrorReport, showOsd]);
 
-  // P8.2 — Track recent playback errors (ring buffer, max 10) for the
-  // diagnostics screen. We snapshot whenever `playbackError` transitions
-  // from null → non-null.
-  const lastErrorRef = useRef<PlaybackErrorState | null>(null);  useEffect(() => {
-    if (playbackError && playbackError !== lastErrorRef.current) {
-      lastErrorRef.current = playbackError;
-      setRecentErrors(prev => [
-        {
-          ts: Date.now(),
-          title: playbackError.title,
-          message: playbackError.message,
-          category: playbackError.category,
-        },
-        ...prev,
-      ].slice(0, 10));
-    }
-    if (!playbackError) lastErrorRef.current = null;
-  }, [playbackError]);
+  // P8.2 — Recent playback errors (ring buffer, max 10) — vedi
+  // `hooks/usePlayerErrorRing.ts`. Lo stato è derivato da `playbackError`
+  // (snapshot + dedup per identità) e consumato da `StreamDiagnostics`.
 
   // Refresh buffer stats periodically while the diagnostics panel is open.
   useEffect(() => {
-    if (!showInfoPanel) return;
+    if (!showInfoPanel || isMpv) return;
     const id = window.setInterval(() => {
       const videoElement = playerRef.current?.el()?.querySelector('video') as HTMLVideoElement | null;
       setBufferStats(computeBufferStats(videoElement));
     }, 1000);
     return () => window.clearInterval(id);
-  }, [showInfoPanel, computeBufferStats]);
+  }, [showInfoPanel, isMpv, computeBufferStats]);
 
   // --- CONTROLS LOGIC ---
 
@@ -546,6 +586,11 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       const action = isPlaying ? nativeVideoPlayer.pause() : nativeVideoPlayer.resume();
       action
         .then(() => {
+          if (isPlaying) {
+             pauseTimeRef.current = Date.now();
+          } else {
+             pauseTimeRef.current = null;
+          }
           setIsPlaying(prev => !prev);
           showOsd(isPlaying
             ? <Pause className="w-12 h-12 text-white" fill="white" />
@@ -560,6 +605,41 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       return;
     }
 
+    if (isMpv) {
+      if (isPlaying) {
+        pauseTimeRef.current = Date.now();
+        pauseMpv().catch(err => console.warn('[Player] MPV pause failed:', err));
+      } else {
+        // C.4 — Ripristino intelligente per Live: se la pausa è durata > 45s,
+        // ricarichiamo lo stream per evitare buffer obsoleti o link scaduti.
+        const pauseDuration = pauseTimeRef.current ? (Date.now() - pauseTimeRef.current) : 0;
+        pauseTimeRef.current = null;
+
+        if (channel?.type === 'live' && pauseDuration > 45000) {
+          console.info('[Player] Pausa prolungata su Live (>45s), ricarico stream...');
+          setIsBuffering(true);
+          loadMpv(channel.url).catch(err => {
+             console.error('[Player] MPV reload failed:', err);
+             setError('Impossibile ricaricare lo stream live');
+          });
+        } else {
+          playMpv().catch(err => {
+            console.warn('[Player] MPV play failed:', err);
+            if (channel?.type === 'live') {
+              console.info('[Player] Attempting reload for live stream after failed play...');
+              loadMpv(channel.url);
+            }
+          });
+        }
+      }
+      showOsd(isPlaying
+        ? <Pause className="w-12 h-12 text-white" fill="white" />
+        : <Play className="w-12 h-12 text-white" fill="white" />,
+        isPlaying ? 'Pausa' : 'Play'
+      );
+      return;
+    }
+
     if (playerRef.current) {
       if (playerRef.current.paused()) {
         playerRef.current.play();
@@ -569,7 +649,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         showOsd(<Pause className="w-12 h-12 text-white" fill="white" />, "Pausa");
       }
     }
-  }, [isPlaying, isUsingNativePlayer, showOsd]);
+  }, [isPlaying, isUsingNativePlayer, isMpv, pauseMpv, playMpv, showOsd]);
 
   const skip = useCallback((seconds: number) => {
     if (isUsingNativePlayer) {
@@ -578,6 +658,18 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         .then(() => setCurrentTime(newTime))
         .catch(err => console.warn('[Player] Native seek failed:', err));
 
+      if (seconds > 0) {
+        showOsd(<FastForward className="w-12 h-12 text-white" />, `+${seconds}s`);
+      } else {
+        showOsd(<Rewind className="w-12 h-12 text-white" />, `${seconds}s`);
+      }
+      return;
+    }
+
+    if (isMpv) {
+      const newTime = Math.max(0, currentTime + seconds);
+      seekMpv(newTime).catch(err => console.warn('[Player] MPV seek failed:', err));
+      
       if (seconds > 0) {
         showOsd(<FastForward className="w-12 h-12 text-white" />, `+${seconds}s`);
       } else {
@@ -596,7 +688,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         showOsd(<Rewind className="w-12 h-12 text-white" />, `${seconds}s`);
       }
     }
-  }, [currentTime, isUsingNativePlayer, showOsd]);
+  }, [currentTime, isUsingNativePlayer, isMpv, seekMpv, showOsd]);
 
   // NOTE: the legacy `handleSeek` (input[type=range] onChange) was removed
   // on 2026-05-13 as part of URG-1 (seek-storm fix). All seeks now go
@@ -630,6 +722,18 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       return;
     }
 
+    if (isMpv) {
+      const newMuted = !isMuted;
+      setMutedMpv(newMuted).catch(err => console.warn('[Player] MPV mute failed:', err));
+      
+      showOsd(newMuted
+        ? <VolumeX className="w-12 h-12 text-white" />
+        : <Volume2 className="w-12 h-12 text-white" />,
+        newMuted ? 'Muto' : 'Audio Attivo'
+      );
+      return;
+    }
+
     if (playerRef.current) {
       const newMuted = !playerRef.current.muted();
       playerRef.current.muted(newMuted);
@@ -646,7 +750,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         }
       }
     }
-  }, [isMuted, isUsingNativePlayer, showOsd]);
+  }, [isMuted, isUsingNativePlayer, isMpv, setMutedMpv, showOsd]);
 
   const handleVolumeChange = useCallback((e: React.ChangeEvent<HTMLInputElement> | number) => {
     const newVolume = typeof e === 'number' ? e : parseFloat(e.target.value);
@@ -659,6 +763,22 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
           return nativeVideoPlayer.setMuted(nextMuted);
         })
         .catch(err => console.warn('[Player] Native volume failed:', err));
+
+      let Icon = Volume2;
+      if (newVolume === 0) Icon = VolumeX;
+      else if (newVolume < 0.5) Icon = Volume1;
+      if (typeof e === 'number') {
+        showOsd(<Icon className="w-12 h-12 text-white" />, `${Math.round(newVolume * 100)}%`);
+      }
+      return;
+    }
+
+    if (isMpv) {
+      setVolumeMpv(newVolume).catch(err => console.warn('[Player] MPV volume failed:', err));
+      setVolume(newVolume);
+      const nextMuted = newVolume === 0;
+      setIsMuted(nextMuted);
+      setMutedMpv(nextMuted).catch(() => undefined);
 
       let Icon = Volume2;
       if (newVolume === 0) Icon = VolumeX;
@@ -690,7 +810,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         showOsd(<Icon className="w-12 h-12 text-white" />, `${Math.round(newVolume * 100)}%`);
       }
     }
-  }, [isUsingNativePlayer, showOsd]);
+  }, [isUsingNativePlayer, isMpv, setVolumeMpv, setMutedMpv, showOsd]);
 
   const togglePiP = useCallback(async () => {
     if (isUsingNativePlayer) {
@@ -741,14 +861,18 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     }
   };
 
-  const handleAudioTrackChange = (trackId: string) => {
+  const handleAudioTrackChange = (trackId: string | number) => {
+    if (isMpv) {
+      const aid = typeof trackId === 'string' ? parseInt(trackId) : trackId;
+      void setAidMpv(aid);
+      return;
+    }
     if (playerRef.current) {
       const tracks = playerRef.current.audioTracks() as any;
       for (let i = 0; i < tracks.length; i++) {
         const track = tracks[i];
         track.enabled = track.id === trackId;
       }
-      // Lo stato locale verrà aggiornato automaticamente dall'event listener 'change' aggiunto nel useEffect
     }
   };
 
@@ -757,14 +881,29 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
 
   // Broadcast status to remote devices
   const broadcastStatus = useCallback((force = false) => {
-    if (!platformService.isDesktop || !host?.updatePlaybackStatus || !playerRef.current || playerRef.current.isDisposed()) return;
+    if (!platformService.isDesktop || !host?.updatePlaybackStatus) return;
+    
+    let cur: number;
+    let dur: number;
+    let playing: boolean;
+
+    if (isMpv) {
+      if (!mpvState) return;
+      cur = mpvState.position;
+      dur = mpvState.duration;
+      playing = mpvState.playing;
+    } else if (playerRef.current && !playerRef.current.isDisposed()) {
+      cur = playerRef.current.currentTime() || 0;
+      dur = playerRef.current.duration() || 0;
+      playing = !playerRef.current.paused();
+    } else {
+      return;
+    }
 
     // Throttle broadcast: non più di una volta ogni 500ms, a meno che non sia forzato
     const now = Date.now();
     if (!force && now - lastBroadcastRef.current < 500) return;
     lastBroadcastRef.current = now;
-
-    const player = playerRef.current;
     
     // Extract series info if possible
     let seriesInfo = {};
@@ -785,13 +924,13 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       cleanName: channel?.cleanName,
       logo: channel?.logo,
       group: channel?.group,
-      currentTime: player.currentTime() || 0,
-      duration: player.duration() || 0,
-      isPlaying: !player.paused(),
+      currentTime: cur,
+      duration: dur,
+      isPlaying: playing,
       type: channel?.type,
       ...seriesInfo
     });
-  }, [channel]);
+  }, [channel, isMpv, mpvState]);
 
   // --- KEYBOARD SHORTCUTS (extracted hook) ---
   usePlayerShortcuts(
@@ -839,7 +978,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     setShowMiniEpg(false);
     setStreamInfoData(null);
     setBufferStats(null);
-    setRecentErrors([]);
+    clearRecentErrors();
     setAudioTracks([]);
     setNativePiPSupported(false);
     setVodProbe(null);
@@ -856,7 +995,9 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     }
     const detectedSource = detectStreamSource(source, channel.type);
     setStreamSourceInfo(detectedSource);
-    playerEngineRef.current = platformService.isNative ? 'native' : detectedSource.engine;
+    playerEngineRef.current = platformService.isNative 
+      ? 'native' 
+      : (platformService.isWails ? 'mpv' : detectedSource.engine);
     setIsUsingNativePlayer(platformService.isNative);
     if (platformService.isNative) {
       setIsBuffering(false);
@@ -919,6 +1060,87 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     isBuffering,
     onVodProbeResult: setVodProbe,
   });
+
+  // Sync MPV state back to VideoPlayer state.
+  useEffect(() => {
+    if (!isMpv || !mpvState) return;
+    
+    setIsPlaying(mpvState.playing);
+    setIsBuffering(!mpvState.loaded && mpvState.paused === false);
+    setCurrentTime(mpvState.position);
+    setDuration(mpvState.duration);
+    setVolume(mpvState.volume);
+    setIsMuted(mpvState.muted);
+    
+    // Sincronizza tracce audio.
+    const audio = mpvTracks
+      .filter(t => t.type === 'audio')
+      .map(t => ({
+        id: t.id,
+        label: t.title || t.codec || `Traccia ${t.id}`,
+        language: t.lang,
+        enabled: t.selected,
+      }));
+    setAudioTracks(audio);
+
+    // Sincronizza tracce sottotitoli (quelle interne allo stream).
+    // Nota: i sottotitoli sottotitoli sideloaded (D.4) sono gestiti separatamente 
+    // dal subtitleService.
+  }, [isMpv, mpvState, mpvTracks]);
+
+  // Notifica il progresso al chiamante (App.tsx) quando si usa MPV.
+  // Gli altri motori (web/native) chiamano onProgress internamente.
+  useEffect(() => {
+    if (isMpv && onProgress && currentTime > 0) {
+      onProgress(currentTime, duration);
+    }
+  }, [isMpv, currentTime, duration, onProgress]);
+
+  // Handle MPV errors.
+  useEffect(() => {
+    if (!isMpv || !mpvError) return;
+    
+    setError(mpvError.message);
+    setPlaybackError({
+      title: 'Errore Backend MPV',
+      message: mpvError.message,
+      category: 'native',
+      canRetry: true,
+      retryCount: retryCountRef.current,
+      technicalDetails: [mpvError.stack || 'No stack trace'],
+    });
+  }, [isMpv, mpvError]);
+
+  // Load source into MPV when channel changes.
+  useEffect(() => {
+    if (!isMpv || !channel) return;
+    
+    // Reset seek flag for new channel
+    mpvHasSeekedRef.current = false;
+
+    const startMpv = async () => {
+      try {
+        await loadMpv(channel.url);
+        // Explicit play to ensure auto-playback on all content types (FIX: movies auto-play).
+        await playMpv();
+      } catch (err) {
+        console.warn('[Player] MPV start failed:', err);
+      }
+    };
+    void startMpv();
+  }, [isMpv, channel, retryNonce, loadMpv, playMpv]);
+
+  // Handle initial seek for MPV (VOD resume) when duration becomes available.
+  useEffect(() => {
+    if (isMpv && channel && initialProgress && mpvState?.duration && !mpvHasSeekedRef.current) {
+      // Apply seek if it's a significant progress (avoiding near-start/near-end edge cases).
+      if (initialProgress > 0.01 && initialProgress < 0.99) {
+        const targetSeconds = mpvState.duration * initialProgress;
+        void seekMpv(targetSeconds);
+      }
+      mpvHasSeekedRef.current = true;
+    }
+  }, [isMpv, channel, initialProgress, mpvState?.duration, seekMpv]);
 
   // Media Session API integration (extracted hook)
   usePlayerMediaSession({
@@ -1054,12 +1276,13 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     };
   }, [isPlaying]);
 
-  // Detach any sideloaded subtitle on unmount to free the Blob URL (D.4).
+  // Detach any sideloaded subtitle and stop engines on unmount.
   useEffect(() => {
     return () => {
+      cleanupPlaybackEngines();
       subtitleService.detach();
     };
-  }, []);
+  }, [cleanupPlaybackEngines]);
 
   if (!channel) return <div className="w-full h-full flex items-center justify-center bg-black text-gray-400">Seleziona un canale</div>;
 
@@ -1107,7 +1330,16 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
 
   return (
     <div ref={containerRef} className="relative w-full h-full bg-black overflow-hidden select-none">
-      <div ref={videoRef} className="w-full h-full bg-black" />
+      {isMpv ? (
+        <canvas
+          ref={canvasRef}
+          className="w-full h-full bg-black object-contain pointer-events-auto"
+          onDoubleClick={toggleFullscreen}
+          onClick={togglePlay}
+        />
+      ) : (
+        <div ref={videoRef} className="w-full h-full bg-black" />
+      )}
 
       {/* OSD Overlay */}
       {osd.visible && (
@@ -1323,8 +1555,22 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
           </div>
         </div>
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          {!isPlaying && !isBuffering && (
-            <button onClick={togglePlay} aria-label="Play" title="Play (Spazio)" className="tv-focus p-6 rounded-full bg-white/20 hover:bg-white/30 pointer-events-auto"><Play className="w-16 h-16 text-white" fill="white" /></button>
+          {isBuffering && (
+            <div className="flex flex-col items-center gap-4">
+              <Loader2 className="w-16 h-16 text-brand-primary animate-spin" />
+              <span className="text-white/70 text-sm font-medium animate-pulse tracking-widest uppercase">Caricamento...</span>
+            </div>
+          )}
+          {!isPlaying && !isBuffering && !osd.visible && showControls && (
+             <div className="bg-black/40 backdrop-blur-md p-8 rounded-full border border-white/10 animate-in zoom-in duration-300 pointer-events-auto">
+                <button 
+                  onClick={togglePlay} 
+                  aria-label="Play" 
+                  className="tv-focus touch-target group"
+                >
+                  <Play className="w-16 h-16 text-white group-hover:scale-110 transition-transform" fill="white" />
+                </button>
+             </div>
           )}
         </div>
         <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 to-transparent">

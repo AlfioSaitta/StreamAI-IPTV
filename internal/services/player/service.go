@@ -28,6 +28,8 @@ package player
 
 import (
 	"errors"
+	"net/http"
+	"strconv"
 	"sync"
 )
 
@@ -122,6 +124,13 @@ type backend interface {
 	BufferInfo() (BufferInfo, error)
 	State() (State, error)
 	HwInfo() (HwAccelInfo, error)
+	// RenderFrame disegna il frame video corrente di libmpv in un buffer
+	// RGBA in memoria (path SW, MPV_RENDER_API_TYPE_SW, "rgb0" pixfmt).
+	// Lunghezza buffer = w*h*4, stride = w*4. Vedi mpv_cgo.go.RenderFrame
+	// per i costi (decoder + colorspace conversion in CPU dentro libmpv).
+	// Fase 6.1 Stage A: path RGBA readback "slow but everywhere"; lo
+	// switch a OpenGL render-API + zero-copy DMA-BUF è in Stage B.
+	RenderFrame(width, height int) ([]byte, error)
 	Close() error
 }
 
@@ -130,17 +139,31 @@ type backend interface {
 // wails:bindings`) sotto frontend/bindings/.../player/service.ts.
 //
 // Thread-safety: tutti i metodi sono safe per chiamata concorrente dal
-// frontend; il lock protegge il puntatore al backend (lazy-init al
-// primo Load) e il riferimento all'app per emit di eventi.
+// frontend; `mu` protegge il puntatore al backend (lazy-init al primo
+// Load); `evMu` protegge i subscribers e i metadati track-level (vedi
+// events.go).
 type Service struct {
 	mu      sync.Mutex
 	backend backend
+
+	// Subscriber pattern + metadati track-level (Fase 6.5, events.go).
+	evMu           sync.RWMutex
+	subscribers    []subscriber
+	sourceURL      string
+	trackTitle     string
+	trackArtist    string
+	trackArtURL    string
+	watcherRunning bool
+	watcherStop    chan struct{}
 }
 
 // New costruisce il servizio. Il backend reale è creato a build-time
 // (vedi mpv_cgo.go / mpv_stub.go) tramite il selettore `newBackend()`.
 func New() *Service {
-	return &Service{backend: newBackend()}
+	return &Service{
+		backend:     newBackend(),
+		watcherStop: make(chan struct{}),
+	}
 }
 
 // ServiceShutdown rilascia le risorse del backend (mpv_terminate_destroy).
@@ -149,6 +172,19 @@ func New() *Service {
 // a essere chiuso (post-cast/remote/netstatus), così l'audio output
 // non viene tagliato prima che l'UI abbia salvato l'history watch.
 func (s *Service) ServiceShutdown() error {
+	// Ferma il watcher events (events.go) prima di chiudere il backend.
+	s.evMu.Lock()
+	if s.watcherRunning {
+		// Drena il channel se gia' chiuso (idempotenza shutdown multipli).
+		select {
+		case <-s.watcherStop:
+		default:
+			close(s.watcherStop)
+		}
+		s.watcherRunning = false
+	}
+	s.evMu.Unlock()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.backend == nil {
@@ -163,47 +199,103 @@ func (s *Service) ServiceShutdown() error {
 // → qui basta passare l'URL `127.0.0.1:<port>/proxy?u=...`.
 func (s *Service) Load(url string, headers map[string]string) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.backend.Load(url, headers)
+	err := s.backend.Load(url, headers)
+	s.mu.Unlock()
+	if err == nil {
+		s.evMu.Lock()
+		s.sourceURL = url
+		s.evMu.Unlock()
+		s.emitState()
+	}
+	return err
 }
 
 // Play / Pause / Stop comandi di playback base.
-func (s *Service) Play() error  { s.mu.Lock(); defer s.mu.Unlock(); return s.backend.Play() }
-func (s *Service) Pause() error { s.mu.Lock(); defer s.mu.Unlock(); return s.backend.Pause() }
-func (s *Service) Stop() error  { s.mu.Lock(); defer s.mu.Unlock(); return s.backend.Stop() }
+func (s *Service) Play() error {
+	s.mu.Lock()
+	err := s.backend.Play()
+	s.mu.Unlock()
+	if err == nil {
+		s.emitState()
+	}
+	return err
+}
+
+func (s *Service) Pause() error {
+	s.mu.Lock()
+	err := s.backend.Pause()
+	s.mu.Unlock()
+	if err == nil {
+		s.emitState()
+	}
+	return err
+}
+
+func (s *Service) Stop() error {
+	s.mu.Lock()
+	err := s.backend.Stop()
+	s.mu.Unlock()
+	if err == nil {
+		// Reset metadata su Stop esplicito.
+		s.evMu.Lock()
+		s.sourceURL = ""
+		s.trackTitle = ""
+		s.trackArtist = ""
+		s.trackArtURL = ""
+		s.evMu.Unlock()
+		s.emitState()
+	}
+	return err
+}
 
 // Seek cerca a posizione assoluta in secondi.
 func (s *Service) Seek(seconds float64) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.backend.Seek(seconds)
+	err := s.backend.Seek(seconds)
+	s.mu.Unlock()
+	if err == nil {
+		s.emitState()
+	}
+	return err
 }
 
 // SetVolume imposta volume 0.0..1.0. Valori fuori range vengono clampati.
 func (s *Service) SetVolume(v float64) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if v < 0 {
 		v = 0
 	}
 	if v > 1 {
 		v = 1
 	}
-	return s.backend.SetVolume(v)
+	s.mu.Lock()
+	err := s.backend.SetVolume(v)
+	s.mu.Unlock()
+	if err == nil {
+		s.emitState()
+	}
+	return err
 }
 
 // SetMuted attiva/disattiva mute.
 func (s *Service) SetMuted(m bool) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.backend.SetMuted(m)
+	err := s.backend.SetMuted(m)
+	s.mu.Unlock()
+	if err == nil {
+		s.emitState()
+	}
+	return err
 }
 
 // SetSpeed velocità di riproduzione (1.0 = normale, 0.5 = lento, 2.0 = veloce).
 func (s *Service) SetSpeed(speed float64) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.backend.SetSpeed(speed)
+	err := s.backend.SetSpeed(speed)
+	s.mu.Unlock()
+	if err == nil {
+		s.emitState()
+	}
+	return err
 }
 
 // SetAid / SetSid selezionano traccia audio / sottotitolo per ID
@@ -281,5 +373,81 @@ func (s *Service) HwAccelInfo() (HwAccelInfo, error) {
 		return HwAccelInfo{Built: false, Error: err.Error()}, nil
 	}
 	return info, err
+}
+
+// AssetMiddlewarePath è il path same-origin servito dall'asset server di
+// Wails per esporre i frame RGBA decodificati da libmpv (Fase 6.1 Stage A).
+// La webview blocca le fetch verso server HTTP standalone su 127.0.0.1
+// per mixed-content/CORS (stesso problema del proxy IPTV, vedi
+// `proxy.AssetMiddlewarePath`); montare l'endpoint come middleware
+// dell'asset server permette al frontend di fare `fetch('/player/frame?w=W&h=H')`
+// dal documento `wails://wails.localhost`.
+//
+// Query params:
+//   - w (int, required): larghezza frame in pixel
+//   - h (int, required): altezza frame in pixel
+//
+// Response body: w*h*4 bytes raw, pixel format "rgb0" (R,G,B,X — alpha
+// indefinita). Content-Type: application/octet-stream. Headers
+// `X-Frame-Width`/`X-Frame-Height` riflettono w/h ricevuti come sanity-check.
+//
+// Errors:
+//   - 400 Bad Request: w o h mancanti/non numerici/fuori range [16..7680]
+//   - 503 Service Unavailable: backend non compilato con `-tags mpv`
+//     (errNotBuilt) — il frontend mostra il banner standard.
+const AssetMiddlewarePath = "/player/frame"
+
+// RenderFrame disegna il frame corrente di libmpv su un buffer RGBA in
+// memoria Go di dimensione w*h*4. Vedi commento in `backend` interface
+// e `mpv_cgo.go.RenderFrame`. Esposto come binding TS auto-generato (utile
+// per smoke test devtools) e usato internamente da AssetMiddleware().
+func (s *Service) RenderFrame(width, height int) ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.backend.RenderFrame(width, height)
+}
+
+// AssetMiddleware ritorna un middleware HTTP che intercetta le richieste a
+// `AssetMiddlewarePath` (`/player/frame`) e risponde con il buffer RGBA
+// del frame corrente. Lasciare passare tutto il resto al `next` handler.
+// Wiring in `cmd/streamai/main.go` (chain con `proxy.AssetMiddleware`).
+func (s *Service) AssetMiddleware() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != AssetMiddlewarePath {
+				next.ServeHTTP(w, r)
+				return
+			}
+			q := r.URL.Query()
+			width, err := strconv.Atoi(q.Get("w"))
+			if err != nil || width < 16 || width > 7680 {
+				http.Error(w, "invalid query param 'w' (expected 16..7680)", http.StatusBadRequest)
+				return
+			}
+			height, err := strconv.Atoi(q.Get("h"))
+			if err != nil || height < 16 || height > 4320 {
+				http.Error(w, "invalid query param 'h' (expected 16..4320)", http.StatusBadRequest)
+				return
+			}
+			buf, err := s.RenderFrame(width, height)
+			if err != nil {
+				if errors.Is(err, errNotBuilt) {
+					http.Error(w, err.Error(), http.StatusServiceUnavailable)
+					return
+				}
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Header().Set("Content-Length", strconv.Itoa(len(buf)))
+			w.Header().Set("X-Frame-Width", strconv.Itoa(width))
+			w.Header().Set("X-Frame-Height", strconv.Itoa(height))
+			w.Header().Set("X-Pixel-Format", "rgb0")
+			// Frame mai cacheable: ogni richiesta deve riflettere il
+			// frame istantaneo del decoder.
+			w.Header().Set("Cache-Control", "no-store")
+			_, _ = w.Write(buf)
+		})
+	}
 }
 

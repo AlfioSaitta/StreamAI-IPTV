@@ -117,7 +117,7 @@ export const useWebPlayerEngine = (opts: WebPlayerEngineOptions): void => {
   } = opts;
 
   useEffect(() => {
-    if (platformService.isNative) return;
+    if (platformService.isNative || platformService.isWails || detectedSource?.engine === 'mpv') return;
     if (!channel || !detectedSource) return;
     if (!videoRef.current) return;
 

@@ -14,6 +14,8 @@ package player
 
 import (
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -67,6 +69,7 @@ func TestService_StubBackend_PropagatesNotBuilt(t *testing.T) {
 		{"Tracks", func() error { _, err := s.Tracks(); return err }},
 		{"BufferInfo", func() error { _, err := s.BufferInfo(); return err }},
 		{"State", func() error { _, err := s.State(); return err }},
+		{"RenderFrame", func() error { _, err := s.RenderFrame(1920, 1080); return err }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -135,3 +138,49 @@ func (v *volumeRecorder) SetVolume(val float64) error {
 	v.last = val
 	return nil
 }
+
+// TestAssetMiddleware verifica il routing del middleware HTTP
+// `/player/frame`: query param validation, propagazione di errNotBuilt
+// come 503, passthrough verso `next` per path non match. Path RGBA happy
+// non testabile qui (richiede backend mpv reale).
+func TestAssetMiddleware_RoutesAndValidates(t *testing.T) {
+	s := New()
+	called := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	})
+	h := s.AssetMiddleware()(next)
+
+	tests := []struct {
+		name       string
+		path       string
+		wantStatus int
+		wantNext   bool
+	}{
+		{"passthrough unrelated path", "/foo/bar", http.StatusOK, true},
+		{"missing w param", "/player/frame", http.StatusBadRequest, false},
+		{"missing h param", "/player/frame?w=1280", http.StatusBadRequest, false},
+		{"w too small", "/player/frame?w=8&h=720", http.StatusBadRequest, false},
+		{"w too large", "/player/frame?w=9999&h=720", http.StatusBadRequest, false},
+		{"h too small", "/player/frame?w=1280&h=8", http.StatusBadRequest, false},
+		{"non-numeric w", "/player/frame?w=abc&h=720", http.StatusBadRequest, false},
+		// Stub backend → errNotBuilt → 503.
+		{"valid params, stub backend", "/player/frame?w=1280&h=720", http.StatusServiceUnavailable, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			called = false
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d (body: %q)", rec.Code, tc.wantStatus, rec.Body.String())
+			}
+			if called != tc.wantNext {
+				t.Fatalf("next handler called = %v, want %v", called, tc.wantNext)
+			}
+		})
+	}
+}
+
