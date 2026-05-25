@@ -10,11 +10,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"sync"
 
+	"github.com/rs/zerolog/log"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 // Service e' il Wails v3 Service di advertising.
@@ -103,10 +103,12 @@ func (s *Service) Stop() error {
 	return nil
 }
 func (s *Service) stopLocked() {
+	log.Debug().Msg("advertising: stopping sub-services")
 	for _, fn := range s.closers {
 		fn()
 	}
 	s.closers = nil
+	log.Debug().Msg("advertising: sub-services stopped")
 }
 // Status ritorna lo stato corrente: "running" | "stopped" | "error".
 func (s *Service) Status() (string, error) {
@@ -133,7 +135,7 @@ func (s *Service) ServiceStartup(_ context.Context, _ application.ServiceOptions
 		// Errore non fatale: il fallimento dell'advertising non deve
 		// abbattere l'app (mDNS può fallire in container/sandbox dove i
 		// multicast socket sono filtrati). Lo loggiamo e proseguiamo.
-		log.Printf("advertising: ServiceStartup soft-fail: %v", err)
+		log.Warn().Err(err).Msg("advertising: ServiceStartup soft-fail")
 	}
 	return nil
 }
@@ -141,6 +143,9 @@ func (s *Service) ServiceStartup(_ context.Context, _ application.ServiceOptions
 // ServiceShutdown è il lifecycle hook Wails v3 per il teardown:
 // chiude mDNS, SSDP e DIAL HTTP. Replica `app.on('will-quit', ...)`.
 func (s *Service) ServiceShutdown() error {
-	return s.Stop()
+	log.Info().Msg("advertising: ServiceShutdown started")
+	err := s.Stop()
+	log.Info().Err(err).Msg("advertising: ServiceShutdown finished")
+	return err
 }
 

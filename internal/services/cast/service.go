@@ -31,6 +31,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rs/zerolog/log"
 	gocast "github.com/barnybug/go-cast"
 	"github.com/barnybug/go-cast/controllers"
 
@@ -98,7 +99,12 @@ func New() *Service {
 
 // ServiceShutdown chiude la sessione cast e ferma il ticker; invocato
 // da Wails v3 al teardown se il metodo è presente.
-func (s *Service) ServiceShutdown() error { return s.Disconnect() }
+func (s *Service) ServiceShutdown() error {
+	log.Info().Msg("cast: ServiceShutdown started")
+	err := s.Disconnect()
+	log.Info().Err(err).Msg("cast: ServiceShutdown finished")
+	return err
+}
 
 // GetStatus ritorna lo snapshot corrente (non emette evento).
 func (s *Service) GetStatus() Status {
@@ -274,22 +280,27 @@ func (s *Service) Disconnect() error {
 // shutdownAndWait: cancella il ticker fuori dal lock per evitare deadlock
 // con `pollStatus` (che a sua volta riacquisisce s.mu).
 func (s *Service) shutdownAndWait() {
+	log.Debug().Msg("cast: shutdownAndWait started")
 	s.mu.Lock()
 	stop := s.tickStop
 	s.tickStop = nil
 	s.mu.Unlock()
 	if stop != nil {
+		log.Debug().Msg("cast: stopping ticker")
 		stop()
 		s.tickerWG.Wait()
+		log.Debug().Msg("cast: ticker stopped")
 	}
 	s.mu.Lock()
 	if s.client != nil {
+		log.Debug().Msg("cast: closing client")
 		s.client.Close()
 		s.client = nil
 	}
 	s.media = nil
 	s.status = Status{PlayerState: "IDLE", Volume: 1}
 	s.mu.Unlock()
+	log.Debug().Msg("cast: shutdownAndWait finished")
 }
 
 // startTickerLocked: caller deve tenere s.mu.

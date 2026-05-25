@@ -31,6 +31,8 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+
+	"github.com/rs/zerolog/log"
 )
 
 // errNotBuilt è ritornato dal backend stub quando il binario è stato
@@ -172,9 +174,11 @@ func New() *Service {
 // a essere chiuso (post-cast/remote/netstatus), così l'audio output
 // non viene tagliato prima che l'UI abbia salvato l'history watch.
 func (s *Service) ServiceShutdown() error {
+	log.Info().Msg("player: ServiceShutdown started")
 	// Ferma il watcher events (events.go) prima di chiudere il backend.
 	s.evMu.Lock()
 	if s.watcherRunning {
+		log.Debug().Msg("player: stopping event watcher")
 		// Drena il channel se gia' chiuso (idempotenza shutdown multipli).
 		select {
 		case <-s.watcherStop:
@@ -188,9 +192,12 @@ func (s *Service) ServiceShutdown() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.backend == nil {
+		log.Info().Msg("player: ServiceShutdown finished (no backend)")
 		return nil
 	}
-	return s.backend.Close()
+	err := s.backend.Close()
+	log.Info().Err(err).Msg("player: ServiceShutdown finished")
+	return err
 }
 
 // Load apre uno stream. Headers HTTP custom (es. User-Agent IPTV, Cookie,

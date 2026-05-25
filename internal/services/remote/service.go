@@ -26,9 +26,10 @@ import (
 "strconv"
 "sync"
 "time"
-"github.com/coder/websocket"
-"github.com/wailsapp/wails/v3/pkg/application"
-"github.com/AlfioSaitta/StreamAI-IPTV/internal/pkg/wailsevents"
+	"github.com/AlfioSaitta/StreamAI-IPTV/internal/pkg/wailsevents"
+	"github.com/coder/websocket"
+	"github.com/rs/zerolog/log"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 const (
 // DefaultPort porta WS di controllo remoto (uguale a main.js WS_CONTROL_PORT).
@@ -74,25 +75,30 @@ return nil
 }
 // ServiceShutdown chiude listener + tutti i WS attivi.
 func (s *Service) ServiceShutdown() error {
-s.mu.Lock()
-if s.stopped {
-s.mu.Unlock()
-return nil
-}
-s.stopped = true
-srv := s.server
-clients := s.clients
-s.clients = make(map[*websocket.Conn]struct{})
-s.mu.Unlock()
-for c := range clients {
-_ = c.Close(websocket.StatusGoingAway, "server shutting down")
-}
-if srv != nil {
-ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-defer cancel()
-_ = srv.Shutdown(ctx)
-}
-return nil
+	log.Info().Msg("remote: ServiceShutdown started")
+	s.mu.Lock()
+	if s.stopped {
+		s.mu.Unlock()
+		log.Info().Msg("remote: ServiceShutdown finished (already stopped)")
+		return nil
+	}
+	s.stopped = true
+	srv := s.server
+	clients := s.clients
+	s.clients = make(map[*websocket.Conn]struct{})
+	s.mu.Unlock()
+	for c := range clients {
+		_ = c.Close(websocket.StatusGoingAway, "server shutting down")
+	}
+	if srv != nil {
+		log.Debug().Msg("remote: http.Server.Shutdown started")
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+		log.Debug().Msg("remote: http.Server.Shutdown finished")
+	}
+	log.Info().Msg("remote: ServiceShutdown finished")
+	return nil
 }
 // Port ritorna la porta in ascolto.
 func (s *Service) Port() int { return s.port }

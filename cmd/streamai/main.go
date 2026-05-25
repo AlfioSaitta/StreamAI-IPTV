@@ -91,7 +91,11 @@ func main() {
 	if err != nil {
 		log.Warn().Err(err).Msg("StreamAI: single-instance lock soft-fail (continuing without lock)")
 	} else {
-		defer func() { _ = lock.Release() }()
+		defer func() {
+			log.Info().Msg("StreamAI: releasing single-instance lock")
+			_ = lock.Release()
+			log.Info().Msg("StreamAI: single-instance lock released")
+		}()
 	}
 
 	// Wiring Fase 4: remote (WS :1902) e netstatus (UDP multicast :1901)
@@ -341,6 +345,7 @@ func main() {
 		_ = logging.Close()
 		os.Exit(1)
 	}
+	log.Info().Msg("StreamAI: app.Run finished")
 	_ = logging.Close()
 }
 

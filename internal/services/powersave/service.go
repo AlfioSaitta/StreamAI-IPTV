@@ -22,6 +22,7 @@ package powersave
 import (
 	"context"
 
+	"github.com/rs/zerolog/log"
 	"github.com/wailsapp/wails/v3/pkg/application"
 
 	"github.com/AlfioSaitta/StreamAI-IPTV/internal/pkg/powersave"
@@ -47,7 +48,10 @@ func (s *Service) ServiceStartup(_ context.Context, _ application.ServiceOptions
 // invoca ServiceShutdown in reverse-order della registration; vedi
 // cmd/streamai/main.go per l'ordine globale (plan §7-bis.1).
 func (s *Service) ServiceShutdown() error {
-	return s.inh.Uninhibit()
+	log.Info().Msg("powersave: ServiceShutdown started")
+	err := s.inh.Uninhibit()
+	log.Info().Err(err).Msg("powersave: ServiceShutdown finished")
+	return err
 }
 
 // Start acquisisce l'inhibition con `reason` user-facing. Se è già

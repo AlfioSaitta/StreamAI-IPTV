@@ -24,10 +24,12 @@ import (
 "net"
 "os"
 "strconv"
-"sync"
-"time"
-"github.com/wailsapp/wails/v3/pkg/application"
-"github.com/AlfioSaitta/StreamAI-IPTV/internal/pkg/wailsevents"
+	"sync"
+	"time"
+
+	"github.com/AlfioSaitta/StreamAI-IPTV/internal/pkg/wailsevents"
+	"github.com/rs/zerolog/log"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 const (
 // MulticastAddr indirizzo multicast condiviso (uguale a main.js).
@@ -130,27 +132,34 @@ return nil
 }
 // ServiceShutdown chiude socket e ferma loop.
 func (s *Service) ServiceShutdown() error {
-s.mu.Lock()
-if s.stopped {
-s.mu.Unlock()
-return nil
-}
-s.stopped = true
-cancel := s.cancel
-listenConn := s.listenConn
-sendConn := s.sendConn
-s.mu.Unlock()
-if cancel != nil {
-cancel()
-}
-if listenConn != nil {
-_ = listenConn.Close()
-}
-if sendConn != nil {
-_ = sendConn.Close()
-}
-s.wg.Wait()
-return nil
+	log.Info().Msg("netstatus: ServiceShutdown started")
+	s.mu.Lock()
+	if s.stopped {
+		s.mu.Unlock()
+		log.Info().Msg("netstatus: ServiceShutdown finished (already stopped)")
+		return nil
+	}
+	s.stopped = true
+	cancel := s.cancel
+	listenConn := s.listenConn
+	sendConn := s.sendConn
+	s.mu.Unlock()
+	if cancel != nil {
+		log.Debug().Msg("netstatus: canceling context")
+		cancel()
+	}
+	if listenConn != nil {
+		log.Debug().Msg("netstatus: closing listen connection")
+		_ = listenConn.Close()
+	}
+	if sendConn != nil {
+		log.Debug().Msg("netstatus: closing send connection")
+		_ = sendConn.Close()
+	}
+	log.Debug().Msg("netstatus: waiting for goroutines")
+	s.wg.Wait()
+	log.Info().Msg("netstatus: ServiceShutdown finished")
+	return nil
 }
 // UpdatePlaybackStatus invia in broadcast lo stato corrente alle altre
 // istanze StreamAI in LAN, e — se configurato — lo inoltra ai client WS

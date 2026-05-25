@@ -28,7 +28,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -37,6 +36,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rs/zerolog/log"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -110,7 +110,10 @@ func (s *Service) ServiceStartup(_ context.Context, _ application.ServiceOptions
 
 // ServiceShutdown lifecycle Wails v3 — teardown.
 func (s *Service) ServiceShutdown() error {
-	return s.Stop()
+	log.Info().Msg("proxy: ServiceShutdown started")
+	err := s.Stop()
+	log.Info().Err(err).Msg("proxy: ServiceShutdown finished")
+	return err
 }
 
 // Start avvia il proxy. Idempotente.
@@ -140,7 +143,7 @@ func (s *Service) Start() error {
 	s.port = ln.Addr().(*net.TCPAddr).Port
 	s.started = true
 	s.closers = append(s.closers, func() { _ = srv.Close() })
-	log.Printf("proxy: listening on http://127.0.0.1:%d%s (insecure=%v)", s.port, proxyPath, s.insecure)
+	log.Info().Int("port", s.port).Bool("insecure", s.insecure).Msg("proxy: listening")
 	return nil
 }
 
@@ -151,6 +154,7 @@ func (s *Service) Stop() error {
 	if !s.started {
 		return nil
 	}
+	log.Debug().Msg("proxy: stopping server")
 	for _, fn := range s.closers {
 		fn()
 	}

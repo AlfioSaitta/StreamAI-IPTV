@@ -36,6 +36,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 // ErrAlreadyRunning indica che un'altra istanza ha già il lock. Il
@@ -182,6 +184,7 @@ func (l *Lock) acceptLoop(onFocus func()) {
 // Idempotente. Il file lock viene rilasciato automaticamente alla
 // chiusura del descrittore o all'exit del processo.
 func (l *Lock) Release() error {
+	log.Debug().Msg("singleinstance: Release started")
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.released {
@@ -189,14 +192,23 @@ func (l *Lock) Release() error {
 	}
 	l.released = true
 	if l.listener != nil {
+		log.Debug().Msg("singleinstance: closing listener")
 		_ = l.listener.Close()
-		<-l.stopped
+		log.Debug().Msg("singleinstance: waiting for acceptLoop to stop")
+		select {
+		case <-l.stopped:
+			log.Debug().Msg("singleinstance: acceptLoop stopped")
+		case <-time.After(1 * time.Second):
+			log.Warn().Msg("singleinstance: acceptLoop stop timeout")
+		}
 	}
 	_ = os.Remove(l.socketPath)
 	if l.lockFile != nil {
+		log.Debug().Msg("singleinstance: releasing flock")
 		_ = unflock(l.lockFile)
 		_ = l.lockFile.Close()
 	}
+	log.Debug().Msg("singleinstance: Release finished")
 	return nil
 }
 

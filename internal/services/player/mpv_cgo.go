@@ -82,6 +82,8 @@ import (
 	"strings"
 	"sync"
 	"unsafe"
+
+	"github.com/rs/zerolog/log"
 )
 
 func newBackend() backend { return &cgoBackend{} }
@@ -569,14 +571,18 @@ func (b *cgoBackend) Close() error {
 	if b.handle == nil {
 		return nil
 	}
+	log.Debug().Msg("player: mpv_terminate_destroy started")
 	// Ordine teardown: prima il render context (che osserva mpv),
 	// poi terminate_destroy.
 	if b.renderCtx != nil {
+		log.Debug().Msg("player: mpv_render_context_free started")
 		C.mpv_render_context_free(b.renderCtx)
 		b.renderCtx = nil
+		log.Debug().Msg("player: mpv_render_context_free finished")
 	}
 	C.mpv_terminate_destroy(b.handle)
 	b.handle = nil
+	log.Debug().Msg("player: mpv_terminate_destroy finished")
 	return nil
 }
 

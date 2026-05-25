@@ -47,6 +47,9 @@
 - [x] **PLAYER-PROGRESS-1** — Incoerenza globale dati progresso (secondi vs percentuale).
   Root cause: `App.tsx` salvava secondi invece di 0..1, causando seek errati o mancanti.
   **Fix landed 2026-05-25:** centralizzato il calcolo della percentuale (0..1) in `App.tsx → handleVideoProgress`.
+- [x] **NET-NOTIF-1** — Notifica "In riproduzione su..." persistente.
+  Root cause: gli eventi `network-playback-status` UDP (frequenti) resettavano continuamente il timeout di 10s.
+  **Fix landed 2026-05-25:** implementato auto-dismiss a 8s con cooldown di 60s per lo stesso contenuto e dispositivo. Aggiunta chiusura immediata se `isPlaying: false`.
 
 ## 🆕 Sessione 2026-05-23/24 — Xtream + EPG dopo drop Electron
 
@@ -104,6 +107,13 @@
 - [x] **PERF-CAT-1 (P1)** — UI freeze su playlist massime.
   Root cause: parsing M3U sincrono su main thread.
   **Fix landed 2026-05-25:** introdotto `CatalogWorker` (Web Worker).
+- [ ] **SHUTDOWN-FREEZE-1 (P1)** — Freeze dell'app alla chiusura su Wails.
+  Root cause (sospetta): Deadlock o attesa infinita in `libmpv` o `DBus` durante lo shutdown.
+  **Azioni intraprese 2026-05-25:**
+  1. Aggiunti log chirurgici in tutti i `ServiceShutdown`.
+  2. Implementato timeout protettivo in `singleinstance.Release`.
+  3. Aggiunti log intorno a `mpv_terminate_destroy`.
+  4. Monitoraggio log richiesto per identificare il colpevole.
 
 ---
 
