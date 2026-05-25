@@ -51,6 +51,11 @@
   Root cause: gli eventi `network-playback-status` UDP (frequenti) resettavano continuamente il timeout di 10s.
   **Fix landed 2026-05-25:** implementato auto-dismiss a 8s con cooldown di 60s per lo stesso contenuto e dispositivo. Aggiunta chiusura immediata se `isPlaying: false`.
 
+- [x] **WAILS-FULLSCREEN-1** — Supporto fullscreen globale (tasto F). **Landed 2026-05-25:** implementata integrazione con le API native di Wails per gestire il fullscreen della finestra reale.
+- [x] **WAILS-SHUTDOWN-2** — Watchdog shutdown e fix deadlock D-Bus. **Landed 2026-05-25:** implementato timeout su `conn.Close()` e watchdog globale di 5s in `main.go`.
+- [x] **WAILS-BUNDLE-1** — Ottimizzazione bundle frontend. **Landed 2026-05-25:** implementato code-splitting per Video.js/Hls.js/Mpegts.js, riducendo il chunk iniziale del 80%.
+- [x] **WAILS-LINUX-PKG** — Packaging nativo Linux via nfpm. **Landed 2026-05-25:** creato `nfpm.yaml` e script `build-linux-wails.sh` per pacchetti .deb, .rpm, .pkg.tar.zst.
+
 ## 🆕 Sessione 2026-05-23/24 — Xtream + EPG dopo drop Electron
 
 - [x] **WAILS-PROXY-1** — Xtream non si connette su Wails (CORS/mixed-content

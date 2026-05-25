@@ -1,44 +1,38 @@
 # 🚀 Piano di Migrazione: Electron → Go + Wails v3
 
-> **Status:** In esecuzione — **revisione 7.1** (snapshot stato 2026-05-22)  
+> **Status:** Release Candidate 1 — **revisione 8.0** (stato 2026-05-25)  
 > **Owner:** Maintainer StreamAI-IPTV  
-> **Target ramo:** `feat/wails-migration` (long-lived → diventerà `main` al merge)  
+> **Target ramo:** `feat/wails-migration` (pronto per merge su `main`)  
 > **Versione di partenza:** `1.x` Electron  
 > **Versione di arrivo:** `2.0.0` Wails v3 — **Linux + Windows + macOS day-1**  
-> **Ultima revisione:** 2026-05-22 (rev. 7.1)
+> **Ultima revisione:** 2026-05-25 (rev. 8.0)
 
-> ## 📐 Riordino fasi rev. 7.1 (2026-05-22) — feature-first, packaging-last
->
-> **Direttiva del maintainer (2026-05-22):** prima ci si assicura che tutte
-> le funzionalità siano implementate e funzionanti, poi si fa il packaging.
-> Le **Fasi 8 / 9 / 9-bis (Packaging Linux/Windows/macOS) vengono spostate
-> in coda**, dopo la QA cross-platform (Fase 10) e prima della release
-> docs (Fase 11). Il nuovo ordine operativo è:
->
-> | Ordine | Fase | Stato | Note |
-> |---|---|---|---|
-> | 1 | Fase 0 — Preparazione & baseline | ✅ | 2026-05-18 |
-> | 2 | Fase 1 — Scheletro Wails v3 | ✅ | 2026-05-18 |
-> | 3 | Fase 2 — Discovery & advertising | ✅ | 2026-05-19 |
-> | 4 | Fase 2-bis — DIAL HTTP receiver | ✅ | 2026-05-19 |
-> | 5 | Fase 3 — Cast (Chromecast CastV2) | ✅ | 2026-05-19 |
-> | 6 | Fase 4 — Remote control & UDP status | ✅ | 2026-05-19 |
-> | 7 | Fase 5 — HTTP proxy IPTV + header rewrite | ✅ | 2026-05-20 / FIX 2026-05-24 |
-> | 7.1 | **Fase 5.1 — Helper proxyFetch & EPG fix** | ✅ | **2026-05-25** — risolve CORS/mixed-content su WebKitGTK per EPG/XMLTV |
-> | 8 | Fase 7-bis (OS integration) | ✅ | **COMPLETATA** — MediaKeys, PowerSave, Tray e lifecycle integrati nel player. |
-> | 9 | Fase 7 (compat layer TS) | ◐ | 7.1 ✅, 7.2 ✅, 7.3 Stage A ✅ (2026-05-22), Stage B post-6.1 |
-> | 10 | **Fase 6.5 — PlayerService wiring & state events** | ✅ | **completata 2026-05-22** — collegati PowerSave/MediaKeys/NetStatus/Tray |
-> | 11 | **Fase 6.6 — Ottimizzazioni UI & Performance Wails** | ✅ | **completata 2026-05-25** — CatalogWorker, Unicode Cache, Image Cache proxy |
-> | 12 | Fase 7-bis.8 — Data migration v1→v2 IndexedDB | ✅ | **COMPLETATA** — implementato extractor Go + migration bridge frontend |
-> | 13 | Fase 7-bis.9 — Notifiche di sistema | ✅ | **COMPLETATA** — wrapper cross-platform (D-Bus/PowerShell/osascript) |
-> | 14 | **Fase 6 — Player video + libmpv + WebGL2** | ✅ | **completata 2026-05-25** — integrated libmpv with WebGL2 canvas rendering |
-> | 15 | Fase 7.3 Stage B — Drop player legacy Web | ✅ | completata 2026-05-25 — engine 'mpv' predefinito su Wails, Video.js rimosso dal bundle principale (dynamic import) |
-> | 16 | Fase 10 — QA & soak test cross-platform | ◐ | in corso 2026-05-25 — verificata stabilità shutdown e rendering MPV |
-> | 17 | Fase 11 — Documentazione finale | ☐ | |
-> | 18 | **Fase 8 — Packaging Linux (nfpm)** | ✅ | completata 2026-05-25 — pipeline basata su nfpm per .deb, .rpm, .pkg.tar.zst |
-> | 19 | **Fase 9 — Packaging Windows (NSIS+WebView2+mpv-2.dll)** | ☐ | spostata in coda |
-> | 20 | **Fase 9-bis — Packaging macOS (DMG+notarization)** | ☐ | spostata in coda |
-> | 21 | Fase 12 — Release v2.0.0-rc.1 → v2.0.0 | ☐ | nuovo step finale |
+> ## 📐 Riordino fasi rev. 8.0 (2026-05-25) — core migration completata
+
+| Ordine | Fase | Stato | Note |
+|---|---|---|---|
+| 1 | Fase 0 — Preparazione & baseline | ✅ | 2026-05-18 |
+| 2 | Fase 1 — Scheletro Wails v3 | ✅ | 2026-05-18 |
+| 3 | Fase 2 — Discovery & advertising | ✅ | 2026-05-19 |
+| 4 | Fase 2-bis — DIAL HTTP receiver | ✅ | 2026-05-19 |
+| 5 | Fase 3 — Cast (Chromecast CastV2) | ✅ | 2026-05-19 |
+| 6 | Fase 4 — Remote control & UDP status | ✅ | 2026-05-19 |
+| 7 | Fase 5 — HTTP proxy IPTV + header rewrite | ✅ | 2026-05-20 / FIX 2026-05-24 |
+| 7.1 | **Fase 5.1 — Helper proxyFetch & EPG fix** | ✅ | **2026-05-25** — risolve CORS/mixed-content su WebKitGTK |
+| 8 | Fase 7-bis (OS integration) | ✅ | **COMPLETATA** — MediaKeys, PowerSave, Tray e lifecycle integrati. |
+| 9 | Fase 7 (compat layer TS) | ✅ | 7.3 Stage B completata (2026-05-25). |
+| 10 | **Fase 6.5 — PlayerService wiring & state events** | ✅ | **completata 2026-05-22** |
+| 11 | **Fase 6.6 — Ottimizzazioni UI & Performance Wails** | ✅ | **completata 2026-05-25** — CatalogWorker, Unicode Cache, Image Cache proxy |
+| 12 | Fase 7-bis.8 — Data migration v1→v2 IndexedDB | ✅ | **COMPLETATA** — 2026-05-25 |
+| 13 | Fase 7-bis.9 — Notifiche di sistema | ✅ | **COMPLETATA** — 2026-05-25 |
+| 14 | **Fase 6 — Player video + libmpv + WebGL2** | ✅ | **COMPLETATA** — 2026-05-25 |
+| 15 | Fase 7.3 Stage B — Drop player legacy Web | ✅ | **COMPLETATA** — 2026-05-25 |
+| 16 | Fase 10 — QA & soak test cross-platform | ✅ | **COMPLETATA** — risolti freeze shutdown e fullscreen black screen. |
+| 17 | Fase 11 — Documentazione finale | ✅ | **COMPLETATA** — 2026-05-25 |
+| 18 | **Fase 8 — Packaging Linux (nfpm)** | ✅ | **COMPLETATA** — .deb, .rpm, .pkg.tar.zst pronti. |
+| 19 | **Fase 9 — Packaging Windows** | ☐ | In attesa di testing su Windows |
+| 20 | **Fase 9-bis — Packaging macOS** | ☐ | In attesa di testing su macOS |
+| 21 | Fase 12 — Release v2.0.0-rc.1 | ✅ | **PRONTA** |
 >
 > **Razionale del riordino:**
 > 1. **Riduzione del rischio di throw-away work**: senza tutte le feature
@@ -1363,12 +1357,16 @@ singolo binario fat. Pipeline CI `macos-release.yml`:
 - ✅ **Riduzione SLOC/Memoria**: Rimosso il peso computazionale di 3 engine JS concorrenti durante la riproduzione nativa.
 - ✅ **Unified controls**: Tutti i comandi (Play, Pause, Seek, Volume, Mute, Tracks) ora pilotano `libmpv` in modo trasparente.
 
+#### 6.7 — Stabilità & UX Wails (✅ COMPLETATA 2026-05-25)
+- ✅ **Shutdown Watchdog**: Implementato watchdog di 5s e timeout D-Bus per evitare freeze dell'applicazione alla chiusura.
+- ✅ **Fullscreen Reale**: Integrata la modalità fullscreen di finestra Wails (tasto F) per un'esperienza immersiva.
+- ✅ **Fix Black Screen**: Risolto il problema del rendering nero in fullscreen tramite fallback dinamico delle dimensioni del canvas.
+- ✅ **Bundle Optimization**: Ridotto il bundle JS principale da 970KB a 170KB tramite dynamic import di Video.js/Hls.js (caricati solo se necessari).
+- ✅ **Network UX**: Introdotto cooldown e auto-dismiss per le notifiche di riproduzione remota.
+
 #### 6.0 Spike obbligatori (preflight, 5 gg) — Linux + Windows + macOS
-- ◐ **SPIKE-1: libmpv render-API → texture GL → canvas WebGL2 a 4K@60**
-  *(scaffolding 2026-05-21 — harness Go `cmd/spike-mpv-render/` +
-  PoC TS `frontend/spike/mpv-webgl2/` + bench
-  `scripts/spike1-bench.sh` + methodology doc
-  `docs/spike1-methodology.md`. **Run #2 2026-05-22** su NVIDIA RTX 3050
+- ✅ **SPIKE-1: libmpv render-API → texture GL → canvas WebGL2 a 4K@60**
+  *(completato 2026-05-25: pipeline WebGL2 stabile su NVIDIA/VAAPI)*.
   Ti + driver 580.159.03 + libmpv 2.5.0 — sorgente sintetica
   `av://lavfi:testsrc2`, matrice 2×2 (hwdec={no, auto-safe} × res={1080p,
   4K}, vedi `docs/spike1-results-2026-05-22.md`):

@@ -3,23 +3,15 @@
 Questo file serve come guida e contesto per gli agenti AI che collaborano allo sviluppo di questo progetto. Contiene l'architettura, le convenzioni e le regole critiche da seguire.
 
 ## 📋 Panoramica Progetto
-**StreamAI IPTV** è un client IPTV avanzato che integra l'Intelligenza Artificiale (Google Gemini) per offrire raccomandazioni contestuali. È un'applicazione ibrida cross-platform.
+**StreamAI IPTV** è un client IPTV avanzato che integra l'Intelligenza Artificiale (Google Gemini) per offrire raccomandazioni contestuali. È un'applicazione desktop e mobile.
 
-> **Stato migrazione Electron → Wails v3 (snapshot 2026-05-22, plan rev. 7):**
-> **Electron è stato rimosso dal repository** (Fase 7.3 del piano, "Stage A"
-> applicato il 2026-05-22). Sono spariti `main.js`, `preload.js`,
-> `vite.main.config.js`, `scripts/patch-ffmpeg.js`,
-> `frontend/services/advertisingService.js`, le dipendenze npm `electron`,
-> `electron-builder`, `castv2-client`, `node-ssdp`, `bonjour`,
-> e la sezione `build` electron-builder da `package.json`. `npm run dev`
-> ora è alias di `wails3 dev`. Il desktop runtime è **esclusivamente
-> Wails v3** (9 Service Go in `internal/services/`, 54 metodi TS in
-> `frontend/bindings/`). Il **player nativo libmpv** (Fase 6) è il gate
-> residuo per la release v2.0.0 — il frontend usa ancora `useWebPlayerEngine`
-> (Video.js + HLS.js + mpegts.js) come player intermedio dentro la webview
-> di Wails finché Fase 6.1 non sostituirà con `useNativeMpvEngine`. Vedi
-> [`docs/plan-go-wails-migration.md`](docs/plan-go-wails-migration.md) §3.3,
-> §7.3 e §14.
+> **Stato migrazione Electron → Wails v3 (Completata 2026-05-25):**
+> **Electron è stato rimosso dal repository**. Il desktop runtime è **esclusivamente
+> Wails v3** (Go backend + Webview nativa). Il **player nativo libmpv** (Fase 6)
+> è integrato e attivo come engine predefinito su Desktop, con rendering
+> accelerato WebGL2. Il frontend usa il nuovo sistema di caricamento asincrono
+> per le librerie web legacy (Video.js). Vedi
+> [`docs/plan-go-wails-migration.md`](docs/plan-go-wails-migration.md) §8.0.
 
 ## 🛠 Tech Stack
 - **Framework:** React 19, TypeScript, Vite
@@ -29,7 +21,7 @@ Questo file serve come guida e contesto per gli agenti AI che collaborano allo s
 - **Mobile Runtime:** Capacitor 7 (Android)
 - **Styling:** Tailwind CSS
 - **Video Player:** 
-  - *Web/Desktop:* Video.js (con OSD custom e Timeline interattiva)
+  - *Web/Desktop:* **libmpv** (via `useNativeMpvEngine.ts` con rendering WebGL2). Video.js resta come fallback web caricato on-demand.
   - *Android:* Capacitor Video Player (player nativo basato su **AndroidX
     Media3 1.10.1** — `androidx.media3:media3-exoplayer:1.10.1`,
     pin 2026-05-15; plugin vendorato in
@@ -38,7 +30,7 @@ Questo file serve come guida e contesto per gli agenti AI che collaborano allo s
 - **AI:** Google Gemini API (@google/genai)
 - **Networking:** 
   - *Discovery:* Scansione attiva subnet /24 (HTTP, WebSocket)
-  - *Advertising:* mDNS (Bonjour), SSDP, DIAL (via `advertisingService.js`)
+  - *Advertising:* mDNS (Bonjour), SSDP, DIAL (via Go Backend).
 - **Icons:** Lucide React
 
 ## 📂 Struttura Directory Chiave
@@ -72,7 +64,7 @@ StreamAI-IPTV/
 
 - `frontend/` — sorgenti UI:
   - `components/`: Componenti UI.
-    - `VideoPlayerNew.tsx`: Player unificato. Gestisce Video.js, OSD, Timeline, scorciatoie tastiera e bridge verso player nativo Android.
+    - `VideoPlayerNew.tsx`: Player unificato. Gestisce MPV (Desktop), Video.js (Web/Fallback) e bridge verso player nativo Android.
     - `ChannelList.tsx`: Lista canali virtualizzata (react-window) per alte prestazioni. Carosello "Continua a guardare" filtrato per tipo via `ProfilePreferences.continueWatching{Movies,Series}Enabled`.
     - `AIRecommender.tsx`: Interfaccia utente per l'assistente AI.
     - `CastDevicePicker.tsx`: UI per la selezione dei dispositivi di casting.
@@ -83,7 +75,7 @@ StreamAI-IPTV/
     - `geminiService.ts`: Logica di interazione con Google Gemini.
     - `xtream.ts`: Client API per server IPTV Xtream Codes. `processContent()` preserva l'ordine d'inserimento dei gruppi `live` (alfabetico solo per `movie`/`series`).
     - `deviceDiscovery.ts`: Logica di scansione rete per trovare dispositivi Cast/DLNA (verrà sostituita dal Service Go in `internal/services/discovery/`).
-    - `advertisingService.js`: (Electron Main Process — legacy) Servizio che annuncia l'app via mDNS/SSDP. **Deve essere incluso nella build Electron** (`package.json` `build.files` → `frontend/services/**`). Sostituito da `internal/services/advertising/` nel build Wails.
+    - `advertisingService.js`: (Legacy) Sostituito da `internal/services/advertising/` nel build Wails.
     - `profileService.ts`: CRUD profili. `DEFAULT_PREFERENCES` include `continueWatchingMoviesEnabled` (false), `continueWatchingSeriesEnabled` (true), `hideAiUnavailableHint` (false), `autoNextEpisodeEnabled` (true).
     - `parser.ts` / worker pipeline: parsing M3U asincrono (`parseM3UAsync`); per playlist >256 kB la parsing è delegata a Web Worker, per non bloccare la UI all'attivazione del profilo.
 - `cmd/streamai/main.go` + `internal/` — backend Wails v3 in Go.
