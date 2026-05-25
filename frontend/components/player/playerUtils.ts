@@ -2,8 +2,6 @@
 // Extracted from components/VideoPlayerNew.tsx during refactor B.1.
 // Keep this file free of React and DOM event handlers.
 
-import Hls from 'hls.js';
-import mpegts from 'mpegts.js';
 import type { Channel } from '../../types';
 import {
   MAX_PLAYBACK_RETRIES,
@@ -54,13 +52,13 @@ export const detectStreamSource = (url: string, channelType?: Channel['type']): 
   const isLive = channelType === 'live' || path.includes('/live/');
 
   if (lowerUrl.includes('.m3u8')) {
-    return { protocol: 'hls', mimeType: 'application/x-mpegURL', engine: Hls.isSupported() ? 'hlsjs' : 'videojs', isXtreamLike, isExtensionless, isLive, label: 'HLS (.m3u8)' };
+    return { protocol: 'hls', mimeType: 'application/x-mpegURL', engine: (typeof window !== 'undefined' && !!(window as any).MediaSource) ? 'hlsjs' : 'videojs', isXtreamLike, isExtensionless, isLive, label: 'HLS (.m3u8)' };
   }
   if (lowerUrl.includes('.mpd')) {
     return { protocol: 'dash', mimeType: 'application/dash+xml', engine: 'videojs', isXtreamLike, isExtensionless, isLive, label: 'DASH (.mpd)' };
   }
   if (/\.(ts|mpeg|mpg)(?:$|[?#])/.test(lowerUrl) || (isXtreamLike && isLive)) {
-    return { protocol: 'mpegts', mimeType: 'video/mp2t', engine: mpegts.isSupported() ? 'mpegts' : 'videojs', isXtreamLike, isExtensionless, isLive, label: 'MPEG-TS' };
+    return { protocol: 'mpegts', mimeType: 'video/mp2t', engine: (typeof window !== 'undefined' && !!(window as any).MediaSource) ? 'mpegts' : 'videojs', isXtreamLike, isExtensionless, isLive, label: 'MPEG-TS' };
   }
   if (/\.(webm)(?:$|[?#])/.test(lowerUrl)) {
     return { protocol: 'webm', mimeType: 'video/webm', engine: 'videojs', isXtreamLike, isExtensionless, isLive, label: 'WebM progressivo' };
@@ -125,13 +123,12 @@ export const classifyPlaybackError = (
   if (code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) {
     // MKV-specific hint: con il bypass di Video.js attivo, un
     // SRC_NOT_SUPPORTED su MKV indica quasi sempre un codec interno non
-    // decodificabile dal Chromium di Electron (tipicamente HEVC/H.265 o
-    // AV1 senza supporto hardware). Suggeriamo di verificare i codec
-    // (script `npm run postinstall` rifa il patch FFmpeg BranchBit).
+    // decodificabile dal browser (tipicamente HEVC/H.265 o
+    // AV1 senza supporto hardware). Suggeriamo di verificare i codec.
     if (sourceInfo.protocol === 'mkv') {
       return {
         title: 'MKV non riproducibile',
-        message: 'Il container MKV è stato accettato ma il codec video o audio interno non è supportato dal player. Probabilmente è HEVC/H.265 o AV1 senza decoder hardware/software disponibile. Verifica i codec di sistema o usa lo script `npm run postinstall` per rigenerare la patch FFmpeg con HEVC.',
+        message: 'Il container MKV è stato accettato ma il codec video o audio interno non è supportato dal player. Probabilmente è HEVC/H.265 o AV1 senza decoder hardware disponibile sul sistema (libmpv). Verifica i driver video o il supporto codec della tua distribuzione.',
         category: 'decode',
         canRetry: retryCount < MAX_PLAYBACK_RETRIES,
         retryCount,
