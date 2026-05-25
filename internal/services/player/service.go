@@ -27,10 +27,13 @@
 package player
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	"runtime"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/rs/zerolog/log"
 )
@@ -157,6 +160,7 @@ type Service struct {
 	trackArtURL    string
 	watcherRunning bool
 	watcherStop    chan struct{}
+	shm            *shmTransport
 }
 
 // New costruisce il servizio. Il backend reale è creato a build-time
@@ -404,14 +408,42 @@ func (s *Service) HwAccelInfo() (HwAccelInfo, error) {
 //     (errNotBuilt) — il frontend mostra il banner standard.
 const AssetMiddlewarePath = "/player/frame"
 
-// RenderFrame disegna il frame corrente di libmpv su un buffer RGBA in
-// memoria Go di dimensione w*h*4. Vedi commento in `backend` interface
-// e `mpv_cgo.go.RenderFrame`. Esposto come binding TS auto-generato (utile
-// per smoke test devtools) e usato internamente da AssetMiddleware().
-func (s *Service) RenderFrame(width, height int) ([]byte, error) {
+// RenderFrameWithContext è la variante di RenderFrame che rispetta un context (per timeout).
+func (s *Service) RenderFrameWithContext(ctx context.Context, width, height int) ([]byte, error) {
+	// Verifichiamo se il backend supporta l'attesa asincrona
+	type awaitable interface {
+		WaitNextFrame(ctx context.Context) error
+	}
+
+	if b, ok := s.backend.(awaitable); ok {
+		if err := b.WaitNextFrame(ctx); err != nil {
+			return nil, err
+		}
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.backend.RenderFrame(width, height)
+
+	// ... resto della logica RenderFrame ...
+	if runtime.GOOS == "linux" && s.shm == nil {
+		if shm, err := newShmTransport("streamai-player-frame", 3840*2160*4); err == nil {
+			s.shm = shm
+			log.Info().Msg("player: SHM transport initialized")
+		} else {
+			log.Warn().Err(err).Msg("player: SHM transport initialization failed")
+		}
+	}
+
+	buf, err := s.backend.RenderFrame(width, height)
+	if err == nil && s.shm != nil {
+		_, _ = s.shm.Write(buf)
+	}
+	return buf, err
+}
+
+// RenderFrame disegna il frame corrente di libmpv su un buffer RGBA in
+func (s *Service) RenderFrame(width, height int) ([]byte, error) {
+	return s.RenderFrameWithContext(context.Background(), width, height)
 }
 
 // AssetMiddleware ritorna un middleware HTTP che intercetta le richieste a
@@ -436,8 +468,17 @@ func (s *Service) AssetMiddleware() func(http.Handler) http.Handler {
 				http.Error(w, "invalid query param 'h' (expected 16..4320)", http.StatusBadRequest)
 				return
 			}
-			buf, err := s.RenderFrame(width, height)
+			ctx, cancel := context.WithTimeout(r.Context(), 1*time.Second)
+			defer cancel()
+
+			buf, err := s.RenderFrameWithContext(ctx, width, height)
 			if err != nil {
+				if errors.Is(err, context.DeadlineExceeded) {
+					// Timeout: mandiamo un body vuoto per segnalare "nessun nuovo frame"
+					// il frontend riproverà subito.
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
 				if errors.Is(err, errNotBuilt) {
 					http.Error(w, err.Error(), http.StatusServiceUnavailable)
 					return
@@ -457,4 +498,3 @@ func (s *Service) AssetMiddleware() func(http.Handler) http.Handler {
 		})
 	}
 }
-
