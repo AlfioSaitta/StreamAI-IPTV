@@ -50,6 +50,8 @@ import {
   PictureInPicture2, Loader2, Info, Cast, Tv, Headphones, Volume1, Calendar, Moon,
   Subtitles, Upload, CheckCircle2, Copy, Check
 } from 'lucide-react';
+// @ts-ignore
+import { FixedSizeList as VirtualList } from 'react-window';
 
 // --- TYPES ---
 
@@ -696,6 +698,21 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
 
 
   const toggleFullscreen = useCallback(() => {
+    // Fase 7.2: su desktop (Wails) preferiamo il fullscreen della finestra
+    // reale rispetto al fullscreen DOM del container. Questo permette di
+    // avere l'OSD e i modali (es. CastDevicePicker) correttamente sovrapposti
+    // senza doverli spostare dentro il container fullscreen.
+    if (platformService.isWails && host?.toggleFullscreen) {
+      host.toggleFullscreen().catch(console.error);
+      // Su Wails lo stato isFullscreen viene aggiornato via polling/evento,
+      // ma qui diamo un feedback immediato all'OSD.
+      host.isFullscreen().then((fs: boolean) => {
+        if (fs) showOsd(<Maximize className="w-12 h-12 text-white" />, "Fullscreen");
+        else showOsd(<Minimize className="w-12 h-12 text-white" />, "Esci da Fullscreen");
+      }).catch(() => undefined);
+      return;
+    }
+
     if (!containerRef.current) return;
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(console.error);
@@ -1159,6 +1176,33 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
 
   // --- UI EFFECTS ---
 
+  // Sincronizza lo stato isFullscreen con il sistema (DOM o Finestra Wails)
+  useEffect(() => {
+    const updateFsState = async () => {
+      if (document.fullscreenElement) {
+        setIsFullscreen(true);
+      } else if (platformService.isWails && host?.isFullscreen) {
+        try {
+          const fs = await host.isFullscreen();
+          setIsFullscreen(fs);
+        } catch {
+          setIsFullscreen(false);
+        }
+      } else {
+        setIsFullscreen(false);
+      }
+    };
+
+    document.addEventListener('fullscreenchange', updateFsState);
+    window.addEventListener('resize', updateFsState);
+    updateFsState();
+
+    return () => {
+      document.removeEventListener('fullscreenchange', updateFsState);
+      window.removeEventListener('resize', updateFsState);
+    };
+  }, []);
+
   // D.4 — Attach / detach a <track> element on the underlying <video> when
   // the user loads / removes a sideloaded subtitle file. We bypass video.js
   // text track APIs to keep the implementation portable (works the same on
@@ -1433,17 +1477,31 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
                 <h3 className="font-bold text-white">Canali ({playlist.length})</h3>
                 <button onClick={() => setShowPlaylist(false)} aria-label="Chiudi lista canali" className="tv-focus touch-target p-2 rounded-full hover:bg-white/10"><X className="w-5 h-5" /></button>
             </div>
-            <div className="flex-1 overflow-y-auto p-2 space-y-2">
-                {playlist.map(c => (
-                    <button 
-                      key={c.id}
-                      onClick={() => onChannelSelect && onChannelSelect(c)}
-                      className={`tv-focus w-full text-left p-3 rounded-lg flex items-center gap-3 transition-colors ${c.id === channel.id ? 'bg-brand-primary text-white' : 'hover:bg-white/10 text-gray-300'}`}
-                    >
-                        {c.logo && <img src={c.logo} alt={c.name} className="w-8 h-8 object-contain bg-black rounded" loading="lazy" />}
-                        <span className="truncate text-sm font-medium">{c.cleanName || c.name}</span>
-                    </button>
-                ))}
+            <div className="flex-1 p-2">
+                <VirtualList
+                  height={window.innerHeight - 100}
+                  width="100%"
+                  itemCount={playlist.length}
+                  itemSize={64}
+                  className="scrollbar-hide"
+                >
+                  {({ index, style }: { index: number, style: React.CSSProperties }) => {
+                    const c = playlist[index];
+                    const isActive = c.id === channel.id;
+                    return (
+                      <div style={style} className="px-1">
+                        <button 
+                          key={c.id}
+                          onClick={() => onChannelSelect && onChannelSelect(c)}
+                          className={`tv-focus w-full text-left p-3 rounded-lg flex items-center gap-3 transition-colors ${isActive ? 'bg-brand-primary text-white' : 'hover:bg-white/10 text-gray-300'}`}
+                        >
+                            {c.logo && <img src={c.logo} alt={c.name} className="w-8 h-8 object-contain bg-black rounded" loading="lazy" />}
+                            <span className="truncate text-sm font-medium">{c.cleanName || c.name}</span>
+                        </button>
+                      </div>
+                    );
+                  }}
+                </VirtualList>
             </div>
         </div>
       )}
@@ -1688,8 +1746,8 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
                   <Calendar className="w-6 h-6" />
                 </button>
               )}
-              {channel.type === 'series' && (
-                <button onClick={() => setShowPlaylist(true)} aria-label="Lista episodi" className="tv-focus touch-target p-2 hover:bg-white/10 rounded-full" title="Lista episodi (L)">
+              {(channel.type === 'series' || channel.type === 'live') && (
+                <button onClick={() => setShowPlaylist(true)} aria-label={channel.type === 'series' ? "Lista episodi" : "Lista canali"} className="tv-focus touch-target p-2 hover:bg-white/10 rounded-full" title={channel.type === 'series' ? "Lista episodi (L)" : "Lista canali (L)"}>
                   <List className="w-6 h-6 text-white" />
                 </button>
               )}

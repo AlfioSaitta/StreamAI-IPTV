@@ -15,7 +15,7 @@
  * Vedi `docs/plan-go-wails-migration.md` §3.1 per la mappa Electron → Wails.
  */
 
-import { Events as WailsEvents } from '@wailsio/runtime';
+import { Events as WailsEvents, Window } from '@wailsio/runtime';
 
 // Binding TS generati da `wails3 generate bindings -ts -d frontend/bindings ./...`
 // (script: `npm run wails:bindings`). Sono in `.gitignore`: rigenerare dopo
@@ -82,6 +82,10 @@ export interface HostAPI {
 
   // Notifications (Fase 7-bis.9)
   sendNotification: (title: string, message: string) => void;
+
+  // Window control (Wails v3)
+  toggleFullscreen: () => Promise<void>;
+  isFullscreen: () => Promise<boolean>;
 }
 
 /**
@@ -206,6 +210,10 @@ export const wailsBridge: HostAPI = {
       console.warn('[wailsBridge] sendNotification failed:', err);
     });
   },
+
+  // --- Window control ---
+  toggleFullscreen: () => Window.ToggleFullscreen(),
+  isFullscreen: () => Window.IsFullscreen(),
 };
 
 export default wailsBridge;
