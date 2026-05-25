@@ -1,0 +1,55 @@
+name: "streamai-iptv"
+arch: "amd64"
+platform: "linux"
+version: "${VERSION}"
+release: "${RELEASE}"
+section: "video"
+priority: "optional"
+maintainer: "Alfio Saitta <alfio@collateralstudios.com>"
+description: "Advanced AI-powered IPTV client (Google Gemini)"
+vendor: "Collateral Studios"
+homepage: "https://github.com/AlfioSaitta/StreamAI-IPTV"
+license: "MIT"
+
+contents:
+  - src: "./build/bin/streamai"
+    dst: "/usr/bin/streamai"
+    file_info:
+      mode: 0755
+  - src: "./build/streamai.desktop"
+    dst: "/usr/share/applications/streamai.desktop"
+  - src: "./build/icons/16x16.png"
+    dst: "/usr/share/icons/hicolor/16x16/apps/streamai.png"
+  - src: "./build/icons/32x32.png"
+    dst: "/usr/share/icons/hicolor/32x32/apps/streamai.png"
+  - src: "./build/icons/48x48.png"
+    dst: "/usr/share/icons/hicolor/48x48/apps/streamai.png"
+  - src: "./build/icons/64x64.png"
+    dst: "/usr/share/icons/hicolor/64x64/apps/streamai.png"
+  - src: "./build/icons/128x128.png"
+    dst: "/usr/share/icons/hicolor/128x128/apps/streamai.png"
+  - src: "./build/icons/256x256.png"
+    dst: "/usr/share/icons/hicolor/256x256/apps/streamai.png"
+  - src: "./build/icons/512x512.png"
+    dst: "/usr/share/icons/hicolor/512x512/apps/streamai.png"
+
+overrides:
+  deb:
+    depends:
+      - libgtk-3-0
+      - libwebkit2gtk-4.1-0
+      - libmpv2 | libmpv1
+    recommends:
+      - gstreamer1.0-plugins-good
+      - gstreamer1.0-plugins-bad
+      - gstreamer1.0-plugins-ugly
+  rpm:
+    depends:
+      - gtk3
+      - webkit2gtk4.1
+      - mpv-libs
+  archlinux:
+    depends:
+      - gtk3
+      - webkit2gtk-4.1
+      - mpv
