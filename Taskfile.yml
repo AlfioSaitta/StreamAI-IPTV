@@ -81,7 +81,13 @@ tasks:
     env:
       CGO_CFLAGS_ALLOW: "{{.CGO_FLAGS_ALLOW}}"
     cmds:
-      - wails3 dev -tags "{{.TAGS}}"
+      # NOTE (2026-05-24, Wails v3 alpha.93): `wails3 dev` non accetta
+      # piu' il flag `-tags`. La pipeline di sviluppo e' definita in
+      # `build/config.yml` (`dev_mode.executes`), che invoca a sua volta
+      # `wails3 task build` qui sotto — i tag arrivano dal default
+      # `vars.TAGS` di questo Taskfile ("gtk3 mpv"). Per override:
+      # `task dev TAGS=gtk3` (= no libmpv, stub backend).
+      - wails3 dev
 
   # ---- Quality gates ----
   lint:

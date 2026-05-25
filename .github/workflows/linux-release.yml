@@ -1,9 +1,18 @@
 name: Linux Release
 
+# ⚠️ DEPRECATED — Electron-based pipeline disabled (plan rev. 7, Fase 7.3).
+# Da riscrivere completamente in Fase 8 (packaging Wails con nfpm).
+# Il trigger su tag `v*` è commentato per evitare release accidentali contro
+# uno script `scripts/build-linux.sh` non più funzionante (electron-builder
+# rimosso dalle dipendenze). Restare su `workflow_dispatch` finché la nuova
+# pipeline Wails non è pronta.
+#
+# Vedi `docs/plan-go-wails-migration.md` §8 e §14.
+
 on:
-  push:
-    tags:
-      - 'v*'
+  # push:
+  #   tags:
+  #     - 'v*'
   workflow_dispatch:
 
 permissions:

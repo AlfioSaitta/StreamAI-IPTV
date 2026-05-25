@@ -1,0 +1,65 @@
+# Wails v3 alpha.93 dev/build config.
+#
+# `wails3 dev` legge questo file per orchestrare il pipeline di sviluppo:
+# `dev_mode.executes` definisce gli step (install deps, vite dev frontend,
+# go build, run). I build tag `gtk3 mpv` arrivano dal Taskfile.yml
+# (`vars.TAGS` → default "gtk3 mpv"), non da CLI: in alpha.93 il flag
+# `-tags` non è più riconosciuto da `wails3 dev`.
+#
+# Vedi anche:
+#   - Taskfile.yml (task `build`, `dev`, `run`)
+#   - docs/plan-go-wails-migration.md §2.2
+version: '3'
+
+info:
+  companyName: "StreamAI"
+  productName: "StreamAI IPTV"
+  productIdentifier: "com.streamai.iptv"
+  description: "AI-powered IPTV player — Wails v3 build"
+  copyright: "(c) 2026, StreamAI"
+  comments: "Linux/Windows/macOS desktop runtime, libmpv backend"
+  version: "1.0.0"
+
+# Pipeline `wails3 dev`. Su file change (debounce 1s) Wails ri-esegue
+# in sequenza: build Go (blocking) + run (primary). Il frontend Vite
+# gira in background con HMR — l'asset server di Wails fa proxy verso
+# il dev server Vite, così `frontend/dist` non viene rigenerato a ogni
+# salvataggio.
+dev_mode:
+  root_path: .
+  log_level: warn
+  debounce: 1000
+  ignore:
+    dir:
+      - .git
+      - node_modules
+      - frontend/node_modules
+      - build/bin
+      - dist
+      - frontend/dist
+      - release
+      - android
+      - public-repo
+    file:
+      - .DS_Store
+      - .gitignore
+      - .gitkeep
+      - "*_test.go"
+    watched_extension:
+      - "*.go"
+    git_ignore: true
+  executes:
+    # Step 1 — Frontend deps (una volta sola, idempotente).
+    - cmd: npm install --prefer-offline --no-audit --no-fund
+      type: once
+    # Step 2 — Vite dev server in background (HMR React).
+    - cmd: npx vite --port 5173
+      type: background
+    # Step 3 — Build Go con i tag `gtk3 mpv` (da Taskfile vars.TAGS).
+    #          Blocking: ad ogni file *.go modificato.
+    - cmd: wails3 task build
+      type: blocking
+    # Step 4 — Run binario buildato (primary = il "main" del dev mode).
+    - cmd: ./build/bin/streamai
+      type: primary
+

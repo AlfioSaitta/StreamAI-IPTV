@@ -5,20 +5,27 @@ Questo file serve come guida e contesto per gli agenti AI che collaborano allo s
 ## 📋 Panoramica Progetto
 **StreamAI IPTV** è un client IPTV avanzato che integra l'Intelligenza Artificiale (Google Gemini) per offrire raccomandazioni contestuali. È un'applicazione ibrida cross-platform.
 
-> **Stato migrazione Electron → Wails v3 (snapshot 2026-05-20, plan rev. 6):**
-> il backend Go è **completo per le Fasi 0–5, 2-bis e gran parte di 7-bis**
-> (9 `application.Service` Wails v3 in `internal/services/`,
-> `cmd/streamai/main.go` con reverse-shutdown order, `npm run wails:bindings`
-> genera 54 metodi TS in `frontend/bindings/`). Il frontend è ancora **100%
-> sull'API Electron** (35 occorrenze `window.electronAPI`): la **Fase 7 —
-> compat layer** è in corso (`services/wailsBridge.ts` + `services/hostBridge.ts`
-> in arrivo). Il **player nativo (Fase 6, libmpv + canvas WebGL2)** è il
-> gate critico residuo, non ancora iniziato (preflight SPIKE-1/2/4). Vedi
-> [`docs/plan-go-wails-migration.md`](docs/plan-go-wails-migration.md) §3.3.
+> **Stato migrazione Electron → Wails v3 (snapshot 2026-05-22, plan rev. 7):**
+> **Electron è stato rimosso dal repository** (Fase 7.3 del piano, "Stage A"
+> applicato il 2026-05-22). Sono spariti `main.js`, `preload.js`,
+> `vite.main.config.js`, `scripts/patch-ffmpeg.js`,
+> `frontend/services/advertisingService.js`, le dipendenze npm `electron`,
+> `electron-builder`, `castv2-client`, `node-ssdp`, `bonjour`,
+> e la sezione `build` electron-builder da `package.json`. `npm run dev`
+> ora è alias di `wails3 dev`. Il desktop runtime è **esclusivamente
+> Wails v3** (9 Service Go in `internal/services/`, 54 metodi TS in
+> `frontend/bindings/`). Il **player nativo libmpv** (Fase 6) è il gate
+> residuo per la release v2.0.0 — il frontend usa ancora `useWebPlayerEngine`
+> (Video.js + HLS.js + mpegts.js) come player intermedio dentro la webview
+> di Wails finché Fase 6.1 non sostituirà con `useNativeMpvEngine`. Vedi
+> [`docs/plan-go-wails-migration.md`](docs/plan-go-wails-migration.md) §3.3,
+> §7.3 e §14.
 
 ## 🛠 Tech Stack
 - **Framework:** React 19, TypeScript, Vite
-- **Desktop Runtime:** Electron (con supporto HEVC custom)
+- **Desktop Runtime:** **Wails v3** (Go backend + WebKitGTK 6.0/4.1
+  su Linux, WebView2 su Windows, WKWebView su macOS). Electron è stato
+  rimosso il 2026-05-22 (plan rev. 7).
 - **Mobile Runtime:** Capacitor 7 (Android)
 - **Styling:** Tailwind CSS
 - **Video Player:** 
@@ -188,15 +195,89 @@ Queste funzionalità definiscono l'identità di StreamAI e devono essere preserv
 - Implementare sempre caching delle risposte per risparmiare token e ridurre latenza.
 
 ## ⚠️ Punti Critici e "Gotchas"
-1.  **Codec HEVC:** Su Electron, usiamo una build custom di FFmpeg scaricata via `scripts/patch-ffmpeg.js`. Non modificare questo script senza cautela.
+1.  ~~**Codec HEVC** Electron (FFmpeg BranchBit patch).~~ **Rimosso il
+    2026-05-22**: lo script `scripts/patch-ffmpeg.js` non esiste più,
+    `postinstall` rimosso da `package.json`. Su Wails il decoding HEVC/AV1
+    sarà fornito da libmpv (Fase 6). Nel frontwait dentro WebKitGTK 4.1/6.0
+    valgono i codec del webview di sistema (H.264/VP8/VP9 OK, HEVC dipende
+    dal sistema).
 2.  **Player Android:** Su Android, il tag `<video>` HTML5 ha performance scarse per IPTV. Usare sempre il player nativo tramite `nativeVideoPlayer.ts` quando `platformService.isNative` è true. Il player nativo è basato su **AndroidX Media3 1.10.1** (`androidx.media3.exoplayer.ExoPlayer` + `androidx.media3.session.MediaSession` + `androidx.media3.cast.CastPlayer`), con `DefaultRenderersFactory.setEnableDecoderFallback(true)` per fallback codec HEVC/AV1 graceful, `DefaultTrackSelector.setTunnelingEnabled(true)` per HDR/4K, `HlsMediaSource.Factory.setAllowChunklessPreparation(true)` per TTFF ridotto, e buffer IPTV-friendly (min 15s / max 50s / playback 1.5s / rebuffer 5s).
 3.  **Plugin Android vendorato (MED-1):** Il plugin `capacitor-video-player` è vendorato in `android/plugins/capacitor-video-player/` per scollegarsi dall'upstream orfano (`@brylsherbert/capacitor-video-player@7.0.32` su ExoPlayer 2.19.0 EOL). `package.json` usa `"capacitor-video-player": "file:android/plugins/capacitor-video-player"`. Patch e bump Media3 vanno fatti lì. Vedi `android/plugins/capacitor-video-player/README.md` per dettagli. Una CI guard `scripts/check-media3-migration.mjs` (invocata da `npm run check`) impedisce regressioni a `com.google.android.exoplayer2.*`.
-4.  **Mixed Content:** L'app deve poter riprodurre stream HTTP (non sicuri) anche se l'app è servita in contesto sicuro. Questo è configurato in `electron/main.js` e `android/app/src/main/AndroidManifest.xml` (usesCleartextTraffic).
-5.  **Electron Build:** Assicurarsi che la cartella `services` sia inclusa in `package.json` -> `build.files` affinché `advertisingService.js` sia disponibile nella build di produzione (ASAR).
+4.  **Mixed Content:** L'app deve poter riprodurre stream HTTP (non sicuri).
+    Su Wails questo è gestito dal **proxy HTTP locale Go**
+    (`internal/services/proxy/`) che strippa CSP/X-Frame-Options e riscrive
+    gli header IPTV (`STREAMAI_INSECURE_PROXY=1` per TLS-skip opt-in).
+    Su Android: `usesCleartextTraffic="true"` in `AndroidManifest.xml`.
+5.  ~~**Electron Build:** include `services` in `build.files`.~~ **Non
+    applicabile.** La sezione `build` electron-builder è stata rimossa da
+    `package.json`. Il packaging desktop è gestito da `wails3 build` (oggi)
+    + `nfpm` (Fase 8 in arrivo).
 6.  **Ordine gruppi Live:** Non riordinare alfabeticamente le categorie `live` in `xtream.ts → processContent()`. L'utente si aspetta lo stesso ordine del server. L'ordinamento alfabetico va applicato solo a `movie`/`series`.
 7.  **AI hint dismiss:** Quando si modifica `AiUnavailableHint` in `App.tsx`, preservare le due dimensioni di stato: `aiHintSessionDismissed` (in-memory, reset al cambio profilo) **e** `ProfilePreferences.hideAiUnavailableHint` (persistente, gestito dalla checkbox "Non mostrare più").
 8.  **Profilo M3U:** Se `Profile.playlistUrl` è valorizzato, all'attivazione del profilo `App.tsx` carica e fa parsing della playlist via `parseM3UAsync` (worker se >256 kB) **prima** di mostrare il catalogo. Non bypassare questo step.
 9.  **Versione applicazione:** la fonte di verità è il file `/.version` (semver `x.y.z`, una sola riga). `scripts/sync-version.mjs` propaga la versione in `package.json` e `android/app/build.gradle` (`versionName` + `versionCode = maj*10000 + min*100 + pat`). Non modificare a mano `package.json` `"version"`: aggiorna `.version` e lancia `npm run version:sync`. In CI il workflow esporta `COMMIT_SHA=${GITHUB_SHA::7}` e `build-linux.sh` lo passa a `make-distro-config.mjs --commit`, che lo embedda nel nome dell'artefatto: `streamai-iptv_${version}_${commit}_${distro}_${arch}.${ext}`. Localmente (senza commit) il pattern collassa a `streamai-iptv_${version}_${distro}_${arch}.${ext}`. Tutti gli script (`publish-repo.sh`, verify step CI) usano glob underscore-separated (`*_${distro}_*`).
+10. **Bridge host (post-drop Electron):** importare `host` da
+    `frontend/services/hostBridge.ts` per parlare col backend desktop.
+    `host` è un `Proxy` lazy che ri-risolve a ogni accesso: su Wails punta
+    a `wailsBridge`, su web/mobile espone `undefined` su ogni proprietà.
+    **NON** usare `if (host) { ... }` come guard (un `Proxy` è sempre
+    truthy): usa `platformService.isWails` / `isDesktop`, poi
+    `host?.someMethod` per la chiamata. `requireHost()` lancia se
+    nessun bridge è disponibile.
+    Il flag `platformService.isElectron` è stato **rimosso** (rev. 7.4,
+    2026-05-23): i call site devono usare `isDesktop` o `isWails`.
+
+11. **Rilevamento runtime Wails (2026-05-23).** Il pacchetto
+    `@wailsio/runtime` esegue `window._wails = window._wails || {}`
+    come side-effect del solo import — quindi la presenza di
+    `window._wails` da sola NON è un marker affidabile (sarebbe `true`
+    anche in jsdom/web). Il backend Go popola
+    `window._wails.environment` (`OS`/`Arch`/`Debug`) solo dentro l'app
+    Wails reale: questo è il marker corretto, vedi
+    `frontend/services/platformService.ts → detectWailsRuntime()`. Il
+    check è **lazy** (re-valutato a ogni accesso) per gestire la race
+    in cui `platformService` viene importato prima del runtime.
+
+12. **Proxy IPTV = middleware dell'asset server Wails, NON listener TCP
+    separato (FIX 2026-05-24).** La webview di Wails
+    (WebKitGTK/WebView2/WKWebView) blocca le `fetch()` cross-origin dal
+    documento (`wails://wails.localhost`) verso un server HTTP
+    standalone su `http://127.0.0.1:<port>` per
+    mixed-content/CORS — anche con `Access-Control-Allow-Origin: *` in
+    risposta (errore tipico WebKit: `Network error: Load failed`).
+    Soluzione: `internal/services/proxy/service.go → AssetMiddleware()`
+    espone il proxy come middleware del **WebKit AssetServer** sul path
+    same-origin `/iptv-proxy`. Wiring in `cmd/streamai/main.go`:
+    ```go
+    Assets: application.AssetOptions{
+        Handler:    application.AssetFileServerFS(rootassets.FS),
+        Middleware: application.Middleware(proxySvc.AssetMiddleware()),
+    },
+    ```
+    Il frontend (`frontend/services/xtream.ts → resolveFetchURL`)
+    costruisce l'URL client-side: `/iptv-proxy?u=<base64url>&ua=<UA>`
+    (`toBase64Url()` JS-side equivalente a `base64.RawURLEncoding` Go,
+    nessun IPC per chiamata). Il listener TCP standalone
+    `proxy: listening on http://127.0.0.1:<port>/proxy` resta attivo
+    come fallback per futuri stream URL libmpv ma il **frontend non
+    deve mai puntarci direttamente**. Conferma al boot:
+    `AssetServer Info: middleware=true`.
+
+## 🐞 Known issues (rolling list, da aggredire nelle prossime sessioni)
+
+- **EPG non viene caricato (2026-05-24).** Dopo il fix proxy Xtream
+  (punto 12) live/VOD/series si caricano correttamente attraverso
+  `/iptv-proxy`, ma l'EPG resta vuoto. Sospetto: `frontend/services/epg/*`
+  fa `fetch()` diretta verso l'URL XMLTV e cade nello stesso
+  CORS/mixed-content di WebKitGTK che aveva Xtream. Da fare:
+  estrarre un helper condiviso (es. `frontend/services/proxyFetch.ts`)
+  che instrada qualsiasi fetch IPTV/XMLTV attraverso `/iptv-proxy`,
+  e usarlo sia da `xtream.ts` (`fetchDirect`) sia da `epg/index.ts`
+  (`fetch(url, ...)` riga ~153). Vedi anche le altre `fetch()` ad-hoc
+  in `streamInfoService.ts`, `metadata.ts`, `downloadManager.ts`,
+  `streamInfo/vodProbe.ts` — non tutte vanno proxate (es. metadata
+  TMDB sono già CORS-friendly), ma vale la pena censirle in un
+  `IMPROVEMENT_TODO`.
 
 ## 🚀 Comandi Utili
 - `npm run dev`: Avvio sviluppo Electron.

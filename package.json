@@ -2,12 +2,9 @@
   "name": "streamai-iptv",
   "version": "1.0.0",
   "description": "StreamAI IPTV Player Client",
-  "main": "main.js",
   "scripts": {
-    "start": "npm run build && electron .",
-    "start:quiet": "npm run build && electron . 2>/dev/null",
-    "dev": "electron .",
-    "dev:quiet": "electron . 2>/dev/null",
+    "start": "npm run wails:run",
+    "dev": "npm run wails:dev",
     "build": "vite build",
     "version:sync": "node scripts/sync-version.mjs",
     "version:print": "node scripts/sync-version.mjs --print",
@@ -22,7 +19,7 @@
     "check": "npm run check:deps && npm run typecheck && npm run test:run && npm run check:media3 && npm run check:wails && npm run check:go && npm run build",
     "wails:build": "bash scripts/build-wails.sh",
     "wails:build:debug": "bash scripts/build-wails.sh --debug",
-    "wails:dev": "CGO_CFLAGS_ALLOW='-fno-strict-overflow|-fstack-clash-protection|-fcf-protection|-fno-omit-frame-pointer' wails3 dev -tags 'gtk3 mpv'",
+    "wails:dev": "CGO_CFLAGS_ALLOW='-fno-strict-overflow|-fstack-clash-protection|-fcf-protection|-fno-omit-frame-pointer' wails3 dev",
     "wails:run": "bash scripts/build-wails.sh && ./build/bin/streamai",
     "wails:bindings": "wails3 generate bindings -ts -d frontend/bindings ./...",
     "icons:generate": "node scripts/generate-icons.mjs",
@@ -35,19 +32,12 @@
     "dist:linux:debian": "bash scripts/build-linux.sh --debian",
     "dist:linux:ubuntu": "bash scripts/build-linux.sh --ubuntu",
     "dist:linux:arch": "bash scripts/build-linux.sh --arch",
-    "dist:linux:deb": "bash scripts/build-linux.sh --deb",
-    "dist:linux:rpm": "bash scripts/build-linux.sh --rpm",
-    "dist:linux:pacman": "bash scripts/build-linux.sh --pacman",
-    "dist:linux:appimage": "bash scripts/build-linux.sh --appimage",
-    "dist:linux:tar": "bash scripts/build-linux.sh --tar",
-    "dist:linux:all": "bash scripts/build-linux.sh --all",
     "repo:publish": "bash scripts/publish-repo.sh",
     "android:sync": "vite build && npx cap sync android",
     "android:open": "npx cap open android",
     "android:build": "vite build && npx cap sync android && cd android && ./gradlew assembleDebug",
     "android:build:release": "bash scripts/android-build-release.sh",
-    "android:run": "vite build && npx cap sync android && npx cap run android",
-    "postinstall": "node scripts/patch-ffmpeg.js || true"
+    "android:run": "vite build && npx cap sync android && npx cap run android"
   },
   "author": "StreamAI",
   "license": "MIT",
@@ -70,8 +60,6 @@
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.18",
     "capacitor-video-player": "file:android/plugins/capacitor-video-player",
-    "electron": "^37.2.4",
-    "electron-builder": "^24.13.0",
     "hls.js": "^1.5.7",
     "jmuxer": "^2.0.5",
     "jsdom": "25.0.1",
@@ -90,99 +78,6 @@
   },
   "dependencies": {
     "@google/genai": "^1.34.0",
-    "@wailsio/runtime": "^3.0.0-alpha.79",
-    "bonjour": "^3.5.0",
-    "castv2-client": "^1.2.0",
-    "node-ssdp": "^4.0.1",
-    "ws": "^8.20.0"
-  },
-  "build": {
-    "appId": "com.streamai.iptv",
-    "productName": "StreamAI",
-    "executableName": "streamai",
-    "asar": true,
-    "compression": "maximum",
-    "electronDist": "node_modules/electron/dist",
-    "buildDependenciesFromSource": false,
-    "removePackageScripts": true,
-    "electronLanguages": [
-      "en-US",
-      "it"
-    ],
-    "files": [
-      "frontend/dist/**/*",
-      "frontend/services/**/*",
-      "main.js",
-      "preload.js",
-      "icon.png",
-      "package.json"
-    ],
-    "linux": {
-      "target": [
-        "deb",
-        "rpm",
-        "pacman"
-      ],
-      "category": "AudioVideo;Video;Player;TV;Network",
-      "maintainer": "StreamAI <maintainer@streamai.app>",
-      "synopsis": "AI-powered IPTV Player",
-      "description": "Next-generation IPTV player with AI recommendations (Google Gemini), Chromecast/DLNA/AirPlay casting, Picture-in-Picture and full keyboard/remote control support.",
-      "vendor": "StreamAI",
-      "icon": "build/icons",
-      "desktop": {
-        "entry": {
-          "Name": "StreamAI",
-          "GenericName": "IPTV Player",
-          "Comment": "AI-powered IPTV Player with casting and PiP",
-          "Categories": "AudioVideo;Video;Player;TV;Network;",
-          "MimeType": "application/vnd.apple.mpegurl;application/x-mpegURL;video/mp2t;application/x-mpegurl;",
-          "Keywords": "IPTV;Video;Player;Streaming;Cast;Chromecast;DLNA;",
-          "StartupWMClass": "StreamAI",
-          "StartupNotify": "true"
-        }
-      }
-    },
-    "deb": {
-      "priority": "optional",
-      "depends": [
-        "libgtk-3-0",
-        "libnotify4",
-        "libnss3",
-        "libxss1",
-        "libxtst6",
-        "xdg-utils",
-        "libatspi2.0-0",
-        "libsecret-1-0",
-        "libdrm2",
-        "libgbm1",
-        "libasound2"
-      ]
-    },
-    "rpm": {
-      "depends": [
-        "xdg-utils",
-        "libnotify.so.4()(64bit)",
-        "libXss.so.1()(64bit)",
-        "libsecret-1.so.0()(64bit)",
-        "libgbm.so.1()(64bit)",
-        "libdrm.so.2()(64bit)",
-        "libasound.so.2()(64bit)"
-      ]
-    },
-    "pacman": {
-      "depends": [
-        "gtk3",
-        "libnotify",
-        "nss",
-        "libxss",
-        "libxtst",
-        "xdg-utils",
-        "at-spi2-core",
-        "libsecret",
-        "libdrm",
-        "mesa",
-        "alsa-lib"
-      ]
-    }
+    "@wailsio/runtime": "^3.0.0-alpha.79"
   }
 }

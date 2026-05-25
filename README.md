@@ -1,5 +1,7 @@
 # 📺 StreamAI IPTV Player
 
+[![CI](https://github.com/AlfioSaitta/StreamAI-IPTV/actions/workflows/ci.yml/badge.svg)](https://github.com/AlfioSaitta/StreamAI-IPTV/actions/workflows/ci.yml)
+
 **StreamAI** è un player IPTV di nuova generazione sviluppato con **React 19**, **TypeScript**, **Tailwind CSS** e un runtime desktop **Wails v3** (Go) — con **Electron** ancora supportato in parallelo durante la fase di migrazione. Si distingue per l'integrazione con **Google Gemini AI**, che offre raccomandazioni intelligenti sui contenuti basate sulle preferenze dell'utente, e per un ecosistema di networking avanzato per il casting e il controllo remoto.
 
 > 🚧 **Migrazione in corso (Electron → Wails v3 / Go).** Il backend desktop è in fase di riscrittura come applicazione Wails v3 con Service Go per discovery, advertising, cast, remote/WebSocket, netstatus, proxy e player. Lo stato di avanzamento, gli inventari Electron ↔ Wails e le fasi residue sono tracciati in [`docs/plan-go-wails-migration.md`](docs/plan-go-wails-migration.md) (rev. 5). Il binario Electron resta la build di riferimento finché le Fasi 5–10 non sono complete.

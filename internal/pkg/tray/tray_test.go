@@ -48,3 +48,26 @@ func TestMainWindowName(t *testing.T) {
 	}
 }
 
+// TestSetPlayLabel_NoCrashWhenTrayNotInitialized verifica che chiamare
+// SetPlayLabel prima che Setup() sia stato eseguito non panichi
+// (Fase 6.5.3: il subscriber PlayerService viene wirato in main.go
+// PRIMA dell'ApplicationStarted callback che inizializza il tray, e
+// può sparare eventi anche durante quel gap).
+func TestSetPlayLabel_NoCrashWhenTrayNotInitialized(t *testing.T) {
+	resetState() // garantisce playItemRef == nil
+	defer resetState()
+
+	SetPlayLabel("Pausa")     // non deve panicare
+	SetPlayLabel("Riproduci") // idem
+}
+
+// TestEventNamesStable congela i nomi degli eventi tray verso il
+// frontend: un rename qui rompe frontend/hooks/useTrayBridge.ts.
+func TestEventNamesStable(t *testing.T) {
+	if EventPlayPause != "tray:play-pause" {
+		t.Errorf("EventPlayPause=%q want tray:play-pause", EventPlayPause)
+	}
+	if EventPiPToggle != "tray:pip-toggle" {
+		t.Errorf("EventPiPToggle=%q want tray:pip-toggle", EventPiPToggle)
+	}
+}

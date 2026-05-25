@@ -6,14 +6,21 @@ This file provides context and guidelines for GitHub Copilot coding agent when w
 
 **StreamAI IPTV** is a next-generation IPTV player built with React 19, TypeScript, Electron, and Tailwind CSS. It features AI-powered recommendations using Google Gemini and supports cross-platform deployment (Linux, Windows, Android via Capacitor).
 
-> **Migration status (2026-05-20, plan rev. 6):** the desktop runtime is
-> migrating from Electron to **Go + Wails v3** (target v2.0.0). Backend Go
-> (fasi 0–5, 2-bis, gran parte di 7-bis) **complete**: 9 Wails Service
-> registrati in `cmd/streamai/main.go`. Frontend ancora 100% sull'API
-> Electron; Fase 7 (compat layer TS via `wailsBridge` + `hostBridge`) **in
-> corso**. Player nativo (Fase 6, libmpv + canvas WebGL2) **non ancora
-> iniziato** (gated da SPIKE-1/2/4). Vedi
-> [`docs/plan-go-wails-migration.md`](../docs/plan-go-wails-migration.md) §3.3.
+> **Migration status (2026-05-22, plan rev. 7):** the desktop runtime is
+> now **exclusively Go + Wails v3** (target v2.0.0). Electron has been
+> **removed from the repository** (Fase 7.3 "Stage A", 2026-05-22):
+> deleted files `main.js`, `preload.js`, `vite.main.config.js`,
+> `scripts/patch-ffmpeg.js`, `frontend/services/advertisingService.js`;
+> uninstalled npm deps `electron`, `electron-builder`, `castv2-client`,
+> `node-ssdp`, `bonjour`; removed `build` electron-builder section from
+> `package.json`. `npm run dev` now aliases `wails3 dev`. 9 Wails Service
+> Go are registered in `cmd/streamai/main.go` (54 TS methods in
+> `frontend/bindings/`). The frontend keeps `useWebPlayerEngine`
+> (Video.js + HLS.js + mpegts.js) as the intermediate player inside the
+> Wails webview until **Fase 6.1** swaps it for `useNativeMpvEngine`
+> (libmpv render-API + WebGL2 canvas). See
+> [`docs/plan-go-wails-migration.md`](../docs/plan-go-wails-migration.md) §3.3,
+> §7.3 and §14.
 
 **Key Capabilities:**
 - Live TV streaming, Movies (VOD), and Series with advanced playback features
@@ -26,7 +33,9 @@ This file provides context and guidelines for GitHub Copilot coding agent when w
 ## Tech Stack
 
 - **Framework:** React 19, TypeScript, Vite
-- **Desktop Runtime:** Electron (with custom HEVC codec support via BranchBit)
+- **Desktop Runtime:** **Wails v3** (Go backend + WebKitGTK 6.0/4.1 on
+  Linux, WebView2 on Windows, WKWebView on macOS). Electron removed
+  2026-05-22 (plan rev. 7).
 - **Mobile Runtime:** Capacitor 7 (Android)
 - **Styling:** Tailwind CSS (dark theme by default)
 - **Video Player:** 
@@ -233,6 +242,14 @@ These features define StreamAI's identity and must be preserved:
 11. **CI GPG headless:** `scripts/import-gpg-key.sh` enables `allow-preset-passphrase` in `gpg-agent.conf` and calls `gpg-preset-passphrase` for every keygrip (primary + subkeys) so `debsigs`/`rpm --addsign`/`gpg --detach-sign` never need to open `/dev/tty`. Both jobs (`build`, `pages`) must export `GPG_PASSPHRASE` to that step.
 12. **`gh-pages` deploy = Pages API + cache + Release fallback:** The `pages` job deploys via the **official GitHub Pages API** (`actions/configure-pages@v5` → `actions/upload-pages-artifact@v3` → `actions/deploy-pages@v4`, environment `github-pages`). This bypasses `git push` entirely, sidestepping the HTTP 500 we hit with `peaceiris/actions-gh-pages` once the accumulated repo grew too large for a single pack. Historical package retention: an `actions/cache` entry keyed `pages-history-v1-*` (seeded into `public-repo/` before `publish-repo.sh` runs) is the primary store; if the cache is evicted (7 days unused) the seed step falls back to `gh release download` of every `.deb`/`.rpm`/`.pkg.tar.zst`/`.sig`/`.asc` asset from past GitHub Releases — Release assets are permanent storage and have no push-size limit. The `gh-pages` branch is no longer used (even with `force_orphan: true` the push kept hitting HTTP 500 on the assembled repo size). **Required repo setting:** *Settings → Pages → Source: "GitHub Actions"* (not "Deploy from a branch"). Never reintroduce a `gh-pages` push step.
 13. **Version is read from `/.version`:** The base version (semver `x.y.z`) lives in the `.version` file at the repo root — single source of truth. `scripts/sync-version.mjs` propagates it to `package.json` and `android/app/build.gradle` (both `versionName` and `versionCode = maj*10000 + min*100 + pat`). Never hand-edit `package.json` `"version"` — always bump `.version` then run `npm run version:sync`. In CI, `linux-release.yml` exports `COMMIT_SHA=${GITHUB_SHA::7}` and `build-linux.sh` forwards it to `make-distro-config.mjs --commit`, which embeds the SHA in the artefact filename. Final pattern: `streamai-iptv_${version}_${commit}_${distro}_${arch}.${ext}` in CI, `streamai-iptv_${version}_${distro}_${arch}.${ext}` locally. The CI cross-check + `publish-repo.sh` globs match on `*_${distro}_*` (underscore-separated), not `*-${distro}.*`.
+14. **IPTV proxy = Wails asset-server middleware, NOT a separate TCP listener (2026-05-24).** WebKitGTK (and WebView2/WKWebView) blocks `fetch()` from the document origin (`wails://wails.localhost`) to a standalone `http://127.0.0.1:<port>` listener for mixed-content/CORS reasons — even with `Access-Control-Allow-Origin: *` on the response (error: `Network error: Load failed`). The fix is in `internal/services/proxy/service.go → AssetMiddleware()`, wired in `cmd/streamai/main.go` via `application.AssetOptions{ Middleware: application.Middleware(proxySvc.AssetMiddleware()) }`. The middleware intercepts the **same-origin** path `/iptv-proxy?u=<base64url>&ua=<...>` and forwards to `handleProxy()`. Frontend (`frontend/services/xtream.ts → resolveFetchURL`) builds proxy URLs client-side with `toBase64Url(url)` (no per-call IPC). The standalone TCP server on `127.0.0.1:<random>` still starts (legacy fallback for libmpv direct stream URLs in phase 6.x) but the frontend MUST NOT hit it directly — always use the relative `/iptv-proxy` path. Boot log confirmation: `AssetServer Info: middleware=true`.
+15. **Wails runtime detection requires `window._wails.environment`, NOT just `window._wails` (2026-05-23).** The `@wailsio/runtime` package executes `window._wails = window._wails || {}` as an import side-effect, so the bare presence of `window._wails` is **not** a reliable marker (it would yield `true` in jsdom tests / web dev). The Wails Go backend populates `window._wails.environment` (an object with `OS`/`Arch`/`Debug`) only when running inside the actual Wails app. `frontend/services/platformService.ts → detectWailsRuntime()` checks `Boolean(w._wails?.environment) || Boolean(w.wails)`. Detection is also **lazy** (re-evaluated on each `isWails` getter access) to handle the race where modules evaluate before the runtime injects.
+16. **`hostBridge.host` is a lazy `Proxy` (2026-05-23).** Same race issue: `host` is exported as a `Proxy({}, { get: () => resolveHost()[prop] })` that re-resolves on every property access. Don't write `if (host)` truthy checks — `Proxy` objects are always truthy. Use `platformService.isWails` / `platformService.isDesktop` for environment gating, then `host?.someMethod` for the call.
+17. **Electron is fully purged from frontend code (2026-05-23, rev. 7.4).** No more `platformService.isElectron`, no `window.electronAPI`, no `ElectronAPI` interface. The legacy shape is now `DesktopHostAPI` in `frontend/services/deviceDiscovery.ts`. Internal helpers were renamed: `isElectron → isDesktopBridge`, `electronUnsubscribe → desktopUnsubscribe`, `discoverViaElectron → discoverViaDesktop`. Comments that still mention "Electron" are historical context only and not actionable.
+
+## Known issues (rolling list)
+
+- **EPG not loading (2026-05-24, after Xtream proxy fix lands).** Live channels + VOD/series load fine through the new asset-server proxy, but the EPG (`frontend/services/epg/index.ts`) returns empty. To investigate: check whether the XMLTV URL fetches also need to go through `/iptv-proxy` (currently they probably hit direct `fetch()` and get the same CORS/mixed-content failure that Xtream had). Look for the `fetch(` calls in `frontend/services/epg/*` and route them through `resolveFetchURL`-equivalent. Suggested location for the helper: a small `proxyFetch.ts` module that both `xtream.ts` and `epg/index.ts` can share.
 
 ## Additional Context
 

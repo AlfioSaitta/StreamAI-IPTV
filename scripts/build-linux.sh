@@ -1,5 +1,30 @@
 #!/usr/bin/env bash
-# Build StreamAI Linux packages.
+# ⚠️ DEPRECATED — Electron-based packaging pipeline disabled (plan rev. 7,
+# Fase 7.3). Lo script richiede `electron-builder` + Docker image
+# `electronuserland/builder` che non sono più tra le dipendenze del repo
+# (rimosse con il drop Electron). Da riscrivere completamente in Fase 8
+# usando `wails3 build` + `nfpm pkg --packager deb|rpm|archlinux`.
+#
+# Per ora lo script aborta immediatamente per evitare build silenziosamente
+# rotte. Vedi `docs/plan-go-wails-migration.md` §8.
+set -euo pipefail
+
+if [[ "${ALLOW_LEGACY_ELECTRON_BUILD:-0}" != "1" ]]; then
+  cat >&2 <<'MSG'
+[build-linux.sh] DEPRECATED — Electron-based pipeline rimossa (plan rev. 7).
+La pipeline Wails (nfpm + wails3 build) è in costruzione (Fase 8 del piano).
+Per ora puoi:
+  • costruire un binario Wails locale:  npm run wails:build
+  • produrre un package Wails (WIP):    bash scripts/build-wails.sh
+
+Per forzare l'esecuzione legacy (richiede manualmente electron + electron-builder),
+esporta ALLOW_LEGACY_ELECTRON_BUILD=1.
+MSG
+  exit 1
+fi
+
+# Build StreamAI Linux packages (legacy Electron path — kept only for
+# reference until Fase 8 lands).
 #
 # Defaults to auto-detecting the host distribution via /etc/os-release and
 # producing a native package tailored to that distro (correct dependency
