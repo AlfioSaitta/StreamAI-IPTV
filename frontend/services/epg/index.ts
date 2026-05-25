@@ -6,6 +6,7 @@
 import type { EpgProgramme, XtreamCredentials } from '../../types.ts';
 import { CacheService } from '../cacheService.ts';
 import { parseXmltvAsync } from '../workers/index.ts';
+import { proxyFetch } from '../proxyFetch.ts';
 
 const EPG_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 const PAST_PROGRAMME_RETENTION_MS = 24 * 60 * 60 * 1000; // keep 24h backlog
@@ -150,9 +151,8 @@ class EpgServiceClass {
   private async fetchXmltv(creds: XtreamCredentials): Promise<string> {
     const baseUrl = normalizeBaseUrl(creds.url);
     const url = `${baseUrl}/xmltv.php?username=${encodeURIComponent(creds.username)}&password=${encodeURIComponent(creds.password)}`;
-    const res = await fetch(url, {
+    const res = await proxyFetch(url, {
       headers: {
-        'User-Agent': 'StreamAI IPTV',
         'Accept': 'application/xml, text/xml, */*',
       },
     });

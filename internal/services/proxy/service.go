@@ -44,8 +44,13 @@ const (
 	// defaultUserAgent replica details.requestHeaders['User-Agent'] = 'StreamAI IPTV'
 	// di main.js:291. Override per-request via query string `ua=`.
 	defaultUserAgent = "StreamAI IPTV"
-	// proxyPath è il path servito dal proxy locale.
+	// proxyPath è il path servito dal proxy locale (server TCP standalone).
 	proxyPath = "/proxy"
+	// AssetMiddlewarePath è il path same-origin servito tramite l'asset
+	// server di Wails (vedi `AssetMiddleware`). Il frontend lo usa per
+	// evitare il blocco mixed-content/CORS della webview quando fa fetch
+	// verso `http://127.0.0.1:<port>` (origine diversa da `wails://`).
+	AssetMiddlewarePath = "/iptv-proxy"
 	// readHeaderTimeout protegge dal Slowloris (gosec G112).
 	readHeaderTimeout = 10 * time.Second
 	// dialTimeout per la connessione TCP iniziale upstream.
@@ -178,6 +183,28 @@ func (s *Service) SetInsecure(insecure bool) {
 	s.insecure = insecure
 	s.httpClient = buildHTTPClient(insecure)
 	s.mu.Unlock()
+}
+
+// AssetMiddleware ritorna un middleware HTTP che intercetta le richieste a
+// `AssetMiddlewarePath` (`/iptv-proxy`) e le inoltra all'handler proxy IPTV,
+// lasciando passare tutto il resto al `next` handler (asset server Vite/embed).
+//
+// Razionale: la webview di Wails (WebKitGTK/WebView2/WKWebView) blocca le
+// fetch cross-origin dal documento (`wails://wails.localhost`) verso un
+// server HTTP standalone su `127.0.0.1:<port>` per mixed-content / CORS,
+// anche se quest'ultimo risponde con `Access-Control-Allow-Origin: *`.
+// Esponendo il proxy come middleware dell'asset server otteniamo un endpoint
+// **same-origin** che la webview accetta senza vincoli.
+func (s *Service) AssetMiddleware() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == AssetMiddlewarePath {
+				s.handleProxy(w, r)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // BuildProxyURL costruisce l'URL locale che il player deve usare al

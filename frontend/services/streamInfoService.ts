@@ -17,6 +17,7 @@ import {
   resolveHlsReference,
   type StreamCodecInfo,
 } from './streamInfo';
+import { proxyFetch } from './proxyFetch.ts';
 export { analyzeVideoBytes } from './streamInfo';
 export type { StreamCodecInfo } from './streamInfo';
 class StreamInfoService {
@@ -708,7 +709,7 @@ class StreamInfoService {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-      const response = await fetch(url, {
+      const response = await proxyFetch(url, {
         method: 'GET',
         headers: {
           'Range': 'bytes=0-65535'
@@ -773,7 +774,7 @@ class StreamInfoService {
           try {
             const nestedController = new AbortController();
             const nestedTimeoutId = setTimeout(() => nestedController.abort(), 8000);
-            const nestedResponse = await fetch(firstReference, { headers: { 'Range': 'bytes=0-65535' }, signal: nestedController.signal });
+            const nestedResponse = await proxyFetch(firstReference, { headers: { 'Range': 'bytes=0-65535' }, signal: nestedController.signal });
             clearTimeout(nestedTimeoutId);
 
             if (nestedResponse.ok || nestedResponse.status === 206) {

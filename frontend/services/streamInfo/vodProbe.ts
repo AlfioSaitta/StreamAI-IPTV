@@ -13,6 +13,8 @@
 // from cache instead of re-downloading. Even Electron's `net` module respects
 // the standard HTTP cache, so this works there too.
 
+import { proxyFetch } from '../proxyFetch.ts';
+
 export type VodRangeSupport = 'unknown' | 'yes' | 'no';
 
 export interface VodProbeResult {
@@ -78,7 +80,7 @@ export const probeVodSource = async (
     // Step 1 — HEAD to discover Accept-Ranges + Content-Type + length.
     try {
       const headResp = await withTimeout(
-        fetch(url, { method: 'HEAD', cache: 'no-store', credentials: 'omit' }),
+        proxyFetch(url, { method: 'HEAD', cache: 'no-store', credentials: 'omit' }),
         HEAD_TIMEOUT_MS,
         'HEAD',
       );
@@ -97,7 +99,7 @@ export const probeVodSource = async (
       // HEAD might not be allowed by the server; try a tiny ranged GET as fallback
       try {
         const tinyResp = await withTimeout(
-          fetch(url, {
+          proxyFetch(url, {
             method: 'GET',
             cache: 'no-store',
             credentials: 'omit',
@@ -139,7 +141,7 @@ export const probeVodSource = async (
       try {
         const tailStart = result.contentLength! - TAIL_PREFETCH_BYTES;
         const tailResp = await withTimeout(
-          fetch(url, {
+          proxyFetch(url, {
             method: 'GET',
             // IMPORTANT: keep the default cache mode so the browser stores the
             // tail in its HTTP cache. We do NOT use no-store here.

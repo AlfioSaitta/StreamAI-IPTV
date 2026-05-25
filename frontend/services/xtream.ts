@@ -9,9 +9,9 @@ import {
 } from '../types.ts';
 import { MetadataService } from './metadata.ts';
 import { CacheService } from './cacheService.ts';
-
-// User-Agent per tutte le richieste IPTV
-const IPTV_USER_AGENT = 'StreamAI IPTV';
+import platformService from './platformService.ts';
+import { proxyFetch } from './proxyFetch.ts';
+import CatalogWorker from './catalogWorker.ts?worker';
 
 // BUG-1 §2.3 Step 3 + hotfix 2026-05-14: timeout esplicito per le fetch del
 // catalogo. I provider Xtream possono rispondere 503 sotto carico, e i
@@ -30,19 +30,56 @@ const RETRY_BACKOFF_MS = 1_500;
 type FetchResult<T> = { ok: true; data: T[] } | { ok: false; reason: string };
 
 // Helper for direct fetching con User-Agent IPTV e timeout
+//
+// FIX 2026-05-23 (Xtream connectivity dopo rimozione Electron):
+// Su Wails v3 la webview (WebKitGTK 6.0/4.1 su Linux, WebView2 su Windows)
+// blocca le `fetch()` cross-origin verso server IPTV `http://` perché:
+//   1. Il documento è servito da `wails://` (contesto secure) → mixed-content.
+//   2. I provider Xtream non rispondono con header CORS (`Access-Control-
+//      Allow-Origin`), quindi anche con HTTPS il browser scarta la risposta.
+//   3. L'header `User-Agent` non è impostabile da fetch in molte webview
+//      (è un "forbidden header name").
+// Soluzione: instradare ogni chiamata al `player_api.php` (e in generale a
+// qualunque endpoint IPTV) attraverso il proxy HTTP locale Go
+// (`internal/services/proxy/`), che gira su `127.0.0.1:<port>` (origine
+// same-app), riscrive l'User-Agent server-side e aggiunge
+// `Access-Control-Allow-Origin: *` in risposta.
+//
+
 const fetchDirect = async (url: string, timeoutMs = DEFAULT_FETCH_TIMEOUT_MS): Promise<unknown> => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, {
-      headers: {
-        'User-Agent': IPTV_USER_AGENT,
-        'Accept': '*/*',
-      },
-      signal: controller.signal,
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
+    let res: Response;
+    try {
+      res = await proxyFetch(url, {
+        headers: {
+          'Accept': '*/*',
+        },
+        signal: controller.signal,
+      });
+    } catch (netErr) {
+      // Su WebKitGTK le fetch CORS/mixed-content falliscono con
+      // `TypeError: NetworkError when attempting to fetch resource.` —
+      // riportiamo un messaggio diagnosticabile lato UI.
+      const why = (netErr as Error)?.message || String(netErr);
+      const isWails = platformService.isWails;
+      const hint = isWails
+        ? '(via proxy locale Go)'
+        : '(fetch diretta: probabile CORS/mixed-content su WebKitGTK)';
+      throw new Error(`Network error ${hint}: ${why}`);
+    }
+    const viaProxy = platformService.isWails;
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status} ${res.statusText || ''} ${viaProxy ? '(via proxy)' : '(direct)'}`.trim());
+    }
+    const text = await res.text();
+    try {
+      return JSON.parse(text);
+    } catch (parseErr) {
+      const preview = text.slice(0, 120).replace(/\s+/g, ' ');
+      throw new Error(`Invalid JSON from server: ${preview} (${(parseErr as Error).message})`);
+    }
   } catch (err) {
     if ((err as Error).name === 'AbortError') {
       throw new Error(`Request timeout after ${timeoutMs}ms`);
@@ -325,6 +362,27 @@ export const loginXtream = async (creds: XtreamCredentials, forceRefresh = false
         : filtered.sort((a, b) => a.name.localeCompare(b.name));
     };
 
+    const runProcessContent = (categories: any[], streams: any[], type: 'live' | 'movie' | 'series'): Promise<Category[]> => {
+      return new Promise((resolve) => {
+        // Fallback sincrono se Worker non disponibile (es. test o ambienti ristretti)
+        if (typeof Worker === 'undefined') {
+          resolve(processContent(categories, streams, type));
+          return;
+        }
+        const worker = new CatalogWorker();
+        worker.onmessage = (e) => {
+          resolve(e.data.result);
+          worker.terminate();
+        };
+        worker.onerror = (err) => {
+          console.error('[Xtream] Worker error:', err);
+          resolve(processContent(categories, streams, type));
+          worker.terminate();
+        };
+        worker.postMessage({ categories, streams, type, baseUrl, credentials: creds });
+      });
+    };
+
     // Estrai i dati grezzi (array vuoto su errore: la health structure tiene
     // comunque traccia del fallimento per la UI).
     const liveCats      = liveCatsRes.ok      ? liveCatsRes.data      : [];
@@ -334,9 +392,15 @@ export const loginXtream = async (creds: XtreamCredentials, forceRefresh = false
     const seriesCats    = seriesCatsRes.ok    ? seriesCatsRes.data    : [];
     const seriesStreams = seriesStreamsRes.ok ? seriesStreamsRes.data : [];
 
-    const liveCategories   = processContent(liveCats,   liveStreams,   'live');
-    const vodCategories    = processContent(vodCats,    vodStreams,    'movie');
-    const seriesCategories = processContent(seriesCats, seriesStreams, 'series');
+    const [
+      liveCategories,
+      vodCategories,
+      seriesCategories,
+    ] = await Promise.all([
+      runProcessContent(liveCats,   liveStreams,   'live'),
+      runProcessContent(vodCats,    vodStreams,    'movie'),
+      runProcessContent(seriesCats, seriesStreams, 'series'),
+    ]);
 
     // BUG-1 §2.3 Step 1: deriva health *prima* del merge.
     const fetchedAt = Date.now();
