@@ -30,6 +30,10 @@ import CastDevicePicker from './CastDevicePicker';
 import MiniEpgOverlay from './MiniEpgOverlay';
 import AutoNextOverlay from './player/AutoNextOverlay';
 import SleepTimerMenu from './player/SleepTimerMenu';
+import PlaylistSidebar from './player/PlaylistSidebar';
+import PlayerControls from './player/PlayerControls';
+import AudioTrackMenu from './player/AudioTrackMenu';
+import SubtitleMenu from './player/SubtitleMenu';
 import StreamDiagnostics, {
   type BufferStats,
 } from './player/StreamDiagnostics';
@@ -42,37 +46,12 @@ import {
 } from './player/playerTypes';
 import {
   detectStreamSource,
-  formatTime,
   sanitizeStreamUrl,
 } from './player/playerUtils';
 import {
-  AlertTriangle, Play, Pause, Volume2, VolumeX, Maximize, Minimize,
-  SkipForward, SkipBack, List, X, FastForward, Rewind, RotateCcw,
-  PictureInPicture2, Loader2, Info, Cast, Tv, Headphones, Volume1, Calendar, Moon,
-  Subtitles, Upload, CheckCircle2, Copy, Check
+  AlertTriangle, Pause, Loader2, Copy, Check, RotateCcw, Play, Volume2, VolumeX, FastForward, Rewind,
+  Maximize, Minimize, Volume1, PictureInPicture2, Subtitles, Tv, Info, Moon
 } from 'lucide-react';
-// @ts-ignore
-import { List as VirtualList } from 'react-window';
-
-// --- COMPONENTS ---
-
-const PlaylistRow = ({ index, style, playlist, currentChannelId, onChannelSelect }: any) => {
-  const c = playlist[index];
-  const isActive = c.id === currentChannelId;
-  return (
-    <div style={style} className="px-1 py-1">
-      <button 
-        key={c.id}
-        onClick={() => onChannelSelect && onChannelSelect(c)}
-        className={`tv-focus w-full text-left p-3 rounded-lg flex items-center gap-3 transition-colors ${isActive ? 'bg-brand-primary text-white' : 'hover:bg-white/10 text-gray-300'}`}
-      >
-          {c.logo && <img src={c.logo} alt={c.name} className="w-8 h-8 object-contain bg-black rounded" loading="lazy" />}
-          <span className="truncate text-sm font-medium">{c.cleanName || c.name}</span>
-      </button>
-    </div>
-  );
-};
-
 // --- TYPES ---
 
 interface VideoPlayerProps {
@@ -1536,337 +1515,103 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
 
       {/* PLAYLIST OVERLAY */}
       {channel.type !== 'movie' && (
-        <div className={`absolute top-0 right-0 bottom-0 w-80 bg-black/90 backdrop-blur-xl border-l border-white/10 z-[60] transform transition-transform duration-300 flex flex-col ${showPlaylist ? 'translate-x-0' : 'translate-x-full'}`}>
-            <div className="p-4 border-b border-white/10 flex items-center justify-between">
-                <h3 className="font-bold text-white">Canali ({playlist.length})</h3>
-                <button onClick={() => setShowPlaylist(false)} aria-label="Chiudi lista canali" className="tv-focus touch-target p-2 rounded-full hover:bg-white/10"><X className="w-5 h-5" /></button>
-            </div>
-            <div className="flex-1 p-2 overflow-hidden">
-                <VirtualList
-                  style={{ height: window.innerHeight - 100 }}
-                  className="scrollbar-hide"
-                  rowCount={playlist.length}
-                  rowHeight={64}
-                  rowComponent={PlaylistRow}
-                  rowProps={{ playlist, currentChannelId: channel.id, onChannelSelect }}
-                />
-            </div>
-        </div>
+        <PlaylistSidebar
+          show={showPlaylist}
+          onClose={() => setShowPlaylist(false)}
+          playlist={playlist}
+          currentChannelId={channel.id}
+          onChannelSelect={onChannelSelect!}
+        />
       )}
 
       {/* AUDIO TRACKS MENU */}
-      {showAudioMenu && audioTracks.length > 1 && (
-        <div className="absolute bottom-20 right-4 w-64 bg-black/90 backdrop-blur-xl border border-white/10 rounded-2xl p-2 z-[70] shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-200">
-          <div className="p-3 border-b border-white/10 flex items-center justify-between mb-2">
-            <h3 className="font-bold text-white text-sm">Tracce Audio</h3>
-            <button onClick={() => setShowAudioMenu(false)} aria-label="Chiudi menu tracce audio" className="tv-focus touch-target p-1 rounded-full hover:bg-white/10"><X className="w-4 h-4 text-gray-400" /></button>
-          </div>
-          <div className="space-y-1">
-            {audioTracks.map((track) => (
-              <button
-                key={track.id}
-                onClick={() => handleAudioTrackChange(track.id)}
-                className={`tv-focus w-full text-left p-3 rounded-xl flex items-center justify-between transition-all ${
-                  track.enabled 
-                    ? 'bg-brand-primary/20 text-brand-primary border border-brand-primary/30' 
-                    : 'hover:bg-white/10 text-gray-300 border border-transparent'
-                }`}
-              >
-                <div className="flex flex-col">
-                  <span className="text-sm font-bold capitalize">{track.label || `Traccia ${track.id}`}</span>
-                  {track.language && <span className="text-[10px] opacity-60 uppercase tracking-widest">{track.language}</span>}
-                </div>
-                {track.enabled && <div className="w-2 h-2 rounded-full bg-brand-primary animate-pulse" />}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      <AudioTrackMenu
+        show={showAudioMenu}
+        onClose={() => setShowAudioMenu(false)}
+        tracks={audioTracks}
+        onTrackChange={handleAudioTrackChange}
+      />
 
       {/* SUBTITLE MENU (D.4) */}
-      {showSubtitleMenu && (channel.type === 'movie' || channel.type === 'series') && (
-        <div className="absolute bottom-20 right-4 w-72 bg-black/90 backdrop-blur-xl border border-white/10 rounded-2xl p-2 z-[70] shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-200">
-          <div className="p-3 border-b border-white/10 flex items-center justify-between mb-2">
-            <h3 className="font-bold text-white text-sm flex items-center gap-2"><Subtitles className="w-4 h-4" /> Sottotitoli</h3>
-            <button onClick={() => setShowSubtitleMenu(false)} aria-label="Chiudi menu sottotitoli" className="tv-focus touch-target p-1 rounded-full hover:bg-white/10"><X className="w-4 h-4 text-gray-400" /></button>
-          </div>
-          <div className="space-y-1 p-1">
-            {/* "Off" entry */}
-            <button
-              onClick={removeSubtitle}
-              className={`tv-focus w-full text-left p-3 rounded-xl flex items-center justify-between transition-all ${
-                !activeSubtitle ? 'bg-brand-primary/20 text-brand-primary border border-brand-primary/30' : 'hover:bg-white/10 text-gray-300 border border-transparent'
-              }`}
-            >
-              <span className="text-sm font-bold">Disattivati</span>
-              {!activeSubtitle && <CheckCircle2 className="w-4 h-4" />}
-            </button>
-
-            {/* Currently loaded subtitle */}
-            {activeSubtitle && (
-              <button
-                onClick={() => setSubtitleEnabled(prev => !prev)}
-                className={`tv-focus w-full text-left p-3 rounded-xl flex items-center justify-between transition-all ${
-                  subtitleEnabled ? 'bg-brand-primary/20 text-brand-primary border border-brand-primary/30' : 'hover:bg-white/10 text-gray-300 border border-transparent'
-                }`}
-              >
-                <div className="flex flex-col min-w-0">
-                  <span className="text-sm font-bold truncate">{activeSubtitle.label}</span>
-                  <span className="text-[10px] opacity-60 uppercase tracking-widest">
-                    {activeSubtitle.format} · {activeSubtitle.cueCount} cue
-                  </span>
-                </div>
-                {subtitleEnabled && <CheckCircle2 className="w-4 h-4 shrink-0" />}
-              </button>
-            )}
-
-            {/* Load file */}
-            <button
-              onClick={() => subtitleFileInputRef.current?.click()}
-              className="tv-focus w-full text-left p-3 rounded-xl flex items-center gap-2 hover:bg-white/10 text-gray-200 border border-transparent transition-all"
-            >
-              <Upload className="w-4 h-4" />
-              <span className="text-sm font-medium">Carica file (.srt / .vtt)</span>
-            </button>
-
-            <p className="px-3 py-2 text-[11px] text-gray-500 leading-relaxed">
-              MVP: un solo file alla volta, conversione SRT→VTT automatica.
-              I sottotitoli si resettano al cambio di episodio/film.
-            </p>
-          </div>
-          <input
-            ref={subtitleFileInputRef}
-            type="file"
-            accept=".srt,.vtt,application/x-subrip,text/vtt,text/plain"
-            className="hidden"
-            onChange={e => {
-              const f = e.target.files?.[0];
-              void handleSubtitleFile(f);
-              // Allow picking the same file twice in a row.
-              if (e.target) e.target.value = '';
-            }}
-          />
-        </div>
-      )}
+      <SubtitleMenu
+        show={showSubtitleMenu && (channel.type === 'movie' || channel.type === 'series')}
+        onClose={() => setShowSubtitleMenu(false)}
+        activeSubtitle={activeSubtitle}
+        subtitleEnabled={subtitleEnabled}
+        onToggleEnabled={() => setSubtitleEnabled(prev => !prev)}
+        onFileSelect={() => subtitleFileInputRef.current?.click()}
+        onRemove={removeSubtitle}
+      />
+      <input
+        ref={subtitleFileInputRef}
+        type="file"
+        accept=".srt,.vtt,application/x-subrip,text/vtt,text/plain"
+        className="hidden"
+        onChange={e => {
+          const f = e.target.files?.[0];
+          void handleSubtitleFile(f);
+          if (e.target) e.target.value = '';
+        }}
+      />
 
       {/* CONTROLS BAR */}
-      <div className={`absolute inset-0 z-30 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-        <div className="absolute top-0 left-0 right-0 p-4 bg-gradient-to-b from-black/80 to-transparent flex justify-between items-center">
-          <div className="flex items-center gap-4">
-            <button onClick={onBack} aria-label="Indietro" title="Indietro (Esc)" className="tv-focus touch-target p-2 rounded-full bg-white/10 hover:bg-white/20"><X className="w-6 h-6 text-white" /></button>
-            <div>
-              <h2 className="text-white font-semibold text-lg truncate max-w-md">{channel.cleanName || channel.name}</h2>
-              {channel.group && <p className="text-gray-400 text-sm">{channel.group}</p>}
-            </div>
-          </div>
-        </div>
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          {isBuffering && (
-            <div className="flex flex-col items-center gap-4">
-              <Loader2 className="w-16 h-16 text-brand-primary animate-spin" />
-              <span className="text-white/70 text-sm font-medium animate-pulse tracking-widest uppercase">Caricamento...</span>
-            </div>
-          )}
-          {!isPlaying && !isBuffering && !osd.visible && showControls && (
-             <div className="bg-black/40 backdrop-blur-md p-8 rounded-full border border-white/10 animate-in zoom-in duration-300 pointer-events-auto">
-                <button 
-                  onClick={togglePlay} 
-                  aria-label="Play" 
-                  className="tv-focus touch-target group"
-                >
-                  <Play className="w-16 h-16 text-white group-hover:scale-110 transition-transform" fill="white" />
-                </button>
-             </div>
-          )}
-        </div>
-        <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 to-transparent">
-          {channel.type !== 'live' && duration > 0 && (
-            <div className="mb-4">
-              {seekDisabledReason && (
-                <div className="mb-2 px-3 py-2 rounded-md bg-amber-500/15 border border-amber-400/40 text-amber-100 text-xs flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 shrink-0" />
-                  <span>{seekDisabledReason}</span>
-                </div>
-              )}
-              <div
-                ref={timelineRef}
-                className={`relative h-2 bg-white/20 rounded-full group/timeline transition-all duration-200 touch-none ${seekDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:h-3'}`}
-                role="slider"
-                aria-label="Posizione di riproduzione"
-                aria-valuemin={0}
-                aria-valuemax={duration}
-                aria-valuenow={displayTime}
-                aria-valuetext={formatTime(displayTime)}
-                aria-disabled={seekDisabled}
-                tabIndex={seekDisabled ? -1 : 0}
-                onPointerDown={seekDisabled ? undefined : handleTimelinePointerDown}
-                onMouseMove={seekDisabled ? undefined : handleTimelineMouseMove}
-                onMouseLeave={seekDisabled ? undefined : handleTimelineMouseLeave}
-                onKeyDown={(e) => {
-                  if (seekDisabled) return;
-                  // Keyboard accessibility: arrows seek ±5s, PageUp/Down ±30s,
-                  // Home/End jump to start/end. Single seek per keystroke.
-                  let next: number | null = null;
-                  if (e.key === 'ArrowRight') next = Math.min(duration, displayTime + 5);
-                  else if (e.key === 'ArrowLeft') next = Math.max(0, displayTime - 5);
-                  else if (e.key === 'PageUp') next = Math.min(duration, displayTime + 30);
-                  else if (e.key === 'PageDown') next = Math.max(0, displayTime - 30);
-                  else if (e.key === 'Home') next = 0;
-                  else if (e.key === 'End') next = Math.max(0, duration - 1);
-                  if (next !== null) { e.preventDefault(); performSeek(next); }
-                }}
-              >
-                {/* Buffered Bar */}
-                <div className="absolute h-full bg-white/30 rounded-full" style={{ width: '0%' }} />
-                
-                {/* Played Bar — tracks displayTime so the playhead follows the
-                    user's finger during scrubbing instead of lagging behind. */}
-                <div className="absolute h-full bg-brand-primary rounded-full" style={{ width: `${(displayTime / duration) * 100}%` }} />
-
-                {/* Hover Ghost Bar */}
-                {hoverTime !== null && (
-                  <div className="absolute h-full bg-white/20 rounded-full" style={{ width: `${hoverPos}%` }} />
-                )}
-
-                {/* Thumb — always visible during scrubbing, otherwise on hover */}
-                <div
-                  className={`absolute top-1/2 w-4 h-4 bg-brand-primary rounded-full shadow-lg transition-transform duration-200 ${isScrubbing ? 'scale-125' : 'scale-0 group-hover/timeline:scale-100'}`}
-                  style={{ left: `${(displayTime / duration) * 100}%`, transform: 'translate(-50%, -50%)' }}
-                />
-
-                {/* Tooltip */}
-                {(hoverTime !== null || isScrubbing) && (
-                  <div
-                    className="absolute bottom-5 -translate-x-1/2 bg-black/80 text-white text-xs px-2 py-1 rounded border border-white/10 whitespace-nowrap pointer-events-none"
-                    style={{ left: `${hoverPos}%` }}
-                  >
-                    {formatTime(hoverTime ?? scrubTime ?? 0)}
-                  </div>
-                )}
-              </div>
-              <div className="flex justify-between text-xs text-gray-400 mt-2 font-medium">
-                <span>{formatTime(displayTime)}</span><span>{formatTime(duration)}</span>
-              </div>
-            </div>
-          )}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              {/* Left Controls */}
-              <div className="flex items-center gap-2 group/vol">
-                <button onClick={toggleMute} aria-label={isMuted || volume === 0 ? 'Riattiva audio' : 'Disattiva audio'} title={`${isMuted || volume === 0 ? 'Riattiva audio' : 'Muto'} (M)`} className="tv-focus touch-target p-2 hover:bg-white/10 rounded-full">
-                  {isMuted || volume === 0 ? <VolumeX className="w-6 h-6 text-white" /> : <Volume2 className="w-6 h-6 text-white" />}
-                </button>
-                <div className="w-0 group-hover/vol:w-24 overflow-hidden transition-all duration-300">
-                  <input
-                    type="range" min="0" max="1" step="0.05" value={isMuted ? 0 : volume}
-                    onChange={handleVolumeChange}
-                    aria-label="Volume"
-                    className="w-full h-1 bg-white/30 rounded-full appearance-none cursor-pointer"
-                  />
-                </div>
-              </div>
-              {(channel.type === 'movie' || channel.type === 'series') && currentTime > 30 && !seekDisabled && (
-                <button onClick={restartFromBeginning} aria-label="Riparti dall'inizio" className="tv-focus touch-target p-2 hover:bg-white/10 rounded-full" title="Riparti dall'inizio">
-                  <RotateCcw className="w-6 h-6 text-white" />
-                </button>
-              )}
-            </div>
-
-            {/* Center Controls */}
-            <div className="flex items-center gap-2">
-              {onPrev && <button onClick={onPrev} aria-label="Precedente" title="Precedente" className="tv-focus touch-target p-2 hover:bg-white/10 rounded-full"><SkipBack className="w-6 h-6 text-white" /></button>}
-              <button onClick={() => skip(-10)} disabled={seekDisabled} aria-label="Indietro 10 secondi" title={seekDisabled ? 'Seek non supportato dal server' : 'Indietro 10s (←)'} className={`tv-focus touch-target p-2 rounded-full ${seekDisabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-white/10'}`}><Rewind className="w-6 h-6 text-white" /></button>
-              <button onClick={togglePlay} aria-label={isPlaying ? 'Pausa' : 'Play'} title={`${isPlaying ? 'Pausa' : 'Play'} (Spazio)`} className="tv-focus touch-target p-3 bg-white/10 hover:bg-white/20 rounded-full">{isPlaying ? <Pause className="w-8 h-8 text-white" /> : <Play className="w-8 h-8 text-white" fill="white" />}</button>
-              <button onClick={() => skip(10)} disabled={seekDisabled} aria-label="Avanti 10 secondi" title={seekDisabled ? 'Seek non supportato dal server' : 'Avanti 10s (→)'} className={`tv-focus touch-target p-2 rounded-full ${seekDisabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-white/10'}`}><FastForward className="w-6 h-6 text-white" /></button>
-              {onNext && <button onClick={onNext} aria-label="Successivo" title="Successivo" className="tv-focus touch-target p-2 hover:bg-white/10 rounded-full"><SkipForward className="w-6 h-6 text-white" /></button>}
-            </div>
-
-            {/* Right Controls */}
-            <div className="flex items-center gap-2">
-              {isLive && channel.tvgId && (
-                <button
-                  onClick={() => setShowMiniEpg(prev => !prev)}
-                  aria-label="Guida TV"
-                  aria-pressed={showMiniEpg}
-                  className={`tv-focus touch-target p-2 hover:bg-white/10 rounded-full transition-colors ${showMiniEpg ? 'text-brand-primary bg-white/10' : 'text-white'}`}
-                  title="Guida TV (G)"
-                >
-                  <Calendar className="w-6 h-6" />
-                </button>
-              )}
-              {(channel.type === 'series' || channel.type === 'live') && (
-                <button onClick={() => setShowPlaylist(true)} aria-label={channel.type === 'series' ? "Lista episodi" : "Lista canali"} className="tv-focus touch-target p-2 hover:bg-white/10 rounded-full" title={channel.type === 'series' ? "Lista episodi (L)" : "Lista canali (L)"}>
-                  <List className="w-6 h-6 text-white" />
-                </button>
-              )}
-              {audioTracks.length > 1 && (
-                <button 
-                  onClick={() => setShowAudioMenu(!showAudioMenu)} 
-                  aria-label="Tracce audio"
-                  aria-pressed={showAudioMenu}
-                  className={`tv-focus touch-target p-2 hover:bg-white/10 rounded-full transition-colors ${showAudioMenu ? 'text-brand-primary bg-white/10' : 'text-white'}`}
-                  title="Lingue Audio"
-                >
-                  <Headphones className="w-6 h-6" />
-                </button>
-              )}
-              {/* D.4 — Subtitles (sideload SRT/VTT) */}
-              {(channel.type === 'movie' || channel.type === 'series') && (
-                <button
-                  onClick={() => setShowSubtitleMenu(prev => !prev)}
-                  aria-label="Sottotitoli"
-                  aria-pressed={showSubtitleMenu || (activeSubtitle !== null && subtitleEnabled)}
-                  className={`tv-focus touch-target p-2 hover:bg-white/10 rounded-full transition-colors ${
-                    activeSubtitle && subtitleEnabled ? 'text-brand-primary bg-white/10' : showSubtitleMenu ? 'text-white bg-white/10' : 'text-white'
-                  }`}
-                  title="Sottotitoli (S)"
-                >
-                  <Subtitles className="w-6 h-6" />
-                </button>
-              )}
-              <button onClick={updateStreamInfo} aria-label="Info stream/codec" className="tv-focus touch-target p-2 hover:bg-white/10 rounded-full" title="Info Codec">
-                <Info className="w-6 h-6 text-white" />
-              </button>
-              {/* D.5 — Sleep timer */}
-              <button
-                onClick={() => setShowSleepMenu(prev => !prev)}
-                aria-label={sleepTimer.preset !== 'off' ? `Sleep timer attivo (${formatSleepRemaining(sleepTimer.remainingSeconds)})` : 'Sleep timer'}
-                aria-pressed={showSleepMenu || sleepTimer.preset !== 'off'}
-                className={`tv-focus touch-target relative p-2 hover:bg-white/10 rounded-full transition-colors ${
-                  sleepTimer.preset !== 'off' ? 'text-amber-300' : 'text-white'
-                }`}
-                title={sleepTimer.preset !== 'off' ? `Sleep timer: ${formatSleepRemaining(sleepTimer.remainingSeconds)} (T)` : 'Sleep timer (T)'}
-              >
-                <Moon className="w-6 h-6" />
-                {sleepTimer.preset !== 'off' && sleepTimer.remainingSeconds > 0 && (
-                  <span className="absolute -bottom-1 -right-1 bg-amber-500 text-black text-[9px] font-mono font-bold rounded-full px-1 leading-tight min-w-[18px] text-center">
-                    {sleepTimer.remainingSeconds >= 60
-                      ? `${Math.ceil(sleepTimer.remainingSeconds / 60)}m`
-                      : `${sleepTimer.remainingSeconds}s`}
-                  </span>
-                )}
-              </button>
-              <button
-                onClick={() => setShowDevicePicker(true)}
-                disabled={isCastLoading || castSession.isConnecting}
-                aria-label={castSession.isConnected ? `Casting attivo su ${castSession.device?.name}` : 'Trasmetti su dispositivo'}
-                className={`tv-focus touch-target p-2 hover:bg-white/10 rounded-full transition-all ${castSession.isConnected ? 'text-blue-400' : 'text-white'}`}
-                title={castSession.isConnected ? `Casting su ${castSession.device?.name}` : 'Trasmetti (C)'}
-              >
-                {isCastLoading ? <Loader2 className="w-6 h-6 animate-spin" /> : <Cast className="w-6 h-6" />}
-              </button>
-              {document.pictureInPictureEnabled && (
-                <button onClick={togglePiP} aria-label="Picture-in-Picture" aria-pressed={isPiP} className={`tv-focus touch-target p-2 hover:bg-white/10 rounded-full ${isPiP ? 'text-brand-accent' : 'text-white'}`} title="Picture-in-Picture (P)">
-                  <PictureInPicture2 className="w-6 h-6" />
-                </button>
-              )}
-              <button onClick={toggleFullscreen} aria-label={isFullscreen ? 'Esci da fullscreen' : 'Fullscreen'} title={`${isFullscreen ? 'Esci da fullscreen' : 'Fullscreen'} (F)`} className="tv-focus touch-target p-2 hover:bg-white/10 rounded-full">
-                {isFullscreen ? <Minimize className="w-6 h-6 text-white" /> : <Maximize className="w-6 h-6 text-white" />}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+      <PlayerControls
+        show={showControls}
+        channel={channel}
+        isPlaying={isPlaying}
+        isBuffering={isBuffering}
+        currentTime={currentTime}
+        duration={duration}
+        volume={volume}
+        isMuted={isMuted}
+        onBack={onBack!}
+        togglePlay={togglePlay}
+        onVolumeChange={handleVolumeChange}
+        onMuteToggle={toggleMute}
+        onNext={onNext}
+        onPrev={onPrev}
+        onPlaylistToggle={() => setShowPlaylist(true)}
+        onAudioMenuToggle={() => setShowAudioMenu(!showAudioMenu)}
+        onSubtitleMenuToggle={() => setShowSubtitleMenu(prev => !prev)}
+        onSleepMenuToggle={() => setShowSleepMenu(prev => !prev)}
+        onInfoPanelToggle={updateStreamInfo}
+        onCastToggle={() => setShowDevicePicker(true)}
+        onRestart={restartFromBeginning}
+        onSkip={skip}
+        onMiniEpgToggle={() => setShowMiniEpg(prev => !prev)}
+        showMiniEpg={showMiniEpg}
+        showAudioMenu={showAudioMenu}
+        showSubtitleMenu={showSubtitleMenu}
+        showSleepMenu={showSleepMenu}
+        isMpv={isMpv}
+        isUsingNativePlayer={isUsingNativePlayer}
+        castSession={{
+          isCasting: castSession.isConnected,
+          isConnecting: castSession.isConnecting,
+          deviceName: castSession.device?.name
+        }}
+        isCastLoading={isCastLoading}
+        osd={osd}
+        seekDisabledReason={seekDisabledReason}
+        timelineRef={timelineRef}
+        hoverTime={hoverTime}
+        hoverPos={hoverPos}
+        isScrubbing={isScrubbing}
+        displayTime={displayTime}
+        onTimelinePointerDown={handleTimelinePointerDown}
+        onTimelineMouseMove={handleTimelineMouseMove}
+        onTimelineMouseLeave={handleTimelineMouseLeave}
+        audioTracksCount={audioTracks.length}
+        activeSubtitle={activeSubtitle}
+        subtitleEnabled={subtitleEnabled}
+        sleepTimer={sleepTimer}
+        formatSleepRemaining={formatSleepRemaining}
+        nativePiPSupported={nativePiPSupported}
+        togglePiP={togglePiP}
+        isFullscreen={isFullscreen}
+        toggleFullscreen={toggleFullscreen}
+        isPiP={isPiP}
+      />
 
       {/* Mini-EPG (Guida TV) — D.1 */}
       {isLive && channel.tvgId && (

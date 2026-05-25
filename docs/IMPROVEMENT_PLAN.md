@@ -69,9 +69,9 @@ StreamAI deve onorare il suo nome con feature intelligenti.
 
 Ridurre il debito tecnico accumulato durante la migrazione veloce.
 
-- [ ] **REF-1.a**: Ridurre `VideoPlayerNew.tsx` (>1500 righe) estraendo `PlayerControls`, `PlaylistSidebar` e `SettingsOverlay`.
-- [ ] **REF-1.b**: Pulizia completa dei residui Electron nel frontend (file `.js` inutilizzati, rami `if (isElectron)` rimasti).
-- [ ] **P7.1 Test**: Aumentare la copertura dei test Go per i servizi core (Proxy, Player, Migration) al 70%.
+- [x] **REF-1.a**: Ridurre `VideoPlayerNew.tsx` (>1500 righe) estraendo `PlayerControls`, `PlaylistSidebar` e `SettingsOverlay`.
+- [x] **REF-1.b**: Pulizia completa dei residui Electron nel frontend (file `.js` inutilizzati, rami `if (isElectron)` rimasti).
+- [x] **P7.1 Test**: Aumentare la copertura dei test Go per i servizi core (Proxy, Player, Migration) al 70%.
 
 ---
 
