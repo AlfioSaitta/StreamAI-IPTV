@@ -2,9 +2,9 @@
 
 [![CI](https://github.com/AlfioSaitta/StreamAI-IPTV/actions/workflows/ci.yml/badge.svg)](https://github.com/AlfioSaitta/StreamAI-IPTV/actions/workflows/ci.yml)
 
-**StreamAI** è un player IPTV di nuova generazione sviluppato con **React 19**, **TypeScript**, **Tailwind CSS** e un runtime desktop **Wails v3** (Go) — con **Electron** ancora supportato in parallelo durante la fase di migrazione. Si distingue per l'integrazione con **Google Gemini AI**, che offre raccomandazioni intelligenti sui contenuti basate sulle preferenze dell'utente, e per un ecosistema di networking avanzato per il casting e il controllo remoto.
+**StreamAI** è un player IPTV di nuova generazione sviluppato con **React 19**, **TypeScript**, **Tailwind CSS** e un runtime desktop **Wails v3** (Go). Si distingue per l'integrazione con **Google Gemini AI**, che offre raccomandazioni intelligenti sui contenuti basate sulle preferenze dell'utente, e per un ecosistema di networking avanzato per il casting e il controllo remoto.
 
-> 🚧 **Migrazione in corso (Electron → Wails v3 / Go).** Il backend desktop è in fase di riscrittura come applicazione Wails v3 con Service Go per discovery, advertising, cast, remote/WebSocket, netstatus, proxy e player. Lo stato di avanzamento, gli inventari Electron ↔ Wails e le fasi residue sono tracciati in [`docs/plan-go-wails-migration.md`](docs/plan-go-wails-migration.md) (rev. 5). Il binario Electron resta la build di riferimento finché le Fasi 5–10 non sono complete.
+> 🚀 **Desktop Runtime: Wails v3.** Il backend desktop è un'applicazione nativa in Go (Wails v3) con Service specializzati per discovery, advertising, cast, remote/WebSocket, netstatus, proxy e un player nativo basato su **libmpv**. Electron è stato rimosso completamente in favore di questa nuova architettura più leggera e performante. Lo stato di avanzamento e i dettagli tecnici sono tracciati in [`docs/plan-go-wails-migration.md`](docs/plan-go-wails-migration.md).
 
 ---
 
@@ -14,11 +14,11 @@
 - **Live TV**: Streaming live con zapping veloce e buffering ottimizzato.
 - **Movies (VOD)**: Film on-demand con seeking fluido, timeline interattiva e anteprima al passaggio del mouse.
 - **Series**: Episodi con navigazione tra stagioni e puntate, e salvataggio automatico del progresso.
-- **Codec HEVC/H.265**: Supporto nativo per video 4K con codec proprietari (via BranchBit).
+- **Codec HEVC/H.265**: Supporto nativo per video 4K decodificati via hardware tramite **libmpv** (su Desktop) e **AndroidX Media3** (su Android).
 - **Player Nativo (Android)**: Utilizzo del player di sistema basato su **AndroidX Media3 1.10.1** (ExoPlayer di nuova generazione) per massime prestazioni su mobile.
 - **OSD (On-Screen Display)**: Feedback visivo immediato per volume, seeking, play/pausa e stato buffer.
 - **Diagnostica stream**: classificazione errori HTTP/codec/timeout, retry controllato e pannello “Info stream” con URL sanitizzato, protocollo, engine, codec video/audio e dati qualità quando disponibili.
-- **Fallback multi-engine**: HLS.js, MPEG-TS (`mpegts.js`), Video.js e player nativo Android vengono scelti in base a protocollo, estensione e URL Xtream-like.
+- **Fallback multi-engine**: libmpv (Desktop), AndroidX Media3 (Android), HLS.js, MPEG-TS (`mpegts.js`) e Video.js (Web/Fallback) vengono scelti automaticamente in base a protocollo, estensione e piattaforma.
 
 ### 📡 Networking & Casting
 - **Casting Universale**: Trasmissione su Chromecast, dispositivi DLNA/UPnP e AirPlay.
@@ -61,10 +61,11 @@
 
 ## 🚀 Requisiti
 
-- **Node.js**: v18+ (per build e sviluppo)
+- **Node.js**: v18+ (per build e sviluppo frontend)
+- **Go**: 1.25+ (per la build del runtime Wails v3)
+- **libmpv**: installata sul sistema (per la riproduzione video desktop)
+- **Sistema Operativo**: Linux (Ubuntu, Debian, Fedora, Arch, openSUSE), Windows (WebView2), macOS
 - **npm**: v9+
-- **Go**: 1.23+ (solo per il runtime Wails v3, opzionale finché Electron è il default)
-- **Sistema Operativo**: Linux (testato), Windows, macOS
 
 ---
 
@@ -75,126 +76,51 @@
 git clone <repository-url>
 cd streamai-iptv
 
-# Installa le dipendenze (include patch automatica per codec HEVC)
+# Installa le dipendenze
 npm install
 
 # Configura le variabili locali opzionali
 cp .env.example .env
 ```
 
-Il comando `npm install` esegue automaticamente lo script `patch-ffmpeg.js` che:
-- Scarica la distribuzione Electron con codec HEVC da BranchBit.
-- Applica la patch solo se necessario (non riscarica se già installata).
+### Dipendenze di sistema (Linux)
+Assicurati di avere `libmpv` e le librerie di sviluppo GTK/WebKitGTK installate.
+Per Ubuntu/Debian:
+```bash
+sudo apt install libgtk-3-dev libwebkit2gtk-4.1-dev libmpv-dev
+```
 
 ---
 
 ## ▶️ Avvio
 
-### Modalità Sviluppo
+### Modalità Sviluppo (Desktop)
 ```bash
-# Avvia con Electron (hot reload)
+# Avvia con Wails v3 (hot reload)
 npm run dev
-
-# Oppure con build prima
-npm start
 ```
 
 ### Build Produzione
 ```bash
-# Solo build Vite
-npm run build
-
-# Type-check TypeScript
-npm run typecheck
-
-# Type-check + build
-npm run check
-
-# Build runtime Wails v3 (Go) → build/bin/streamai
-# (richiede mpv-devel + webkit2gtk-4_1-devel + go ≥ 1.22, vedi docs/wails-quickstart.md)
-npm run wails:build         # release ~19 MB con backend libmpv (tags 'gtk3 mpv')
-npm run wails:build:debug   # versione con symbol info
-npm run wails:dev           # hot-reload Vite + Go (richiede `wails3` CLI)
-npm run wails:run           # build + esegui il binario subito
-npm run wails:bindings      # rigenera binding TS dai Service Go
-
-# Build + pacchetto Linux (auto-detect distro host)
+# Genera i pacchetti Linux (.deb, .rpm, .pkg.tar.zst)
 npm run dist:linux
 
-# …oppure scegli la distro target con nomi pacchetto nativi:
-npm run dist:linux:opensuse  # openSUSE Tumbleweed / Leap
-npm run dist:linux:fedora    # Fedora
-npm run dist:linux:rhel      # RHEL / Rocky / AlmaLinux
-npm run dist:linux:debian    # Debian
-npm run dist:linux:ubuntu    # Ubuntu / Mint / Pop!_OS
-npm run dist:linux:arch      # Arch / Manjaro / EndeavourOS
-
-# …o i target generici SONAME-based (utili per test locali):
-npm run dist:linux:deb       # .deb generico
-npm run dist:linux:rpm       # .rpm generico
-npm run dist:linux:pacman    # .pkg.tar.zst generico
-npm run dist:linux:appimage  # AppImage universale (on-demand)
-npm run dist:linux:tar       # tar.xz portatile (on-demand)
-npm run dist:linux:all       # tutti i formati sopra
+# Solo build binario locale
+npm run wails:build
 ```
 
-Gli artefatti finiscono in `dist/` con tag distro + (in CI) hash del
-commit corrente nel nome — pattern underscore-separated coerente con la
-convenzione Debian:
+Gli artefatti finiscono in `dist/packages/` con l'hash del commit nel nome:
+`streamai-iptv_${version}_${commit}_amd64.${ext}`
 
-```
-streamai-iptv_${version}_${distro}_${arch}.${ext}             # locale
-streamai-iptv_${version}_${commit}_${distro}_${arch}.${ext}   # CI
-```
+Esempio: `streamai-iptv_1.0.0_276ee32_amd64.deb`. La versione proviene dal file `.version` (singola fonte di verità) ed è propagata in `package.json` e `android/app/build.gradle` da `npm run version:sync`.
 
-Esempio CI: `streamai-iptv_1.0.0_276ee32_debian_amd64.deb`. La versione
-proviene dal file `.version` (singola fonte di verità) ed è propagata in
-`package.json` e `android/app/build.gradle` da `npm run version:sync`.
-
-Se `GPG_KEY_ID` è impostato in ambiente, ogni pacchetto viene firmato
-automaticamente (vedi [`docs/SIGNING.md`](docs/SIGNING.md)).
-
-> **Prerequisiti host:** `rpm`, `fakeroot`, `debsigs`, `gnupg2`,
-> `libarchive-tools` (per `bsdtar`), e `docker` se vuoi pubblicare il repo
-> Arch via `npm run repo:publish` o se il tuo `rpmbuild` è incompatibile con
-> `fpm` (rpmbuild ≥ 4.20 ⇒ build automatica in container
-> `electronuserland/builder`). Nota: `dpkg-sig` non è più richiesto — dal
-> rilascio di Ubuntu 24.04 è stato rimpiazzato da `debsigs --sign=origin`.
-
-Per le istruzioni di installazione lato utente finale (repo APT/RPM/Arch
-ospitati su GitHub Pages) consulta [`docs/INSTALL.md`](docs/INSTALL.md).
+Se `GPG_KEY_ID` è impostato in ambiente, ogni pacchetto viene firmato automaticamente.
 
 ### Release automatiche (GitHub Actions)
-
-Un push di tag `v*` (es. `git tag v1.0.1 && git push --tags`) attiva il
-workflow [`.github/workflows/linux-release.yml`](.github/workflows/linux-release.yml)
-che:
-
-1. Costruisce i **6 pacchetti per-distribuzione** (`opensuse`, `fedora`,
-   `rhel`, `debian`, `ubuntu`, `arch`) con nomi dipendenze nativi.
-2. Li **firma** con la chiave GPG del maintainer (subkey Ed25519, cachata
-   in `gpg-agent` via `gpg-preset-passphrase` per essere headless).
-3. **Verifica** ogni firma in modalità strict: `.rpm` con un rpmdb
-   dedicato (`rpm --dbpath`), `.deb` ricostruendo il blob firmato
-   nell'ordine reale di `ar t`, `.pkg.tar.zst` via `gpg --verify`,
-   `SHA256SUMS` + `.asc` + `sha256sum -c`.
-4. Genera **SLSA build provenance** (`actions/attest-build-provenance@v2`).
-5. Pubblica la **GitHub Release** con i 6 pacchetti + `*.asc` + `*.sig` +
-   `SHA256SUMS{,.asc}`.
-6. In un job separato ripristina la storia dei pacchetti già pubblicati
-   da `actions/cache` (fallback: download dei `.deb`/`.rpm`/`.pkg.tar.zst`
-   firmati dalle GitHub Release passate via `gh release download`),
-   assembla i repo APT/RPM/Arch in `public-repo/` e deploya tramite la
-   **GitHub Pages API ufficiale** (`actions/deploy-pages@v4`). Niente
-   `git push` sul branch `gh-pages`: evita gli HTTP 500 server-side
-   sulle pack grandi che colpivano i deploy via
-   `peaceiris/actions-gh-pages`.
-
-Per ridurre i tempi della pipeline (cold ~14 min → warm ~5 min) il
-workflow riusa quattro cache: Electron, electron-builder, APT toolchain e
-le immagini Docker `electronuserland/builder` + `archlinux:latest`. Vedi
-i dettagli in [`docs/plan-linuxDistroPackaging.prompt.md`](docs/plan-linuxDistroPackaging.prompt.md)
-§ "Esecuzione & evoluzione (post v5)".
+Un push di tag `v*` attiva il workflow che:
+1. Costruisce i pacchetti per Linux (.deb, .rpm, .pkg.tar.zst) usando `nfpm`.
+2. Firma i pacchetti con GPG.
+3. Crea la GitHub Release e aggiorna il repository statico su GitHub Pages.
 
 Per provisionare i secret GPG sul repository (`GPG_PRIVATE_KEY`,
 `GPG_PASSPHRASE`, `GPG_KEY_ID`) usa lo helper:

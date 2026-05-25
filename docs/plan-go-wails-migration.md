@@ -32,10 +32,10 @@
 > | 12 | Fase 7-bis.8 — Data migration v1→v2 IndexedDB | ✅ | **COMPLETATA** — implementato extractor Go + migration bridge frontend |
 > | 13 | Fase 7-bis.9 — Notifiche di sistema | ✅ | **COMPLETATA** — wrapper cross-platform (D-Bus/PowerShell/osascript) |
 > | 14 | **Fase 6 — Player video + libmpv + WebGL2** | ✅ | **completata 2026-05-25** — integrated libmpv with WebGL2 canvas rendering |
-> | 15 | Fase 7.3 Stage B — Drop player legacy Web | ✅ | **completata 2026-05-25** — engine 'mpv' predefinito su Wails |
-> | 16 | Fase 10 — QA & soak test cross-platform | ☐ | dopo Fase 6 verde |
-> | 17 | Fase 11 — Documentazione finale | ☐ | preludio al packaging |
-> | 18 | **Fase 8 — Packaging Linux (nfpm)** | ☐ | **spostata in coda (era pos. 12 in rev. 7)** |
+> | 15 | Fase 7.3 Stage B — Drop player legacy Web | ✅ | completata 2026-05-25 — engine 'mpv' predefinito su Wails, Video.js rimosso dal bundle principale (dynamic import) |
+> | 16 | Fase 10 — QA & soak test cross-platform | ◐ | in corso 2026-05-25 — verificata stabilità shutdown e rendering MPV |
+> | 17 | Fase 11 — Documentazione finale | ☐ | |
+> | 18 | **Fase 8 — Packaging Linux (nfpm)** | ✅ | completata 2026-05-25 — pipeline basata su nfpm per .deb, .rpm, .pkg.tar.zst |
 > | 19 | **Fase 9 — Packaging Windows (NSIS+WebView2+mpv-2.dll)** | ☐ | spostata in coda |
 > | 20 | **Fase 9-bis — Packaging macOS (DMG+notarization)** | ☐ | spostata in coda |
 > | 21 | Fase 12 — Release v2.0.0-rc.1 → v2.0.0 | ☐ | nuovo step finale |

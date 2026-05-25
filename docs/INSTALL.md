@@ -84,30 +84,17 @@ EOF
 sudo pacman -Sy streamai
 ```
 
-## AppImage (universale)
+---
 
-> **Nota:** AppImage e tar.xz **non** sono pubblicati dalla CI ufficiale
-> (il workflow CI produce solo i 6 pacchetti nativi per-distribuzione).
-> Sono disponibili solo se il maintainer ha eseguito localmente
-> `npm run dist:linux:all` e ha caricato manualmente gli artefatti.
+## Requisiti di Sistema
 
-```bash
-curl -fsSLO https://<user>.github.io/StreamAI-IPTV/appimage/StreamAI-x.y.z.AppImage
-curl -fsSLO https://<user>.github.io/StreamAI-IPTV/appimage/StreamAI-x.y.z.AppImage.asc
-gpg --verify StreamAI-x.y.z.AppImage.asc
-chmod +x StreamAI-x.y.z.AppImage
-./StreamAI-x.y.z.AppImage
-```
+Oltre alle dipendenze gestite automaticamente dal gestore pacchetti, assicurati che il tuo sistema abbia il supporto hardware per la decodifica video (opzionale ma consigliato):
 
-## tar.xz portable
+- **Driver Video:** Driver aggiornati per la tua GPU (NVIDIA, Intel o AMD).
+- **libmpv:** Il player desktop richiede `libmpv` (versione 1.107+ o API 2.x) installata. Sui pacchetti nativi questa è elencata come dipendenza e verrà installata automaticamente.
 
-```bash
-curl -fsSLO https://<user>.github.io/StreamAI-IPTV/tar/streamai-x.y.z.tar.xz
-curl -fsSLO https://<user>.github.io/StreamAI-IPTV/tar/streamai-x.y.z.tar.xz.asc
-gpg --verify streamai-x.y.z.tar.xz.asc
-tar -xJf streamai-x.y.z.tar.xz
-./streamai-x.y.z/streamai
-```
+## AppImage / tar.xz (disponibili a breve)
+Le versioni universali AppImage e tar.xz sono in fase di migrazione verso il nuovo runtime Wails e non sono ancora disponibili per la versione 2.0.0. Utilizza i pacchetti nativi (.deb, .rpm, .pkg.tar.zst) per la migliore integrazione con il sistema.
 
 ---
 
