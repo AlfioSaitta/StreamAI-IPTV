@@ -28,15 +28,31 @@ const splitGenres = (raw: string | undefined): string[] => {
     .filter(g => g.length > 1);
 };
 
-const normalizeSearchText = (value: string | undefined): string => (value || '')
-  .normalize('NFD')
-  .replace(/[\u0300-\u036f]/g, '')
-  .toLowerCase()
-  .replace(/[^\p{L}\p{N}]+/gu, ' ')
-  .replace(/\s+/g, ' ')
-  .trim();
+const searchNormalizationCache = new Map<string, string>();
+
+const normalizeSearchText = (value: string | undefined): string => {
+  if (!value) return '';
+  const cached = searchNormalizationCache.get(value);
+  if (cached !== undefined) return cached;
+
+  const result = value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Evita memory leak su cataloghi infiniti
+  if (searchNormalizationCache.size > 20000) searchNormalizationCache.clear();
+  searchNormalizationCache.set(value, result);
+  return result;
+};
 
 export const indexChannel = (channel: Channel): IndexedChannel => {
+  // Se già indicizzato (es. dal worker), ritorna 1:1
+  if ('haystack' in channel) return channel as IndexedChannel;
+
   const nameLower = normalizeSearchText(channel.name);
   const cleanNameLower = normalizeSearchText(channel.cleanName || channel.name);
   const groupLower = normalizeSearchText(channel.group);

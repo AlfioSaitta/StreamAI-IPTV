@@ -27,12 +27,27 @@ const GuideView = lazy(() => import('./components/GuideView.tsx'));
 // impostando `window.__SHOW_DS_PREVIEW = true` da DevTools. Non viene caricata
 // nel chunk principale.
 const DesignSystemPreview = lazy(() => import('./components/DesignSystemPreview.tsx'));
+const NativeMpvSmokeTest = lazy(() => import('./components/NativeMpvSmokeTest.tsx'));
 
 const shouldShowDsPreview = (): boolean => {
   if (typeof window === 'undefined') return false;
   if ((window as unknown as { __SHOW_DS_PREVIEW?: boolean }).__SHOW_DS_PREVIEW) return true;
   try {
     return new URLSearchParams(window.location.search).has('ds-preview');
+  } catch {
+    return false;
+  }
+};
+
+// Fase 6.1 Stage A — Smoke test del player nativo libmpv. Attivabile con
+// `?nativeMpv=1` in URL (es. devtools → location.search += '&nativeMpv=1').
+// È un harness isolato che bypassa il player principale per verificare
+// la pipeline `RenderFrame` → `/player/frame` → canvas 2D senza rischio
+// di rompere `VideoPlayerNew.tsx`. Vedi `components/NativeMpvSmokeTest.tsx`.
+const shouldShowNativeMpvSmoke = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  try {
+    return new URLSearchParams(window.location.search).has('nativeMpv');
   } catch {
     return false;
   }
@@ -64,6 +79,7 @@ import { host } from './services/hostBridge.ts';
 import { hasAiApiKey, isAiAvailable, isAiTemporarilySuspended } from './services/geminiService.ts';
 import { EpgReminderService, type ReminderFiredEvent } from './services/epg/reminderService.ts';
 import { useBackStack } from './hooks/useBackStack.ts';
+import { useTrayBridge } from './hooks/useTrayBridge.ts';
 
 const MIN_CONTENT_REFRESH_INTERVAL_MINUTES = 60;
 
@@ -372,6 +388,28 @@ function App() {
       },
     },
   );
+
+  // System tray bridge (Wails v3, plan §6.5.3): listener degli eventi
+  // emessi dal menu tray (`tray:play-pause`, `tray:pip-toggle`).
+  // - `onPlayPause` (default): toggle automatico via PlayerService.State()
+  //   gestito dentro l'hook stesso.
+  // - `onPipToggle`: emette il keyboard shortcut `P` sul player corrente,
+  //   replicando il path già rodato di `VideoPlayerNew.tsx` (che intercetta
+  //   `KeyboardEvent.key === 'p'` nella sua keymap interna). Questo evita
+  //   di tirar fuori `videoRef` da App.tsx — il refactor pulito sarà
+  //   parte di REF-1.a (estrazione hooks PiP/shortcuts da VideoPlayerNew).
+  //   Su web/Capacitor l'hook è no-op (early-return su isWails).
+  useTrayBridge({
+    onPipToggle: () => {
+      const ev = new KeyboardEvent('keydown', {
+        key: 'p',
+        code: 'KeyP',
+        bubbles: true,
+        cancelable: true,
+      });
+      window.dispatchEvent(ev);
+    },
+  });
 
   // Initialize Cache Persistence
   useEffect(() => {
@@ -746,8 +784,10 @@ function App() {
       setSelectedSeries(null);
   };
 
-  const handleVideoProgress = (progress: number, duration: number) => {
+  const handleVideoProgress = (currentTime: number, duration: number) => {
       if (activeProfile && currentChannel) {
+          // Calcoliamo la percentuale (0..1) per il "riprendi visione" cross-platform.
+          const progress = duration > 0 ? currentTime / duration : 0;
           ProfileService.updateProgress(activeProfile.id, currentChannel.id, progress, duration);
       }
   };
@@ -1145,6 +1185,13 @@ function Root() {
     return (
       <Suspense fallback={<PlayerLoadingFallback />}>
         <DesignSystemPreview />
+      </Suspense>
+    );
+  }
+  if (shouldShowNativeMpvSmoke()) {
+    return (
+      <Suspense fallback={<PlayerLoadingFallback />}>
+        <NativeMpvSmokeTest />
       </Suspense>
     );
   }
