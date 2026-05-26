@@ -178,7 +178,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   });
 
   // Start the RAF loop to draw libmpv frames to canvas.
-  const { stats: mpvRenderStats } = useMpvCanvasRenderer(canvasRef, isMpv, { onResize: resizeMpv });
+  useMpvCanvasRenderer(canvasRef, isMpv, { onResize: resizeMpv });
 
   // EPG (D.1) — only loads when the channel is Live and we have a tvgId + creds.
   const isLive = channel?.type === 'live';

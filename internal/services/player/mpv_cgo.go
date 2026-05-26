@@ -43,10 +43,6 @@ package player
 // #include <locale.h>
 // #include <mpv/client.h>
 // #include <mpv/render.h>
-// #include <mpv/render_gl.h>
-// #include "render_gl.h"
-//
-// extern void streamai_set_render_update_callback(mpv_render_context* ctx, void* userdata);
 //
 // // Helper C: costruisce l'array di mpv_render_param per il render SW
 // // a partire dai puntatori già allocati lato Go. Tenere la logica qui
@@ -78,7 +74,6 @@ package player
 import "C"
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -91,11 +86,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-func newBackend() backend {
-	b := &cgoBackend{}
-	b.renderCond = sync.NewCond(&b.mu)
-	return b
-}
+func newBackend() backend { return &cgoBackend{} }
 
 // cgoBackend incapsula un mpv_handle. Lifecycle:
 //   - newBackend()      → struct vuota (mpv non ancora creato, cost zero)
@@ -111,39 +102,6 @@ type cgoBackend struct {
 	handle    *C.mpv_handle
 	renderCtx *C.mpv_render_context
 	bufPool   sync.Pool
-
-	gl *glBackend
-
-	renderCond  *sync.Cond
-	renderReady bool
-	opaqueID    uintptr
-}
-
-var (
-	backendRegistry = make(map[uintptr]*cgoBackend)
-	registryMu      sync.RWMutex
-	nextOpaqueID    uintptr = 1
-)
-
-func registerBackend(b *cgoBackend) uintptr {
-	registryMu.Lock()
-	defer registryMu.Unlock()
-	id := nextOpaqueID
-	nextOpaqueID++
-	backendRegistry[id] = b
-	return id
-}
-
-func unregisterBackend(id uintptr) {
-	registryMu.Lock()
-	defer registryMu.Unlock()
-	delete(backendRegistry, id)
-}
-
-func getBackend(id uintptr) *cgoBackend {
-	registryMu.RLock()
-	defer registryMu.RUnlock()
-	return backendRegistry[id]
 }
 
 // ensureInit crea il mpv_handle se non esiste. Da chiamare con `mu` preso.
@@ -232,38 +190,14 @@ func (b *cgoBackend) ensureInit() error {
 	// La memoria di destinazione viene allocata per-call in `RenderFrame`,
 	// quindi qui basta tenere il context.
 	var rctx *C.mpv_render_context
-
-	// Prova a inizializzare OpenGL se su Linux
-	if runtime.GOOS == "linux" {
-		if gl, err := initEGL(); err == nil {
-			if rc := C.streamai_create_gl_ctx(h, &rctx); rc >= 0 {
-				b.gl = gl
-				b.renderCtx = rctx
-				log.Info().Msg("player: libmpv render-API initialized with OpenGL (Stage B)")
-			} else {
-				gl.destroy()
-				log.Warn().Msgf("player: libmpv mpv_render_context_create(GL) failed, falling back to SW: %d", rc)
-			}
-		} else {
-			log.Warn().Err(err).Msg("player: initEGL failed, falling back to SW")
-		}
+	if rc := C.streamai_create_sw_ctx(h, &rctx); rc < 0 {
+		errMsg := C.GoString(C.mpv_error_string(rc))
+		C.mpv_terminate_destroy(h)
+		return fmt.Errorf("player: mpv_render_context_create(SW): %s", errMsg)
 	}
-
-	if b.renderCtx == nil {
-		if rc := C.streamai_create_sw_ctx(h, &rctx); rc < 0 {
-			errMsg := C.GoString(C.mpv_error_string(rc))
-			C.mpv_terminate_destroy(h)
-			return fmt.Errorf("player: mpv_render_context_create(SW): %s", errMsg)
-		}
-		b.renderCtx = rctx
-		log.Info().Msg("player: libmpv render-API initialized with SW (Stage A)")
-	}
-
-	// Imposta il callback di aggiornamento del rendering passando un ID opaco invece del puntatore Go
-	b.opaqueID = registerBackend(b)
-	C.streamai_set_render_update_callback(b.renderCtx, unsafe.Pointer(b.opaqueID))
 
 	b.handle = h
+	b.renderCtx = rctx
 	runtime.SetFinalizer(b, func(bb *cgoBackend) { _ = bb.Close() })
 	return nil
 }
@@ -646,15 +580,6 @@ func (b *cgoBackend) Close() error {
 		b.renderCtx = nil
 		log.Debug().Msg("player: mpv_render_context_free finished")
 	}
-	if b.gl != nil {
-		b.gl.destroy()
-		b.gl = nil
-	}
-	if b.opaqueID != 0 {
-		unregisterBackend(b.opaqueID)
-		b.opaqueID = 0
-	}
-
 	C.mpv_terminate_destroy(b.handle)
 	b.handle = nil
 	log.Debug().Msg("player: mpv_terminate_destroy finished")
@@ -711,45 +636,19 @@ func (b *cgoBackend) RenderFrame(w, h int) ([]byte, error) {
 		buf = make([]byte, size)
 	}
 
-	if b.gl != nil {
-		runtime.LockOSThread()
-		defer runtime.UnlockOSThread()
-
-		if err := b.gl.makeCurrent(); err != nil {
-			return nil, err
-		}
-
-		if err := b.gl.ensureFBO(w, h); err != nil {
-			return nil, err
-		}
-		rc := C.streamai_gl_render(b.renderCtx, C.int(b.gl.fbo), C.int(w), C.int(h))
-		if rc < 0 {
-			return nil, fmt.Errorf("player: mpv_render_context_render(GL): %s", C.GoString(C.mpv_error_string(rc)))
-		}
-
-		// Per migliorare le performance, eseguiamo glFinish solo se necessario
-		// o dopo mpv_render_context_render.
-		C.glFinish()
-
-		// Leggiamo sempre i pixel per ora per garantire che il buffer sia popolato.
-		C.streamai_gl_read_pixels(C.int(b.gl.fbo), C.int(w), C.int(h), unsafe.Pointer(&buf[0]))
-		b.renderReady = false // frame consumato
-	} else {
-		fmt0 := C.CString("rgba")
-		defer C.free(unsafe.Pointer(fmt0))
-		stride := C.size_t(w * 4)
-		rc := C.streamai_sw_render(
-			b.renderCtx,
-			C.int(w), C.int(h),
-			fmt0,
-			stride,
-			unsafe.Pointer(&buf[0]),
-		)
-		if rc < 0 {
-			return nil, fmt.Errorf("player: mpv_render_context_render(SW): %s",
-				C.GoString(C.mpv_error_string(rc)))
-		}
-		b.renderReady = false // frame consumato
+	fmt0 := C.CString("rgba")
+	defer C.free(unsafe.Pointer(fmt0))
+	stride := C.size_t(w * 4)
+	rc := C.streamai_sw_render(
+		b.renderCtx,
+		C.int(w), C.int(h),
+		fmt0,
+		stride,
+		unsafe.Pointer(&buf[0]),
+	)
+	if rc < 0 {
+		return nil, fmt.Errorf("player: mpv_render_context_render(SW): %s",
+			C.GoString(C.mpv_error_string(rc)))
 	}
 
 	// Copiamo il buffer prima di ritornarlo perché Wails lo leggerà
@@ -764,48 +663,3 @@ func (b *cgoBackend) RenderFrame(w, h int) ([]byte, error) {
 	return res, nil
 }
 
-// WaitNextFrame aspetta che libmpv segnali un nuovo frame pronto per il rendering.
-func (b *cgoBackend) WaitNextFrame(ctx context.Context) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	if b.renderCtx == nil {
-		return nil
-	}
-
-	// Se un frame è già pronto, ritorniamo subito
-	if b.renderReady {
-		return nil
-	}
-
-	// Altrimenti aspettiamo con timeout
-	done := make(chan struct{})
-	go func() {
-		b.mu.Lock()
-		defer b.mu.Unlock()
-		for !b.renderReady && b.renderCtx != nil {
-			b.renderCond.Wait()
-		}
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-//export streamai_render_update_callback
-func streamai_render_update_callback(userdata unsafe.Pointer) {
-	id := uintptr(userdata)
-	b := getBackend(id)
-	if b == nil {
-		return
-	}
-	b.mu.Lock()
-	b.renderReady = true
-	b.mu.Unlock()
-	b.renderCond.Signal()
-}
