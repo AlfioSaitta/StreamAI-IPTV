@@ -71,6 +71,12 @@ export interface UseMpvCanvasRendererResult {
   lastFrameMs: number;
   /** True se almeno un frame è stato disegnato (utile per UI placeholder). */
   hasRenderedFrame: boolean;
+  /** Metriche di performance (frame drop e jitter). */
+  stats: {
+    dropped: number;
+    jitter: number;
+    avgMs: number;
+  };
 }
 
 const FRAME_ENDPOINT = '/player/frame';
@@ -85,6 +91,7 @@ export function useMpvCanvasRenderer(
   const [error, setError] = useState<Error | null>(null);
   const [lastFrameMs, setLastFrameMs] = useState(0);
   const [hasRenderedFrame, setHasRenderedFrame] = useState(false);
+  const [stats, setStats] = useState({ dropped: 0, jitter: 0, avgMs: 0 });
 
   // Stato non-reattivo: tenere il contatore fuori da React state per
   // evitare re-render a ogni frame (cost ammortizzato: gli state setter
@@ -161,12 +168,20 @@ export function useMpvCanvasRenderer(
     let localFrameCount = 0;
     let localError: Error | null = null;
     let localLastFrameMs = 0;
+    let frameTimes: number[] = [];
+    let lastT = 0;
 
     // Flush periodico dello state React per evitare 60 re-render/sec.
     const flush = window.setInterval(() => {
       if (state.cancelled) return;
       setFrameCount((prev) => (prev !== localFrameCount ? localFrameCount : prev));
       setLastFrameMs((prev) => (prev !== localLastFrameMs ? localLastFrameMs : prev));
+      if (frameTimes.length > 0) {
+        const avg = frameTimes.reduce((a, b) => a + b, 0) / frameTimes.length;
+        const jitter = Math.sqrt(frameTimes.map(x => Math.pow(x - avg, 2)).reduce((a, b) => a + b, 0) / frameTimes.length);
+        setStats(s => ({ ...s, avgMs: avg, jitter }));
+        frameTimes = [];
+      }
       if (localError) setError(localError);
     }, 500);
 
@@ -227,7 +242,14 @@ export function useMpvCanvasRenderer(
           const txt = await res.text();
           throw new Error(`HTTP ${res.status}: ${txt.trim()}`);
         }
-        const buf = new Uint8Array(await res.arrayBuffer());
+        const arrayBuffer = await res.arrayBuffer();
+        if (arrayBuffer.byteLength === 0) {
+          // Nessun nuovo frame (timeout o idle) - riprova subito
+          if (!state.cancelled) requestAnimationFrame(() => void renderLoop());
+          return;
+        }
+
+        const buf = new Uint8Array(arrayBuffer);
         if (buf.length !== frameW * frameH * 4) {
           throw new Error(`frame size mismatch: got ${buf.length} bytes, expected ${frameW * frameH * 4}`);
         }
@@ -248,9 +270,9 @@ export function useMpvCanvasRenderer(
       }
 
       const elapsed = performance.now() - lastFrameStart;
-      const wait = Math.max(0, minFrameInterval - elapsed);
+      // Con il callback-based rendering, non cappiamo gli FPS lato JS,
+      // lasciamo che il backend detti il ritmo.
       lastFrameStart = performance.now();
-      if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
 
       if (!state.cancelled) requestAnimationFrame(() => void renderLoop());
     };

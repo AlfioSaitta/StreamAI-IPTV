@@ -63,6 +63,10 @@ export interface StreamDiagnosticsProps {
   recentErrors: RecentPlaybackError[];
   loading?: boolean;
   onRefresh?: () => void;
+  renderStats?: {
+    avgMs: number;
+    jitter: number;
+  };
 }
 
 const RES_LABELS: Array<[number, string]> = [
@@ -157,6 +161,7 @@ const StreamDiagnostics: React.FC<StreamDiagnosticsProps> = React.memo(({
   recentErrors,
   loading = false,
   onRefresh,
+  renderStats,
 }) => {
   const copyUrl = useCallback(() => {
     try {
@@ -313,6 +318,20 @@ const StreamDiagnostics: React.FC<StreamDiagnosticsProps> = React.memo(({
             ) : '—'}
           />
           {info?.frameRate ? <Row label="Frame rate" value={`${info.frameRate.toFixed(2)} fps`} /> : null}
+          {renderStats && (
+            <>
+              <Row
+                label="Render Time"
+                value={`${renderStats.avgMs.toFixed(2)} ms`}
+                hint="Tempo medio fetch + draw (Stage B OpenGL)"
+              />
+              <Row
+                label="Render Jitter"
+                value={`${renderStats.jitter.toFixed(2)} ms`}
+                hint="Deviazione standard latenza frame"
+              />
+            </>
+          )}
           {info?.videoBitDepth ? <Row label="Bit depth" value={`${info.videoBitDepth}-bit`} /> : null}
           <Row label="Bitrate video" value={formatBitrate(videoBitrate)} hint="Stima dall'ABR / manifest" />
           {info?.videoColorSpace && <Row label="Color space" value={info.videoColorSpace} />}
