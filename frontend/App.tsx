@@ -6,6 +6,7 @@ import CodecWarning from './components/CodecWarning.tsx';
 import EmptyState from './components/shared/EmptyState.tsx';
 import ShortcutsCheatsheet from './components/ShortcutsCheatsheet.tsx';
 import CommandPalette from './components/CommandPalette.tsx';
+import TitleBar from './components/TitleBar.tsx';
 
 // E.1 — Heavy components are code-split via React.lazy so the initial chunk
 // stays lean. video.js + hls.js + mpegts.js (~600 kB minified) live entirely
@@ -1091,6 +1092,7 @@ function App() {
   return (
     <LanguageProvider profileLanguage={activeProfile?.preferences?.language || DEFAULT_PREFERENCES.language}>
       <div className="min-h-screen w-screen bg-[var(--bg-primary)] overflow-x-hidden relative font-sans text-gray-100 flex flex-col">
+        {platformService.isDesktop && <TitleBar />}
         {renderContent()}
 
         {selectedMovie && (

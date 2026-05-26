@@ -18,9 +18,11 @@ package crashguard
 import (
 	"fmt"
 	"os"
+	"os/signal"
 	"runtime"
 	"runtime/debug"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/getsentry/sentry-go"
@@ -28,6 +30,46 @@ import (
 
 	"github.com/AlfioSaitta/StreamAI-IPTV/internal/pkg/logging"
 )
+
+// InitSignalHandler imposta un listener globale per i segnali fatali del sistema
+// operativo (es. SIGSEGV). Quando un segnale viene catturato, genera un report
+// di crash, lo invia a Sentry e termina il programma.
+// Va chiamato una sola volta all'avvio dell'applicazione.
+func InitSignalHandler(appID, version, commitSHA string) {
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGSEGV, syscall.SIGABRT)
+
+	go func() {
+		sig := <-sigs
+		// Un segnale è stato catturato. Generiamo il report.
+		payload := buildPayload(fmt.Sprintf("Fatal OS signal: %s", sig), version, commitSHA)
+
+		// Scrivi il report su file, come per un panic normale.
+		path, err := logging.WriteCrashReport(appID, payload)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "crashguard: cannot write signal crash report: %v\n", err)
+			fmt.Fprintln(os.Stderr, payload)
+		} else {
+			fmt.Fprintf(os.Stderr, "crashguard: signal crash report written to %s\n", path)
+		}
+
+		// Invia l'evento a Sentry. Creiamo un errore ad-hoc per avere uno stack trace.
+		sentry.WithScope(func(scope *sentry.Scope) {
+			scope.SetLevel(sentry.LevelFatal)
+			scope.SetTag("signal", sig.String())
+			sentry.CaptureException(fmt.Errorf("caught signal: %s", sig))
+		})
+
+		// Flush di Sentry e del logger prima di uscire.
+		log.Error().Str("signal", sig.String()).Msg("Fatal signal caught, flushing logs and Sentry before exit.")
+		sentry.Flush(5 * time.Second)
+		_ = logging.Close()
+
+		// Termina il processo.
+		os.Exit(1)
+	}()
+}
+
 
 // Recover è il defer top-level per main(). Cattura panic, scrive un
 // crash report, fa flush del log file e termina con exit code 1.

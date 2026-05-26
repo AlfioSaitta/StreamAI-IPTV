@@ -16,6 +16,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"runtime"
 	"time"
 
 	"github.com/getsentry/sentry-go"
@@ -43,7 +44,6 @@ import (
 	"github.com/AlfioSaitta/StreamAI-IPTV/internal/services/remote"
 )
 
-
 // Set at build time via -ldflags "-X main.version=...".
 var (
 	version   = "dev"
@@ -51,6 +51,12 @@ var (
 )
 
 func main() {
+	// FIX CRITICO per le GUI su CGo (come GTK3/GTK4 usate da Wails su Linux):
+	// Il thread in cui viene inizializzata la GUI *deve* rimanere lo stesso per
+	// tutta la durata dell'applicazione. Il runtime di Go normalmente sposta
+	// le goroutine tra i thread OS, causando SIGSEGV quando si chiamano API C.
+	runtime.LockOSThread()
+
 	// Initialize Sentry
 	err := sentry.Init(sentry.ClientOptions{
 		Dsn: "https://1ed61c33c431587bec1c76a3db950908@o4508166622806016.ingest.de.sentry.io/4511451808006224",
@@ -63,6 +69,9 @@ func main() {
 	}
 	defer sentry.Flush(2 * time.Second)
 
+	// Attiva il gestore di segnali personalizzato (per crash C/OS come SIGSEGV).
+	// Ora è centralizzato in crashguard e scrive anche il report su file.
+	crashguard.InitSignalHandler("streamai", version, commitSHA)
 
 	// Fase 7-bis.6 — logging: dual sink (stderr + lumberjack) attivo
 	// PRIMA di ogni log.Printf, così single-instance e service wiring
@@ -73,7 +82,7 @@ func main() {
 	// crash-<ts>.log nella cartella crashes/ accanto al log principale
 	// e fa flush+exit ordinato. Va prima di qualsiasi panic possibile.
 	defer crashguard.Recover("streamai", version, commitSHA)
-	defer sentry.Recover()
+	defer sentry.Recover() // Cattura panic Go normali
 
 	startedAt := time.Now()
 
@@ -173,10 +182,10 @@ func main() {
 			application.NewService(playerSvc),
 			application.NewService(proxySvc),
 			application.NewService(advertisingSvc),
-		application.NewService(netstatusSvc),
-		application.NewService(migrationSvc),
-		application.NewService(notificationsSvc),
-		application.NewService(remoteSvc),
+			application.NewService(netstatusSvc),
+			application.NewService(migrationSvc),
+			application.NewService(notificationsSvc),
+			application.NewService(remoteSvc),
 			application.NewService(cast.New()),
 			application.NewService(discovery.New()),
 		},
@@ -189,26 +198,26 @@ func main() {
 			})
 		},
 		Assets: application.AssetOptions{
-				Handler: application.AssetFileServerFS(rootassets.FS),
-				// FIX 2026-05-24 — Xtream "Load failed" su WebKitGTK.
-				// La webview blocca le fetch cross-origin dal documento
-				// `wails://wails.localhost` verso il proxy HTTP locale su
-				// `http://127.0.0.1:<port>` per mixed-content. Esponiamo il
-				// proxy come middleware dell'asset server così il frontend
-				// può fare fetch a `/iptv-proxy?u=...` (same-origin),
-				// bypassando i vincoli CORS/mixed-content della webview.
-				//
-				// Fase 6.1 Stage A (2026-05-24) — stessa logica per i frame
-				// del native player: `/player/frame?w=W&h=H` ritorna i bytes
-				// RGBA del frame corrente di libmpv. I due middleware sono
-				// composti (proxy outer → player inner → assets); il match
-				// di path è esclusivo (`/iptv-proxy` vs `/player/frame`),
-				// quindi nessuna interferenza.
-				Middleware: application.Middleware(chainMiddlewares(
-					proxySvc.AssetMiddleware(),
-					playerSvc.AssetMiddleware(),
-				)),
-			},
+			Handler: application.AssetFileServerFS(rootassets.FS),
+			// FIX 2026-05-24 — Xtream "Load failed" su WebKitGTK.
+			// La webview blocca le fetch cross-origin dal documento
+			// `wails://wails.localhost` verso il proxy HTTP locale su
+			// `http://127.0.0.1:<port>` per mixed-content. Esponiamo il
+			// proxy come middleware dell'asset server così il frontend
+			// può fare fetch a `/iptv-proxy?u=...` (same-origin),
+			// bypassando i vincoli CORS/mixed-content della webview.
+			//
+			// Fase 6.1 Stage A (2026-05-24) — stessa logica per i frame
+			// del native player: `/player/frame?w=W&h=H` ritorna i bytes
+			// RGBA del frame corrente di libmpv. I due middleware sono
+			// composti (proxy outer → player inner → assets); il match
+			// di path è esclusivo (`/iptv-proxy` vs `/player/frame`),
+			// quindi nessuna interferenza.
+			Middleware: application.Middleware(chainMiddlewares(
+				proxySvc.AssetMiddleware(),
+				playerSvc.AssetMiddleware(),
+			)),
+		},
 		// Linux: webview backend è scelto via build-tag (`gtk3` per
 		// webkit2gtk-4.1 fallback, default webkitgtk-6.0). Vedi
 		// plan §5.1 e build/depends/<distro>.json.
@@ -352,7 +361,6 @@ func main() {
 		Height:           800,
 		MinWidth:         960,
 		MinHeight:        540,
-		BackgroundColour: application.NewRGB(20, 20, 20), // #141414
 		URL:              "/",
 		DevToolsEnabled:  devToolsEnabled,
 		KeyBindings:      devtools.KeyBindings(),
