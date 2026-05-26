@@ -18,6 +18,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/getsentry/sentry-go"
 	"github.com/rs/zerolog/log"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -33,13 +34,13 @@ import (
 	"github.com/AlfioSaitta/StreamAI-IPTV/internal/services/cast"
 	"github.com/AlfioSaitta/StreamAI-IPTV/internal/services/discovery"
 	mediakeyssvc "github.com/AlfioSaitta/StreamAI-IPTV/internal/services/mediakeys"
+	"github.com/AlfioSaitta/StreamAI-IPTV/internal/services/migration"
 	"github.com/AlfioSaitta/StreamAI-IPTV/internal/services/netstatus"
+	notificationssvc "github.com/AlfioSaitta/StreamAI-IPTV/internal/services/notifications"
 	"github.com/AlfioSaitta/StreamAI-IPTV/internal/services/player"
 	powersavesvc "github.com/AlfioSaitta/StreamAI-IPTV/internal/services/powersave"
 	"github.com/AlfioSaitta/StreamAI-IPTV/internal/services/proxy"
 	"github.com/AlfioSaitta/StreamAI-IPTV/internal/services/remote"
-	"github.com/AlfioSaitta/StreamAI-IPTV/internal/services/migration"
-	notificationssvc "github.com/AlfioSaitta/StreamAI-IPTV/internal/services/notifications"
 )
 
 
@@ -50,6 +51,19 @@ var (
 )
 
 func main() {
+	// Initialize Sentry
+	err := sentry.Init(sentry.ClientOptions{
+		Dsn: "https://1ed61c33c431587bec1c76a3db950908@o4508166622806016.ingest.de.sentry.io/4511451808006224",
+		EnableTracing: true,
+		TracesSampleRate: 1.0,
+		Release: version,
+	})
+	if err != nil {
+		log.Error().Err(err).Msg("sentry.Init failed")
+	}
+	defer sentry.Flush(2 * time.Second)
+
+
 	// Fase 7-bis.6 — logging: dual sink (stderr + lumberjack) attivo
 	// PRIMA di ogni log.Printf, così single-instance e service wiring
 	// finiscono nel file rotante. Soft-fail in caso di filesystem RO.
@@ -59,6 +73,7 @@ func main() {
 	// crash-<ts>.log nella cartella crashes/ accanto al log principale
 	// e fa flush+exit ordinato. Va prima di qualsiasi panic possibile.
 	defer crashguard.Recover("streamai", version, commitSHA)
+	defer sentry.Recover()
 
 	startedAt := time.Now()
 

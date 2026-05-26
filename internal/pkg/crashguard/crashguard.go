@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/getsentry/sentry-go"
 	"github.com/rs/zerolog/log"
 
 	"github.com/AlfioSaitta/StreamAI-IPTV/internal/pkg/logging"
@@ -38,6 +39,11 @@ func Recover(appID, version, commitSHA string) {
 	if r == nil {
 		return
 	}
+
+	// Invia il panic a Sentry
+	sentry.CaptureException(fmt.Errorf("%v", r))
+	sentry.Flush(2 * time.Second) // Attende l'invio prima di uscire
+
 	payload := buildPayload(r, version, commitSHA)
 	path, err := logging.WriteCrashReport(appID, payload)
 	if err != nil {
@@ -57,6 +63,12 @@ func Recover(appID, version, commitSHA string) {
 // vivo, ma il logger registra l'evento.
 func RecoverGoroutine(name string) {
 	if r := recover(); r != nil {
+		// Invia il panic a Sentry
+		sentry.WithScope(func(scope *sentry.Scope) {
+			scope.SetTag("goroutine", name)
+			sentry.CaptureException(fmt.Errorf("%v", r))
+		})
+
 		log.Error().
 			Str("goroutine", name).
 			Interface("panic", r).
@@ -88,4 +100,3 @@ func nonEmpty(s, fallback string) string {
 	}
 	return s
 }
-

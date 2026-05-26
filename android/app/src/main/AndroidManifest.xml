@@ -13,6 +13,11 @@
         android:largeHeap="true"
         android:networkSecurityConfig="@xml/network_security_config">
 
+        <meta-data android:name="io.sentry.dsn" android:value="https://1ed61c33c431587bec1c76a3db950908@o4508166622806016.ingest.de.sentry.io/4511451808006224" />
+        <meta-data android:name="io.sentry.traces.sample-rate" android:value="1.0" />
+        <meta-data android:name="io.sentry.ndk.scope-sync.enabled" android:value="true" />
+        <meta-data android:name="io.sentry.auto-init" android:value="true" />
+
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
             android:name=".MainActivity"

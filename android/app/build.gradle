@@ -1,4 +1,5 @@
 apply plugin: 'com.android.application'
+apply plugin: 'io.sentry.android.gradle'
 
 android {
     namespace = "com.streamai.iptv"
@@ -40,6 +41,10 @@ dependencies {
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
+
+    // Sentry
+    implementation 'io.sentry:sentry-android:7.0.0'
+    implementation 'io.sentry:sentry-android-ndk:7.0.0'
 }
 
 apply from: 'capacitor.build.gradle'

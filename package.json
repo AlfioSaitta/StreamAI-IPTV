@@ -5,7 +5,7 @@
   "scripts": {
     "start": "npm run wails:run",
     "dev": "npm run wails:dev",
-    "build": "vite build",
+    "build": "vite build --env-file .env.sentry",
     "version:sync": "node scripts/sync-version.mjs",
     "version:print": "node scripts/sync-version.mjs --print",
     "version:full": "node scripts/sync-version.mjs --print-full",
@@ -73,10 +73,12 @@
     "typescript": "^5.3.3",
     "video.js": "^8.23.4",
     "vite": "^5.1.4",
-    "vitest": "3.2.4"
+    "vitest": "3.2.4",
+    "@sentry/vite-plugin": "^5.3.0"
   },
   "dependencies": {
     "@google/genai": "^1.34.0",
-    "@wailsio/runtime": "^3.0.0-alpha.79"
+    "@wailsio/runtime": "^3.0.0-alpha.79",
+    "@sentry/react": "^10.53.1"
   }
 }
