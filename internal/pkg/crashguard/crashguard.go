@@ -21,6 +21,7 @@ import (
 	"os/signal"
 	"runtime"
 	"runtime/debug"
+	"runtime/pprof"
 	"strings"
 	"syscall"
 	"time"
@@ -41,8 +42,8 @@ func InitSignalHandler(appID, version, commitSHA string) {
 
 	go func() {
 		sig := <-sigs
-		// Un segnale è stato catturato. Generiamo il report.
-		payload := buildPayload(fmt.Sprintf("Fatal OS signal: %s", sig), version, commitSHA)
+		// Un segnale è stato catturato. Generiamo il report con lo stack di TUTTE le goroutine.
+		payload := buildPayload(fmt.Sprintf("Fatal OS signal: %s", sig), version, commitSHA, true)
 
 		// Scrivi il report su file, come per un panic normale.
 		path, err := logging.WriteCrashReport(appID, payload)
@@ -57,7 +58,7 @@ func InitSignalHandler(appID, version, commitSHA string) {
 		sentry.WithScope(func(scope *sentry.Scope) {
 			scope.SetLevel(sentry.LevelFatal)
 			scope.SetTag("signal", sig.String())
-			sentry.CaptureException(fmt.Errorf("caught signal: %s", sig))
+			sentry.CaptureException(fmt.Errorf("caught signal: %s\n\n%s", sig, payload))
 		})
 
 		// Flush di Sentry e del logger prima di uscire.
@@ -86,7 +87,7 @@ func Recover(appID, version, commitSHA string) {
 	sentry.CaptureException(fmt.Errorf("%v", r))
 	sentry.Flush(2 * time.Second) // Attende l'invio prima di uscire
 
-	payload := buildPayload(r, version, commitSHA)
+	payload := buildPayload(r, version, commitSHA, false)
 	path, err := logging.WriteCrashReport(appID, payload)
 	if err != nil {
 		// Best effort: stampa su stderr se non possiamo scrivere il file.
@@ -119,7 +120,7 @@ func RecoverGoroutine(name string) {
 	}
 }
 
-func buildPayload(panicValue any, version, commitSHA string) string {
+func buildPayload(panicValue any, version, commitSHA string, allGoroutines bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "StreamAI crash report\n")
 	fmt.Fprintf(&b, "=====================\n")
@@ -132,7 +133,17 @@ func buildPayload(panicValue any, version, commitSHA string) string {
 	fmt.Fprintf(&b, "NumGoroutine:%d\n", runtime.NumGoroutine())
 	fmt.Fprintf(&b, "Log file:    %s\n", nonEmpty(logging.LogFilePath(), "(not configured)"))
 	fmt.Fprintf(&b, "\nPanic value:\n%v\n", panicValue)
-	fmt.Fprintf(&b, "\nStack trace:\n%s\n", debug.Stack())
+	fmt.Fprintf(&b, "\nStack trace:\n")
+
+	if allGoroutines {
+		// Per i segnali OS, debug.Stack() mostra solo lo stack del gestore di segnali.
+		// Usiamo pprof per ottenere uno snapshot di TUTTE le goroutine, che è molto più utile.
+		_ = pprof.Lookup("goroutine").WriteTo(&b, 1)
+	} else {
+		// Per i panic Go, debug.Stack() è sufficiente e mostra lo stack della goroutine in panic.
+		b.Write(debug.Stack())
+	}
+
 	return b.String()
 }
 

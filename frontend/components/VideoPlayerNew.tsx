@@ -1,7 +1,4 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import type Player from 'video.js/dist/types/player';
-import type Hls from 'hls.js';
-import 'video.js/dist/video-js.css';
 
 import { Channel } from '../types';
 import type { XtreamCredentials } from '../types';
@@ -18,7 +15,6 @@ import { usePlayerShortcuts } from '../hooks/usePlayerShortcuts';
 import { usePlayerMediaSession } from '../hooks/usePlayerMediaSession';
 import { useRemoteControl } from '../hooks/useRemoteControl';
 import { useNativePlayerEngine } from '../hooks/useNativePlayerEngine';
-import { useWebPlayerEngine } from '../hooks/useWebPlayerEngine';
 import { useNativeMpvEngine } from '../hooks/useNativeMpvEngine';
 import { useMpvCanvasRenderer } from '../hooks/useMpvCanvasRenderer';
 import { useEpg } from '../hooks/useEpg';
@@ -92,19 +88,14 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   autoNextEpisodeEnabled = true,
 }) => {
   // Refs
-  const videoRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const playerRef = useRef<Player | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const controlsTimeoutRef = useRef<number | null>(null);
-  const networkStatusIntervalRef = useRef<number | null>(null);
-  const hlsRef = useRef<Hls | null>(null);
-  const mpegtsRef = useRef<any>(null);
   const retryCountRef = useRef(0);
   const retryTimerRef = useRef<number | null>(null);
   const loadTimeoutRef = useRef<number | null>(null);
   const nativeProgressIntervalRef = useRef<number | null>(null);
-  const playerEngineRef = useRef<PlayerEngine>('videojs');
+  const playerEngineRef = useRef<PlayerEngine>('mpv');
   const lastSourceRef = useRef<string | null>(null);
   const pauseTimeRef = useRef<number | null>(null);
   const mpvHasSeekedRef = useRef(false);
@@ -151,7 +142,6 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   const [subtitleEnabled, setSubtitleEnabled] = useState<boolean>(true);
   const [showSubtitleMenu, setShowSubtitleMenu] = useState<boolean>(false);
   const subtitleFileInputRef = useRef<HTMLInputElement | null>(null);
-  const subtitleTrackElRef = useRef<HTMLTrackElement | null>(null);
 
   // OSD (extracted hook)
   const { osd, showOsd } = usePlayerOsd();
@@ -221,8 +211,8 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     onFire: () => {
       if (isUsingNativePlayer) {
         nativeVideoPlayer.pause().catch(() => undefined);
-      } else if (playerRef.current && !playerRef.current.paused()) {
-        playerRef.current.pause();
+      } else {
+        pauseMpv().catch(() => undefined);
       }
       setIsPlaying(false);
       showOsd(<Pause className="w-12 h-12 text-white" fill="white" />, 'Sleep timer scaduto');
@@ -230,22 +220,19 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     fadeOutSeconds: 5,
     getVolume: () => {
       if (isUsingNativePlayer) return volume;
-      return playerRef.current?.volume() ?? volume;
+      return mpvState?.volume ?? volume;
     },
     setVolume: (v) => {
       if (isUsingNativePlayer) {
         nativeVideoPlayer.setVolume(v).catch(() => undefined);
-      } else if (playerRef.current) {
-        playerRef.current.volume(v);
+      } else {
+        setVolumeMpv(v).catch(() => undefined);
       }
       setVolume(v);
     },
   });
 
   // Interactive timeline (hover ghost bar + tooltip + pointer scrubbing).
-  // URG-1: the hook now owns the scrubbing state machine and emits a SINGLE
-  // seek on pointerup, eliminating the seek-storm caused by the previous
-  // invisible <input type="range">.
   const performSeek = useCallback((time: number) => {
     if (isUsingNativePlayer) {
       nativeVideoPlayer.seekTo(time)
@@ -259,19 +246,6 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       setCurrentTime(time);
       return;
     }
-
-    if (!playerRef.current) return;
-    // Prefer videoEl.fastSeek() when available — lands on the nearest keyframe
-    // without decoding the intermediate frames, which is dramatically faster
-    // on long VOD files.
-    const videoEl = playerRef.current.el()?.querySelector('video') as HTMLVideoElement | null;
-    if (videoEl && typeof (videoEl as any).fastSeek === 'function') {
-      try { (videoEl as any).fastSeek(time); }
-      catch { playerRef.current.currentTime(time); }
-    } else {
-      playerRef.current.currentTime(time);
-    }
-    setCurrentTime(time);
   }, [isUsingNativePlayer, isMpv, seekMpv]);
 
   const {
@@ -290,10 +264,6 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   // until the seek completes server-side).
   const displayTime = isScrubbing && scrubTime !== null ? scrubTime : currentTime;
 
-  // URG-1 L3: when the upstream server explicitly advertises `Accept-Ranges:
-  // none` we KNOW any seek will trigger a full re-download. Disable the
-  // timeline interaction entirely (Play/Pause still works) and surface a
-  // clear inline banner instead of letting the user freeze the player.
   const seekDisabled = vodProbe?.rangeSupport === 'no';
   const seekDisabledReason = seekDisabled
     ? 'Il server non supporta il seek (Accept-Ranges: none). Solo Play/Pausa disponibili.'
@@ -316,21 +286,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       window.clearInterval(nativeProgressIntervalRef.current);
       nativeProgressIntervalRef.current = null;
     }
-    if (hlsRef.current) {
-      hlsRef.current.destroy();
-      hlsRef.current = null;
-    }
-    if (mpegtsRef.current) {
-      try {
-        mpegtsRef.current.unload?.();
-        mpegtsRef.current.detachMediaElement?.();
-        mpegtsRef.current.destroy?.();
-      } catch (e) {
-        console.warn('[Player] Errore cleanup mpegts:', e);
-      }
-      mpegtsRef.current = null;
-    }
-
+    
     // Wails libmpv engine cleanup.
     if (playerEngineRef.current === 'mpv') {
       stopMpv().catch(() => {});
@@ -365,43 +321,15 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     setRetryNonce(n => n + 1);
   }, [showOsd]);
 
-  const computeBufferStats = useCallback((video: HTMLVideoElement | null): BufferStats | null => {
-    if (!video) return null;
-    try {
-      const buf = video.buffered;
-      const ranges = buf ? buf.length : 0;
-      let total = 0;
-      let ahead = 0;
-      let behind = 0;
-      const ct = video.currentTime || 0;
-      for (let i = 0; i < ranges; i++) {
-        const start = buf.start(i);
-        const end = buf.end(i);
-        total += end - start;
-        if (ct >= start && ct <= end) {
-          ahead = Math.max(ahead, end - ct);
-          behind = Math.max(behind, ct - start);
-        } else if (start > ct) {
-          // Future buffered range — still counts as ahead from gap edge.
-          ahead = Math.max(ahead, end - start);
-        }
-      }
-      return { ranges, ahead, behind, total, currentTime: ct };
-    } catch {
-      return null;
-    }
-  }, []);
-
   const updateStreamInfo = useCallback(async () => {
     if (!channel) return;
     setShowInfoPanel(true);
-    const videoElement = playerRef.current?.el()?.querySelector('video') as HTMLVideoElement | null;
     setInfoLoading(true);
     try {
       if (isMpv) {
         await refreshMpv();
       }
-      const info = await streamInfoService.collectInfoAsync(videoElement, hlsRef.current, mpegtsRef.current, channel.url);
+      const info = await streamInfoService.collectInfoAsync(null, null, null, channel.url);
       
       // Integrate MPV hardware info if using MPV engine (Fase 6.1).
       if (isMpv && mpvHwInfo) {
@@ -414,19 +342,14 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       }
 
       setStreamInfoData(info);
-      setBufferStats(computeBufferStats(videoElement));
     } catch (e) {
       console.warn('[Player] Stream diagnostics failed', e);
       setStreamInfoData(null);
-      setBufferStats(computeBufferStats(videoElement));
     } finally {
       setInfoLoading(false);
     }
-  }, [channel, computeBufferStats, isMpv, mpvHwInfo, refreshMpv]);
+  }, [channel, isMpv, mpvHwInfo, refreshMpv]);
 
-  // Build a human-readable bug report combining channel metadata, the
-  // classified PlaybackError, the source detection and basic environment
-  // info. Designed to be pasted into a GitHub issue / email to the dev.
   const buildErrorReport = useCallback((): string => {
     const ts = new Date().toISOString();
     const lines: string[] = [];
@@ -567,45 +490,27 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     }
   }, [buildErrorReport, showOsd]);
 
-  // P8.2 — Recent playback errors (ring buffer, max 10) — vedi
-  // `hooks/usePlayerErrorRing.ts`. Lo stato è derivato da `playbackError`
-  // (snapshot + dedup per identità) e consumato da `StreamDiagnostics`.
-
   // Handlers atomici per integrazione di sistema (MediaKeys/OS)
   const handlePlay = useCallback(() => {
     if (isMpv) void playMpv();
     else if (isUsingNativePlayer) void nativeVideoPlayer.resume();
-    else playerRef.current?.play();
   }, [isMpv, playMpv, isUsingNativePlayer]);
 
   const handlePause = useCallback(() => {
     if (isMpv) void pauseMpv();
     else if (isUsingNativePlayer) void nativeVideoPlayer.pause();
-    else playerRef.current?.pause();
   }, [isMpv, pauseMpv, isUsingNativePlayer]);
 
   const handleStop = useCallback(() => {
     if (isMpv) void stopMpv();
     else if (isUsingNativePlayer) void nativeVideoPlayer.stop();
-    else playerRef.current?.dispose();
     onBack?.();
   }, [isMpv, stopMpv, isUsingNativePlayer, onBack]);
 
   const handleSeek = useCallback((time: number) => {
     if (isMpv) void seekMpv(time);
     else if (isUsingNativePlayer) void nativeVideoPlayer.seekTo(time);
-    else if (playerRef.current) playerRef.current.currentTime(time);
   }, [isMpv, seekMpv, isUsingNativePlayer]);
-
-  // Refresh buffer stats periodically while the diagnostics panel is open.
-  useEffect(() => {
-    if (!showInfoPanel || isMpv) return;
-    const id = window.setInterval(() => {
-      const videoElement = playerRef.current?.el()?.querySelector('video') as HTMLVideoElement | null;
-      setBufferStats(computeBufferStats(videoElement));
-    }, 1000);
-    return () => window.clearInterval(id);
-  }, [showInfoPanel, isMpv, computeBufferStats]);
 
   // --- CONTROLS LOGIC ---
 
@@ -667,16 +572,6 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       );
       return;
     }
-
-    if (playerRef.current) {
-      if (playerRef.current.paused()) {
-        playerRef.current.play();
-        showOsd(<Play className="w-12 h-12 text-white" fill="white" />, "Play");
-      } else {
-        playerRef.current.pause();
-        showOsd(<Pause className="w-12 h-12 text-white" fill="white" />, "Pausa");
-      }
-    }
   }, [isPlaying, isUsingNativePlayer, isMpv, pauseMpv, playMpv, showOsd, channel, loadMpv]);
 
   // System Integration (MediaKeys, PowerSave) per ambiente Wails
@@ -722,33 +617,11 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       }
       return;
     }
-
-    if (playerRef.current) {
-      const newTime = (playerRef.current.currentTime() || 0) + seconds;
-      playerRef.current.currentTime(Math.max(0, newTime));
-      
-      if (seconds > 0) {
-        showOsd(<FastForward className="w-12 h-12 text-white" />, `+${seconds}s`);
-      } else {
-        showOsd(<Rewind className="w-12 h-12 text-white" />, `${seconds}s`);
-      }
-    }
   }, [currentTime, isUsingNativePlayer, isMpv, seekMpv, showOsd]);
 
-  // NOTE: the legacy `handleSeek` (input[type=range] onChange) was removed
-  // on 2026-05-13 as part of URG-1 (seek-storm fix). All seeks now go
-  // through `performSeek` invoked by `useInteractiveTimeline` on pointerup.
-
-
   const toggleFullscreen = useCallback(() => {
-    // Fase 7.2: su desktop (Wails) preferiamo il fullscreen della finestra
-    // reale rispetto al fullscreen DOM del container. Questo permette di
-    // avere l'OSD e i modali (es. CastDevicePicker) correttamente sovrapposti
-    // senza doverli spostare dentro il container fullscreen.
     if (platformService.isWails && host?.toggleFullscreen) {
       host.toggleFullscreen().catch(console.error);
-      // Su Wails lo stato isFullscreen viene aggiornato via polling/evento,
-      // ma qui diamo un feedback immediato all'OSD.
       host.isFullscreen().then((fs: boolean) => {
         if (fs) showOsd(<Maximize className="w-12 h-12 text-white" />, "Fullscreen");
         else showOsd(<Minimize className="w-12 h-12 text-white" />, "Esci da Fullscreen");
@@ -793,23 +666,6 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       );
       return;
     }
-
-    if (playerRef.current) {
-      const newMuted = !playerRef.current.muted();
-      playerRef.current.muted(newMuted);
-      setIsMuted(newMuted);
-      
-      if (newMuted) {
-        showOsd(<VolumeX className="w-12 h-12 text-white" />, "Muto");
-      } else {
-        showOsd(<Volume2 className="w-12 h-12 text-white" />, "Audio Attivo");
-        // Se stiamo riattivando l'audio e il volume è a 0, impostiamolo a un valore minimo
-        if (playerRef.current.volume() === 0) {
-          playerRef.current.volume(0.5);
-          setVolume(0.5);
-        }
-      }
-    }
   }, [isMuted, isUsingNativePlayer, isMpv, setMutedMpv, showOsd]);
 
   const handleVolumeChange = useCallback((e: React.ChangeEvent<HTMLInputElement> | number) => {
@@ -848,28 +704,6 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       }
       return;
     }
-
-    if (playerRef.current) {
-      playerRef.current.volume(newVolume);
-      setVolume(newVolume);
-      
-      let Icon = Volume2;
-      if (newVolume === 0) Icon = VolumeX;
-      else if (newVolume < 0.5) Icon = Volume1;
-      
-      if (newVolume > 0) {
-        playerRef.current.muted(false);
-        setIsMuted(false);
-      } else {
-        playerRef.current.muted(true);
-        setIsMuted(true);
-      }
-      
-      // Mostra OSD solo se cambiato via tastiera (quando è un numero)
-      if (typeof e === 'number') {
-        showOsd(<Icon className="w-12 h-12 text-white" />, `${Math.round(newVolume * 100)}%`);
-      }
-    }
   }, [isUsingNativePlayer, isMpv, setVolumeMpv, setMutedMpv, showOsd]);
 
   const togglePiP = useCallback(async () => {
@@ -883,23 +717,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       return;
     }
 
-    const videoElement = playerRef.current?.el()?.querySelector('video');
-    if (!videoElement) return;
-
-    try {
-      if (document.pictureInPictureElement) {
-        await document.exitPictureInPicture();
-        setIsPiP(false);
-        showOsd(<PictureInPicture2 className="w-12 h-12 text-white" />, "PiP Disattivato");
-      } else if (document.pictureInPictureEnabled) {
-        await videoElement.requestPictureInPicture();
-        setIsPiP(true);
-        showOsd(<PictureInPicture2 className="w-12 h-12 text-white" />, "PiP Attivo");
-      }
-    } catch (err) {
-      console.error("PiP error:", err);
-      showOsd(<AlertTriangle className="w-12 h-12 text-white" />, 'PiP non disponibile');
-    }
+    // TODO: Implement PiP for Wails
   }, [isUsingNativePlayer, nativePiPSupported, showOsd]);
 
   const restartFromBeginning = () => {
@@ -913,9 +731,9 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         .catch(err => console.warn('[Player] Native restart failed:', err));
       return;
     }
-
-    if (playerRef.current) {
-      playerRef.current.currentTime(0);
+    
+    if (isMpv) {
+      seekMpv(0).catch(() => {});
       if (onResetProgress) onResetProgress();
       showOsd(<RotateCcw className="w-12 h-12 text-white" />, "Riavvia");
     }
@@ -926,13 +744,6 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       const aid = typeof trackId === 'string' ? parseInt(trackId) : trackId;
       void setAidMpv(aid);
       return;
-    }
-    if (playerRef.current) {
-      const tracks = playerRef.current.audioTracks() as any;
-      for (let i = 0; i < tracks.length; i++) {
-        const track = tracks[i];
-        track.enabled = track.id === trackId;
-      }
     }
   };
 
@@ -952,10 +763,6 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       cur = mpvState.position;
       dur = mpvState.duration;
       playing = mpvState.playing;
-    } else if (playerRef.current && !playerRef.current.isDisposed()) {
-      cur = playerRef.current.currentTime() || 0;
-      dur = playerRef.current.duration() || 0;
-      playing = !playerRef.current.paused();
     } else {
       return;
     }
@@ -1057,14 +864,14 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     setStreamSourceInfo(detectedSource);
     playerEngineRef.current = platformService.isNative 
       ? 'native' 
-      : (platformService.isWails ? 'mpv' : detectedSource.engine);
+      : 'mpv';
     setIsUsingNativePlayer(platformService.isNative);
     if (platformService.isNative) {
       setIsBuffering(false);
     }
   }, [channel, retryNonce, cleanupPlaybackEngines]);
 
-  // Native (Capacitor/ExoPlayer) engine — no-op on web/Electron.
+  // Native (Capacitor/ExoPlayer) engine — no-op on web/desktop.
   useNativePlayerEngine({
     channel,
     detectedSource: streamSourceInfo,
@@ -1084,41 +891,6 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     scheduleRetry,
     nativeProgressIntervalRef,
     retryCountRef,
-  });
-
-  // Web (Video.js + hls.js + mpegts.js) engine — no-op on native.
-  useWebPlayerEngine({
-    channel,
-    detectedSource: streamSourceInfo,
-    initialProgress,
-    retryNonce,
-    onNext,
-    onProgress,
-    videoRef,
-    playerRef,
-    hlsRef,
-    mpegtsRef,
-    loadTimeoutRef,
-    networkStatusIntervalRef,
-    retryCountRef,
-    setIsPlaying,
-    setIsBuffering,
-    setCurrentTime,
-    setDuration,
-    setVolume,
-    setIsMuted,
-    setIsFullscreen,
-    setNetworkSpeed,
-    setAudioTracks,
-    setError,
-    setPlaybackError,
-    setIsPiP,
-    showOsd,
-    scheduleRetry,
-    cleanupPlaybackEngines,
-    broadcastStatus,
-    isBuffering,
-    onVodProbeResult: setVodProbe,
   });
 
   // Sync MPV state back to VideoPlayer state.
@@ -1143,13 +915,9 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       }));
     setAudioTracks(audio);
 
-    // Sincronizza tracce sottotitoli (quelle interne allo stream).
-    // Nota: i sottotitoli sottotitoli sideloaded (D.4) sono gestiti separatamente 
-    // dal subtitleService.
   }, [isMpv, mpvState, mpvTracks]);
 
   // Notifica il progresso al chiamante (App.tsx) quando si usa MPV.
-  // Gli altri motori (web/native) chiamano onProgress internamente.
   useEffect(() => {
     if (isMpv && onProgress && currentTime > 0) {
       onProgress(currentTime, duration);
@@ -1175,13 +943,11 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   useEffect(() => {
     if (!isMpv || !channel) return;
     
-    // Reset seek flag for new channel
     mpvHasSeekedRef.current = false;
 
     const startMpv = async () => {
       try {
         await loadMpv(channel.url);
-        // Explicit play to ensure auto-playback on all content types (FIX: movies auto-play).
         await playMpv();
       } catch (err) {
         console.warn('[Player] MPV start failed:', err);
@@ -1193,7 +959,6 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   // Handle initial seek for MPV (VOD resume) when duration becomes available.
   useEffect(() => {
     if (isMpv && channel && initialProgress && mpvState?.duration && !mpvHasSeekedRef.current) {
-      // Apply seek if it's a significant progress (avoiding near-start/near-end edge cases).
       if (initialProgress > 0.01 && initialProgress < 0.99) {
         const targetSeconds = mpvState.duration * initialProgress;
         void seekMpv(targetSeconds);
@@ -1215,11 +980,10 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   });
 
   // Remote Control Handler (extracted hook)
-  useRemoteControl({ playerRef, setVolume, setIsMuted, broadcastStatus });
+  useRemoteControl({ broadcastStatus });
 
   // --- UI EFFECTS ---
 
-  // Sincronizza lo stato isFullscreen con il sistema (DOM o Finestra Wails)
   useEffect(() => {
     const updateFsState = async () => {
       if (document.fullscreenElement) {
@@ -1246,66 +1010,6 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     };
   }, []);
 
-  // D.4 — Attach / detach a <track> element on the underlying <video> when
-  // the user loads / removes a sideloaded subtitle file. We bypass video.js
-  // text track APIs to keep the implementation portable (works the same on
-  // plain HTMLVideoElement on Android web fallback).
-  useEffect(() => {
-    if (isUsingNativePlayer) return;
-    const videoEl = playerRef.current?.el()?.querySelector('video') as HTMLVideoElement | null;
-    if (!videoEl) return;
-
-    // Remove the previous track element, if any.
-    if (subtitleTrackElRef.current && subtitleTrackElRef.current.parentNode === videoEl) {
-      videoEl.removeChild(subtitleTrackElRef.current);
-      subtitleTrackElRef.current = null;
-    }
-
-    if (!activeSubtitle) return;
-
-    const trackEl = document.createElement('track');
-    trackEl.kind = 'subtitles';
-    trackEl.label = activeSubtitle.label;
-    trackEl.srclang = 'und';
-    trackEl.src = activeSubtitle.blobUrl;
-    trackEl.default = true;
-    videoEl.appendChild(trackEl);
-    subtitleTrackElRef.current = trackEl;
-
-    // Browsers expose the just-added TextTrack on `videoEl.textTracks[i]`.
-    // Force it to `showing` (the `default` attribute is sometimes ignored
-    // when the track is added after `loadedmetadata`).
-    const trySetMode = () => {
-      const tracks = videoEl.textTracks;
-      for (let i = 0; i < tracks.length; i++) {
-        const t = tracks[i];
-        if (t.label === activeSubtitle.label) {
-          t.mode = subtitleEnabled ? 'showing' : 'disabled';
-        } else if (t.mode === 'showing') {
-          // Hide any other showing track to avoid stacking.
-          t.mode = 'disabled';
-        }
-      }
-    };
-    trySetMode();
-    // Also retry once the track has loaded (some browsers expose the mode
-    // only after the .vtt body is fetched).
-    trackEl.addEventListener('load', trySetMode, { once: true });
-  }, [activeSubtitle, subtitleEnabled, isUsingNativePlayer]);
-
-  // Toggle visibility without re-attaching the <track>.
-  useEffect(() => {
-    if (isUsingNativePlayer) return;
-    const videoEl = playerRef.current?.el()?.querySelector('video') as HTMLVideoElement | null;
-    if (!videoEl || !activeSubtitle) return;
-    const tracks = videoEl.textTracks;
-    for (let i = 0; i < tracks.length; i++) {
-      if (tracks[i].label === activeSubtitle.label) {
-        tracks[i].mode = subtitleEnabled ? 'showing' : 'disabled';
-      }
-    }
-  }, [subtitleEnabled, activeSubtitle, isUsingNativePlayer]);
-
   const handleSubtitleFile = useCallback(async (file: File | null | undefined) => {
     if (!file) return;
     try {
@@ -1329,7 +1033,6 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
 
   const toggleSubtitleVisibility = useCallback(() => {
     if (!activeSubtitle) {
-      // No subtitle loaded — open the menu to let the user pick a file.
       setShowSubtitleMenu(prev => !prev);
       return;
     }
@@ -1363,7 +1066,6 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     };
   }, [isPlaying]);
 
-  // Detach any sideloaded subtitle and stop engines on unmount.
   useEffect(() => {
     return () => {
       cleanupPlaybackEngines();
@@ -1417,16 +1119,12 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
 
   return (
     <div ref={containerRef} className="relative w-full h-full bg-black overflow-hidden select-none">
-      {isMpv ? (
-        <canvas
-          ref={canvasRef}
-          className="w-full h-full bg-black object-contain pointer-events-auto"
-          onDoubleClick={toggleFullscreen}
-          onClick={togglePlay}
-        />
-      ) : (
-        <div ref={videoRef} className="w-full h-full bg-black" />
-      )}
+      <canvas
+        ref={canvasRef}
+        className="w-full h-full bg-black object-contain pointer-events-auto"
+        onDoubleClick={toggleFullscreen}
+        onClick={togglePlay}
+      />
 
       {/* OSD Overlay */}
       {osd.visible && (
@@ -1683,8 +1381,8 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
             }
             const loaded = await castSession.loadMedia(channel.url, channel.cleanName || channel.name);
             setIsCastLoading(false);
-            if (loaded && playerRef.current && !playerRef.current.isDisposed()) {
-              playerRef.current.pause();
+            if (loaded) {
+              pauseMpv().catch(() => {});
             }
             return loaded;
           }}
