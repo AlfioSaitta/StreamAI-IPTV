@@ -1,4 +1,3 @@
-
 export type StreamType = 'home' | 'live' | 'movie' | 'series';
 
 export interface Channel {
@@ -158,6 +157,8 @@ export interface ProfilePreferences {
   debugOverlay: boolean; // Show network speed and debug info in player
   theme?: 'dark' | 'oled';
   geminiApiKey?: string; // Custom API Key provided by user
+  tmdbApiKey?: string; // Custom API Key for The Movie Database
+  tmdbEnrichmentEnabled?: boolean; // Enable background enrichment from TMDB
   contentAutoRefreshEnabled?: boolean; // Refresh Xtream catalog in background
   contentAutoRefreshIntervalMinutes?: number; // Background refresh interval in minutes
   contentLastRefreshAt?: number; // Last successful forced catalog refresh timestamp

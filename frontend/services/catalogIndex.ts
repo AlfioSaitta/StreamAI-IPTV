@@ -5,6 +5,7 @@ export interface IndexedSearchFields {
   cleanNameLower: string;
   groupLower: string;
   genreLower: string;
+  descriptionLower: string;
   year: string;
   haystack: string;
   /** C.3 Filtri avanzati — vero se il nome o group contiene un tag qualità HD+. */
@@ -50,17 +51,17 @@ const normalizeSearchText = (value: string | undefined): string => {
 };
 
 export const indexChannel = (channel: Channel): IndexedChannel => {
-  // Se già indicizzato (es. dal worker), ritorna 1:1
-  if ('haystack' in channel) return channel as IndexedChannel;
+  // Se già indicizzato (es. dal worker) E ha il nuovo campo descriptionLower, ritorna 1:1
+  if ('haystack' in channel && 'descriptionLower' in channel) {
+    return channel as IndexedChannel;
+  }
 
   const nameLower = normalizeSearchText(channel.name);
   const cleanNameLower = normalizeSearchText(channel.cleanName || channel.name);
   const groupLower = normalizeSearchText(channel.group);
   const genreLower = normalizeSearchText(channel.genre);
+  const descriptionLower = normalizeSearchText(channel.description);
   const year = normalizeSearchText(channel.year);
-  // L'HD detection lavora sul nome **originale** (i tag tipo "[FHD]" sono
-  // proprio quelli che `cleanTitle` rimuove) + group per coprire i casi tipo
-  // "IT - Cinema HD".
   const isHD = HD_RE.test(channel.name || '') || HD_RE.test(channel.group || '');
   const genreTokens = splitGenres(channel.genre);
 
@@ -70,20 +71,31 @@ export const indexChannel = (channel: Channel): IndexedChannel => {
     cleanNameLower,
     groupLower,
     genreLower,
+    descriptionLower,
     year,
-    haystack: `${cleanNameLower} ${nameLower} ${groupLower} ${genreLower} ${year}`.trim(),
+    haystack: `${cleanNameLower} ${nameLower} ${groupLower} ${genreLower} ${descriptionLower} ${year}`.trim(),
     isHD,
     genreTokens,
   };
 };
 
+/**
+ * @deprecated For main thread use. These functions are now executed in a web worker.
+ * They are exported only for the worker to use them.
+ */
 export const indexChannels = (channels: Channel[]): IndexedChannel[] => channels.map(indexChannel);
 
+/**
+ * @deprecated For main thread use. These functions are now executed in a web worker.
+ * They are exported only for the worker to use them.
+ */
 export const indexCategories = (categories: Category[]): Array<Category & { channels: IndexedChannel[] }> => categories.map(category => ({
   ...category,
   channels: indexChannels(category.channels)
 }));
 
+// This function is now only used inside the worker.
+// It's kept here for reference and for the worker to import it.
 export const searchIndexedChannels = (channels: IndexedChannel[], query: string, limit = 150): IndexedChannel[] => {
   const normalizedQuery = normalizeSearchText(query);
   if (normalizedQuery.length < 2) return channels.slice(0, limit);
@@ -99,6 +111,7 @@ export const searchIndexedChannels = (channels: IndexedChannel[], query: string,
         else if (channel.cleanNameLower.includes(token)) score += 14;
         else if (channel.nameLower.includes(token)) score += 10;
         else if (channel.groupLower.includes(token) || channel.genreLower.includes(token)) score += 6;
+        else if (channel.descriptionLower && channel.descriptionLower.includes(token)) score += 2;
         else if (channel.year === token) score += 5;
         else if (!channel.haystack.includes(token)) return null;
       }
@@ -109,6 +122,7 @@ export const searchIndexedChannels = (channels: IndexedChannel[], query: string,
 
   return scored.slice(0, limit).map(entry => entry.channel);
 };
+
 
 /**
  * C.3 Filtri avanzati: estrae i generi più frequenti dal catalogo indicizzato
@@ -131,4 +145,3 @@ export const extractTopGenres = (channels: IndexedChannel[], topN = 24): string[
 
 /** C.3 — soglia "nuovi" (ms): elementi aggiunti negli ultimi 30 giorni. */
 export const NEW_ITEM_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
-

@@ -1,7 +1,6 @@
-
 import React, { useState, useEffect, useRef, useMemo, useDeferredValue } from 'react';
 import { Category, Channel, StreamType, WatchHistoryItem, XtreamContent } from '../types.ts';
-import { Search, Play, Info, ChevronRight, LogOut, Clock, RefreshCw, BookmarkPlus, BookmarkCheck, Settings, X, Tv, SearchX, Server, Calendar, AlertTriangle, Film as FilmIcon } from 'lucide-react';
+import { Search, Play, Info, ChevronRight, LogOut, Clock, RefreshCw, BookmarkPlus, BookmarkCheck, Settings, X, Tv, SearchX, Server, Calendar, AlertTriangle, Film as FilmIcon, Sparkles } from 'lucide-react';
 import CachedImage from './CachedImage.tsx';
 import { useLanguage } from '../contexts/LanguageContext.tsx';
 import EmptyState from './shared/EmptyState.tsx';
@@ -9,6 +8,7 @@ import { Button } from './shared';
 import { useInitialTvFocus, useTvSpatialNavigation } from '../hooks/useTvFocus.ts';
 import { DownloadManager } from '../services/downloadManager.ts';
 import { IndexedChannel, indexCategories, indexChannels, searchIndexedChannels } from '../services/catalogIndex.ts';
+import { getSemanticSearchResults, isAiAvailable } from '../services/geminiService.ts';
 
 const INITIAL_VISIBLE_ROWS = 6;
 const ROW_BATCH_SIZE = 6;
@@ -64,6 +64,7 @@ interface ChannelListProps {
   onRefreshCatalog?: () => void;
   /** Stato corrente del refresh (idle/refreshing/success/error) per disabilitare la CTA. */
   contentRefreshStatus?: { state: 'idle' | 'refreshing' | 'success' | 'error'; message?: string };
+  geminiApiKey?: string;
 }
 
 // --- CHANNEL ITEM COMPONENT ---
@@ -276,6 +277,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
   catalogHealth,
   onRefreshCatalog,
   contentRefreshStatus,
+  geminiApiKey,
 }) => {
   const { t } = useLanguage();
   const screenRef = useRef<HTMLDivElement>(null);
@@ -284,6 +286,9 @@ const ChannelList: React.FC<ChannelListProps> = ({
   const [scrolled, setScrolled] = useState(false);
   const [featuredItem, setFeaturedItem] = useState<Channel | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [aiSearchEnabled, setAiSearchEnabled] = useState(false);
+  const [aiSearchResults, setAiSearchResults] = useState<string[] | null>(null);
+  const [aiSearchLoading, setAiSearchLoading] = useState(false);
 
   const indexedLiveCategories = useMemo(() => indexCategories(liveCategories), [liveCategories]);
   const indexedVodCategories = useMemo(() => indexCategories(vodCategories), [vodCategories]);
@@ -544,13 +549,26 @@ const ChannelList: React.FC<ChannelListProps> = ({
       return activeTab === 'home' ? homeCategories : indexedBaseCategories;
   }, [activeTab, homeCategories, indexedBaseCategories]);
 
+  useEffect(() => {
+    if (aiSearchEnabled && deferredSearchTerm.length > 1) {
+      const performAiSearch = async () => {
+        setAiSearchLoading(true);
+        setAiSearchResults(null);
+        const results = await getSemanticSearchResults(indexedAllChannels, deferredSearchTerm, activeTab, true, geminiApiKey);
+        setAiSearchResults(results);
+        setAiSearchLoading(false);
+      };
+      performAiSearch();
+    } else {
+      setAiSearchResults(null);
+    }
+  }, [aiSearchEnabled, deferredSearchTerm, indexedAllChannels, activeTab, geminiApiKey]);
+
   const filteredCategories = useMemo(() => {
     if (!deferredSearchTerm) return activeCategories;
 
-    // Ottimizza la ricerca: cerca solo se il termine ha almeno 2 caratteri
     if (deferredSearchTerm.length < 2) return activeCategories;
 
-    // Determina quali canali cercare in base alla tab attiva
     let channelsToSearch: IndexedChannel[];
     switch (activeTab) {
       case 'movie':
@@ -568,14 +586,23 @@ const ChannelList: React.FC<ChannelListProps> = ({
         break;
     }
 
+    if (aiSearchEnabled) {
+      if (aiSearchLoading) {
+        return [{ name: "Ricerca AI in corso...", channels: [] }];
+      }
+      if (aiSearchResults) {
+        const searchChannels = channelsToSearch.filter(c => aiSearchResults.includes(c.name));
+        return [{ name: `Risultati AI (${searchChannels.length})`, channels: searchChannels }];
+      }
+    }
+
     const searchChannels = searchIndexedChannels(channelsToSearch, deferredSearchTerm, SEARCH_RESULT_LIMIT);
 
     if (searchChannels.length > 0) {
-        // Limita i risultati per performance
         return [{ name: t.search + ` (${searchChannels.length})`, channels: searchChannels.slice(0, 100) }];
     }
     return [];
-  }, [activeCategories, deferredSearchTerm, indexedAllChannels, activeTab, indexedVodCategories, indexedSeriesCategories, indexedLiveCategories, t]);
+  }, [activeCategories, deferredSearchTerm, indexedAllChannels, activeTab, indexedVodCategories, indexedSeriesCategories, indexedLiveCategories, t, aiSearchEnabled, aiSearchResults, aiSearchLoading]);
 
   const displayedCategories = filteredCategories.slice(0, visibleRows);
 
@@ -616,10 +643,6 @@ const ChannelList: React.FC<ChannelListProps> = ({
                         key={tab}
                         onClick={() => {
                             setActiveTab(tab);
-                            // Reset campo ricerca: altrimenti un termine digitato in un
-                            // tab si "porta dietro" e nasconde tutti i contenuti del tab
-                            // successivo (es. cercando "rai" su Live e poi cliccando
-                            // FILM la pagina sembra vuota).
                             setSearchTerm('');
                             window.scrollTo({top:0, behavior:'smooth'});
                             setVisibleRows(INITIAL_VISIBLE_ROWS);
@@ -648,7 +671,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
                  <Search className="w-icon-sm h-icon-sm text-content-muted flex-shrink-0" aria-hidden="true" />
                  <input
                     type="text"
-                    placeholder={t.search + '...'}
+                    placeholder={aiSearchEnabled ? "Cerca o descrivi un film..." : t.search + '...'}
                     className="bg-transparent text-sm text-content-primary placeholder-content-muted outline-none focus:outline-none focus:ring-0 border-0 w-full min-w-0 caret-brand-primary"
                     value={searchTerm}
                     onChange={e => setSearchTerm(e.target.value)}
@@ -662,6 +685,16 @@ const ChannelList: React.FC<ChannelListProps> = ({
                       aria-label="Pulisci ricerca"
                     >
                       <X className="w-icon-sm h-icon-sm" aria-hidden="true" />
+                    </button>
+                 )}
+                 {isAiAvailable(geminiApiKey) && (
+                    <button
+                      onClick={() => setAiSearchEnabled(!aiSearchEnabled)}
+                      className={`p-1 rounded-full transition-colors ${aiSearchEnabled ? 'bg-brand-accent text-white' : 'text-content-muted hover:text-content-primary'}`}
+                      aria-label="Ricerca Semantica"
+                      title="Ricerca Semantica"
+                    >
+                      <Sparkles className="w-icon-sm h-icon-sm" />
                     </button>
                  )}
              </div>

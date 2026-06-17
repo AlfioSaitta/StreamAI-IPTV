@@ -1,4 +1,3 @@
-
 import {
   Category,
   Channel,
@@ -321,6 +320,9 @@ export const loginXtream = async (creds: XtreamCredentials, forceRefresh = false
             stream.movie_image ||
             undefined;
 
+          const tmdbIdValue = stream.tmdb_id || stream.tmdb || stream.custom_sid;
+          const parsedTmdbId = tmdbIdValue && !isNaN(Number(tmdbIdValue)) ? Number(tmdbIdValue) : undefined;
+
           const channel: Channel = {
             id: type === 'series' ? `series-${stream.series_id}` : stream.stream_id.toString(),
             name: rawName,
@@ -336,6 +338,7 @@ export const loginXtream = async (creds: XtreamCredentials, forceRefresh = false
             genre: stream.genre,
             cast: stream.cast,
             director: stream.director,
+            tmdbId: parsedTmdbId,
             tvgId: type === 'live'
               ? (typeof stream.epg_channel_id === 'string' && stream.epg_channel_id ? stream.epg_channel_id : undefined)
               : undefined,
@@ -544,4 +547,3 @@ export const __testing = {
   fetchCatalogWithRetry,
   deriveHealth,
 };
-

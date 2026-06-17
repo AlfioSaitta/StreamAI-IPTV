@@ -81,6 +81,15 @@ var blockedResponseHeaders = []string{
 	"X-Frame-Options",
 }
 
+// bufferPool riutilizza i buffer per io.Copy, riducendo le allocazioni e il GC.
+var bufferPool = &sync.Pool{
+	New: func() interface{} {
+		// Un buffer da 32KB è un buon compromesso per lo streaming.
+		buffer := make([]byte, 32*1024)
+		return &buffer
+	},
+}
+
 // Service è il Wails v3 Service del proxy IPTV.
 type Service struct {
 	mu         sync.RWMutex
@@ -298,7 +307,11 @@ func (s *Service) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 	rewriteResponseHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
-	if _, err := io.Copy(w, resp.Body); err != nil && !errors.Is(err, context.Canceled) {
+
+	// Usa un buffer dal pool per copiare lo stream, riducendo le allocazioni.
+	buffer := bufferPool.Get().(*[]byte)
+	defer bufferPool.Put(buffer)
+	if _, err := io.CopyBuffer(w, resp.Body, *buffer); err != nil && !errors.Is(err, context.Canceled) {
 		log.Printf("proxy: copy body %s: %v", sanitizeURL(upstreamURL), err)
 	}
 }
@@ -360,15 +373,17 @@ func isBlockedResponse(h string) bool {
 
 func buildHTTPClient(insecure bool) *http.Client {
 	tr := &http.Transport{
+		// Impostazioni di pooling ottimizzate per HLS/IPTV
 		DialContext: (&net.Dialer{
 			Timeout:   dialTimeout,
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,              // Aumentato per gestire più connessioni idle totali
+		MaxIdleConnsPerHost:   20,               // Cruciale per HLS, che fa molte richieste allo stesso host
+		IdleConnTimeout:       90 * time.Second, // Timeout più lungo per mantenere le connessioni aperte
 		TLSHandshakeTimeout:   tlsHandshakeTimeout,
 		ResponseHeaderTimeout: responseHeaderTimeout,
-		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          50,
-		IdleConnTimeout:       60 * time.Second,
 		// gosec G402: InsecureSkipVerify abilitato solo quando l'utente
 		// ha esplicitamente attivato lo "Insecure mode" (env o toggle UI).
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: insecure}, //nolint:gosec
@@ -428,4 +443,3 @@ func isEnvTruthy(name string) bool {
 	v := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
 	return v == "1" || v == "true" || v == "yes" || v == "on"
 }
-

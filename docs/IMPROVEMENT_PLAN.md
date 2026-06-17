@@ -1,10 +1,10 @@
 # StreamAI IPTV — Piano Strategico & Roadmap v2.0
 
-> **Documento unico e canonico.** Sostituisce tutte le versioni precedenti.  
+> **Documento unico e canonico.** Sostituisce tutte le versioni precedenti.
 > Focalizzato sul post-migrazione **Wails v3** e sul mantenimento dell'eccellenza su **Android**.
 
-**Stato attuale:** Release Candidate 1 (2026-05-25)  
-**Target:** Versione 2.0.0 (Stabile) e Roadmap 2.1+  
+**Stato attuale:** Final Packaging (2026-05-26)
+**Target:** Versione 2.0.0 (Stabile) e Roadmap 2.1+
 
 ---
 
@@ -16,8 +16,8 @@
 | **Player Video** | ✅ | libmpv + WebGL2 attivo su Desktop. |
 | **Data Migration** | ✅ | Recupero profili da Electron v1 a Wails v2 attivo. |
 | **Networking** | ✅ | Proxy IPTV same-origin e discovery Go completati. |
-| **Android** | 🚧 | Allineamento feature v2.0 in corso (Media3 1.10.1). |
-| **Windows/macOS** | ⏳ | Packaging e integrazioni OS specifiche pianificate. |
+| **Android** | ✅ | Allineamento feature v2.0 completato (Media3 1.10.1). |
+| **Windows/macOS** | 🚧 | Packaging e integrazioni OS specifiche in corso. |
 
 ---
 
@@ -26,16 +26,16 @@
 L'app è ora stabile su Linux. Dobbiamo garantire la stessa qualità su Windows e macOS.
 
 ### 9.1 Windows Integration (P0)
-- [ ] **Power Save**: Implementare `SetThreadExecutionState` in `internal/pkg/powersave/powersave_windows.go`.
-- [ ] **Media Keys**: Implementare bridge SMTC (System Media Transport Controls) in `internal/pkg/mediakeys/mediakeys_windows.go`.
-- [ ] **Notifications**: Implementare notifiche Toast native.
-- [ ] **Packaging**: Configurare `nfpm` o NSIS per la generazione dell'installer `.exe`.
+- [🚧] **WIN-POWERSAVE** — Implementare `SetThreadExecutionState` (Go).
+- [🚧] **WIN-MEDIAKEYS** — Implementare bridge SMTC (System Media Transport Controls) (Go).
+- [🚧] **WIN-NOTIF** — Implementare notifiche Toast native (Go).
+- [🚧] **WIN-PKG** — Configurazione pipeline NSIS/nfpm per `.exe`.
 
 ### 9.2 macOS Integration (P0)
-- [ ] **Power Save**: Implementare `IOPMAssertion` in `internal/pkg/powersave/powersave_darwin.go`.
-- [ ] **Media Keys**: Implementare `MPNowPlayingInfoCenter` bridge in `internal/pkg/mediakeys/mediakeys_darwin.go`.
-- [ ] **Notifications**: Implementare notifiche native via `UNUserNotificationCenter`.
-- [ ] **Packaging**: Configurare bundle `.app` e creazione `.dmg`.
+- [🚧] **MAC-POWERSAVE** — Implementare `IOPMAssertion` (Go).
+- [🚧] **MAC-MEDIAKEYS** — Implementare `MPNowPlayingInfoCenter` (Go).
+- [🚧] **MAC-NOTIF** — Implementare notifiche native (Go).
+- [🚧] **MAC-PKG** — Configurazione bundle `.app` e `.dmg`.
 
 ---
 
@@ -49,8 +49,8 @@ Ottimizzazioni per contenuti 4K e miglioramento della gestione tracce.
 - [ ] **Stats**: Aggiungere metriche di "Frame Drop" e "Jitter" reali nella Diagnostica Stream.
 
 ### 11.2 Gestione Tracce & Sottotitoli
-- [ ] **Sideload**: Migliorare l'UI per il caricamento di sottotitoli esterni (.srt/.vtt) inviandoli direttamente a MPV.
-- [ ] **Sync**: Garantire che il cambio traccia audio sia istantaneo e riflesso correttamente nell'OSD.
+- [✅] **Sideload**: Migliorata l'UI per il caricamento di sottotitoli esterni (.srt/.vtt) inviandoli direttamente a MPV.
+- [✅] **Sync**: Garantito che il cambio traccia audio sia istantaneo e riflesso correttamente nell'OSD.
 - [ ] **Miglioramento OSD**: Aggiungere anteprime dei frame sulla timeline (se MPV lo permette via cache veloce).
 
 ---
@@ -69,16 +69,16 @@ StreamAI deve onorare il suo nome con feature intelligenti.
 
 Ridurre il debito tecnico accumulato durante la migrazione veloce.
 
-- [x] **REF-1.a**: Ridurre `VideoPlayerNew.tsx` (>1500 righe) estraendo `PlayerControls`, `PlaylistSidebar` e `SettingsOverlay`.
-- [x] **REF-1.b**: Pulizia completa dei residui Electron nel frontend (file `.js` inutilizzati, rami `if (isElectron)` rimasti).
-- [x] **P7.1 Test**: Aumentare la copertura dei test Go per i servizi core (Proxy, Player, Migration) al 70%.
+- [✅] **REF-1.a**: Ridotto `VideoPlayerNew.tsx` (>1500 righe) estraendo `PlayerControls`, `PlaylistSidebar` e `SettingsOverlay`.
+- [✅] **REF-1.b**: Pulizia completa dei residui Electron nel frontend (file `.js` inutilizzati, rami `if (isElectron)` rimasti).
+- [ ] **P7.1 Test**: Aumentare la copertura dei test Go per i servizi core (Proxy, Player, Migration) al 70%.
 
 ---
 
 ## 📦 6. Fase 14 — Distribution & CI/CD (Priorità P1)
 
 - [ ] **Auto-update**: Implementare un sistema di aggiornamento automatico sicuro (Wails v3 built-in o custom).
-- [ ] **Windows/macOS CI**: Configurare GitHub Actions per produrre artefatti Windows e macOS firmati.
+- [🚧] **Windows/macOS CI**: Configurare GitHub Actions per produrre artefatti Windows e macOS firmati.
 
 ---
 

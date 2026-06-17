@@ -27,10 +27,12 @@ import {
   History,
   Keyboard,
   Type,
+  Film,
 } from 'lucide-react';
 import { useEscapeKey, useInitialTvFocus, useTvSpatialNavigation } from '../hooks/useTvFocus.ts';
 import { Avatar, AvatarPicker, Button, Card, FormField, Input, Select, ToggleSwitch } from './shared';
 import { DEFAULT_AVATAR_ID } from '../services/avatars';
+import { TmdbEnricherService } from '../services/tmdbEnricher.ts';
 
 interface ProfileSettingsProps {
   profile: Profile;
@@ -43,6 +45,7 @@ interface ProfileSettingsProps {
   /** BUG-1 §2.3 Step 4: stato per blocco (live/vod/series) per mostrare
    *  un riepilogo "Ultimo stato" nella sezione Sincronizzazione catalogo. */
   catalogHealth?: XtreamContent['health'] | null;
+  allChannels: Channel[];
 }
 
 const LANGUAGES = [
@@ -144,6 +147,7 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
   isContentRefreshing = false,
   contentRefreshMessage,
   catalogHealth,
+  allChannels,
 }) => {
   const { t } = useLanguage();
   const [preferences, setPreferences] = useState<ProfilePreferences>(
@@ -159,6 +163,8 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
   const [aiCacheMessage, setAiCacheMessage] = useState<string | null>(null);
   const [imageCacheMessage, setImageCacheMessage] = useState<string | null>(null);
   const [cacheStats, setCacheStats] = useState<CacheStatsView | null>(null);
+  const [enrichmentProgress, setEnrichmentProgress] = useState(0);
+  const [isEnriching, setIsEnriching] = useState(TmdbEnricherService.isEnriching());
   const screenRef = useRef<HTMLDivElement>(null);
 
   useInitialTvFocus(true, screenRef, '[data-initial-focus="true"]');
@@ -231,6 +237,24 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
       setPreferences(prev => ({ ...prev, contentLastRefreshError: message }));
       setLocalRefreshMessage(message);
     }
+  };
+
+  const handleEnrichCatalog = () => {
+    if (!preferences.tmdbApiKey) {
+      alert('Per favore, inserisci prima una chiave API TMDB.');
+      return;
+    }
+    setIsEnriching(true);
+    TmdbEnricherService.startBackgroundEnrichment(
+      allChannels,
+      preferences.tmdbApiKey,
+      preferences.language,
+      (progress, total) => {
+        setEnrichmentProgress(Math.round((progress / total) * 100));
+      }
+    ).finally(() => {
+      setIsEnriching(false);
+    });
   };
 
   const handleClearAiCache = async () => {
@@ -466,8 +490,113 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
           </div>
         </SectionCard>
 
-        {/* AI Settings — icona AI accent (viola) */}
-        <SectionCard icon={Sparkles} title={t.aiSettings} iconTone="accent">
+        {/* AI & Metadata Settings */}
+        <SectionCard icon={Sparkles} title="AI & Metadati" iconTone="accent">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <ShieldCheck className="w-icon-md h-icon-md text-content-muted" aria-hidden="true" />
+                <div>
+                  <h3 className="font-medium text-content-primary">{t.geminiApiKey}</h3>
+                  <p className="text-sm text-content-muted mt-1">{t.geminiApiKeyDesc}</p>
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-col gap-3">
+              <Input
+                type="password"
+                value={preferences.geminiApiKey || ''}
+                onChange={(e) => handlePreferenceChange('geminiApiKey', e.target.value)}
+                placeholder="AIza..."
+                accent="accent"
+                className="font-mono"
+                aria-label={t.geminiApiKey}
+              />
+              <a
+                href="https://aistudio.google.com/app/apikey"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="tv-focus text-xs text-brand-accent hover:text-brand-accent-hover transition-colors flex items-center gap-1 w-fit rounded-control px-2 py-1"
+              >
+                <Globe className="w-icon-xs h-icon-xs" aria-hidden="true" />
+                {t.getApiKeyLink}
+              </a>
+            </div>
+          </div>
+
+          <Divider />
+
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Film className="w-icon-md h-icon-md text-content-muted" aria-hidden="true" />
+                <div>
+                  <h3 className="font-medium text-content-primary">The Movie Database (TMDB) API Key</h3>
+                  <p className="text-sm text-content-muted mt-1">
+                    Fornisce poster, trame e informazioni su cast e regia per film e serie TV.
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-col gap-3">
+              <Input
+                type="password"
+                value={preferences.tmdbApiKey || ''}
+                onChange={(e) => handlePreferenceChange('tmdbApiKey', e.target.value)}
+                placeholder="v4 Auth Token o v3 API Key"
+                className="font-mono"
+                aria-label="TMDB API Key"
+              />
+              <a
+                href="https://www.themoviedb.org/settings/api"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="tv-focus text-xs text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1 w-fit rounded-control px-2 py-1"
+              >
+                <Globe className="w-icon-xs h-icon-xs" aria-hidden="true" />
+                Ottieni una chiave API gratuita su TMDB
+              </a>
+            </div>
+          </div>
+
+          <Divider />
+          
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <RefreshCw className="w-icon-md h-icon-md text-content-muted mt-0.5" aria-hidden="true" />
+              <div>
+                <h3 className="font-medium text-content-primary">Arricchimento automatico TMDB</h3>
+                <p className="text-sm text-content-muted mt-1">
+                  Scarica in background i metadati per tutti i film e serie del catalogo.
+                </p>
+                {isEnriching && (
+                  <div className="mt-2 text-xs text-blue-400">
+                    Sincronizzazione in corso... {enrichmentProgress}%
+                  </div>
+                )}
+              </div>
+            </div>
+            <ToggleSwitch
+              checked={Boolean(preferences.tmdbEnrichmentEnabled)}
+              onChange={(v) => handlePreferenceChange('tmdbEnrichmentEnabled', v)}
+              ariaLabel="Arricchimento automatico TMDB"
+            />
+          </div>
+          
+          <div className="flex justify-end mt-4">
+             <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleEnrichCatalog}
+                disabled={!preferences.tmdbApiKey || isEnriching}
+                loading={isEnriching}
+              >
+                {isEnriching ? 'In corso...' : 'Forza Sincronizzazione Ora'}
+              </Button>
+          </div>
+
+          <Divider />
+
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <Zap className="w-icon-md h-icon-md text-content-muted" aria-hidden="true" />
@@ -505,43 +634,6 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
 
           <Divider />
 
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <ShieldCheck className="w-icon-md h-icon-md text-content-muted" aria-hidden="true" />
-                <div>
-                  <h3 className="font-medium text-content-primary">{t.geminiApiKey}</h3>
-                  <p className="text-sm text-content-muted mt-1">{t.geminiApiKeyDesc}</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-3">
-              <Input
-                type="password"
-                value={preferences.geminiApiKey || ''}
-                onChange={(e) => handlePreferenceChange('geminiApiKey', e.target.value)}
-                placeholder="AIza..."
-                accent="accent"
-                className="font-mono"
-                aria-label={t.geminiApiKey}
-              />
-              <a
-                href="https://aistudio.google.com/app/apikey"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="tv-focus text-xs text-brand-accent hover:text-brand-accent-hover transition-colors flex items-center gap-1 w-fit rounded-control px-2 py-1"
-              >
-                <Globe className="w-icon-xs h-icon-xs" aria-hidden="true" />
-                {t.getApiKeyLink}
-              </a>
-            </div>
-          </div>
-
-          <Divider />
-
-          {/* FIX 2026-05-15: re-enable della notifica "AI non configurata"
-              dopo che l'utente l'ha silenziata con "Non mostrare più". */}
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <Sparkles className="w-icon-md h-icon-md text-content-muted" aria-hidden="true" />
@@ -942,4 +1034,3 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
 };
 
 export default ProfileSettings;
-

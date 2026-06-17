@@ -29,12 +29,22 @@ const GuideView = lazy(() => import('./components/GuideView.tsx'));
 // nel chunk principale.
 const DesignSystemPreview = lazy(() => import('./components/DesignSystemPreview.tsx'));
 const NativeMpvSmokeTest = lazy(() => import('./components/NativeMpvSmokeTest.tsx'));
+const PerformanceProfiler = lazy(() => import('./components/dev/PerformanceProfiler.tsx'));
 
 const shouldShowDsPreview = (): boolean => {
   if (typeof window === 'undefined') return false;
   if ((window as unknown as { __SHOW_DS_PREVIEW?: boolean }).__SHOW_DS_PREVIEW) return true;
   try {
     return new URLSearchParams(window.location.search).has('ds-preview');
+  } catch {
+    return false;
+  }
+};
+
+const shouldShowPerformanceProfiler = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  try {
+    return new URLSearchParams(window.location.search).has('profile');
   } catch {
     return false;
   }
@@ -82,6 +92,8 @@ import { hasAiApiKey, isAiAvailable, isAiTemporarilySuspended } from './services
 import { EpgReminderService, type ReminderFiredEvent } from './services/epg/reminderService.ts';
 import { useBackStack } from './hooks/useBackStack.ts';
 import { useTrayBridge } from './hooks/useTrayBridge.ts';
+import { TmdbEnricherService } from './services/tmdbEnricher.ts';
+import { Events } from '@wailsio/runtime';
 
 const MIN_CONTENT_REFRESH_INTERVAL_MINUTES = 60;
 
@@ -481,9 +493,28 @@ function App() {
       }
     };
     window.addEventListener('epg-reminder-clicked', onNotifClick);
+
+    // Playlist processing events from Go backend
+    const offPlaylistSuccess = Events.On('playlist:success', (event) => {
+      const content = event.data as XtreamContent;
+      setLiveCategories(content.live);
+      setVodCategories(content.vod);
+      setSeriesCategories(content.series);
+      setCatalogHealth(content.health ?? null);
+      setIsLoading(false);
+    });
+
+    const offPlaylistError = Events.On('playlist:error', (event) => {
+      console.error('[Go Backend] Playlist processing failed:', event.data);
+      setIsLoading(false);
+      // TODO: Show an error toast to the user
+    });
+
     return () => {
       offFired();
       window.removeEventListener('epg-reminder-clicked', onNotifClick);
+      offPlaylistSuccess();
+      offPlaylistError();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -582,47 +613,48 @@ function App() {
 
   const handleXtreamLogin = async (creds: XtreamCredentials, saveToProfile = true) => {
     setIsLoading(true);
-    try {
-        // This will check cache first!
-        const content = await loginXtream(creds);
-        setLiveCategories(content.live);
-        setVodCategories(content.vod);
-        setSeriesCategories(content.series);
-        setCatalogHealth(content.health ?? null);
-        setXtreamCreds(creds);
+    setXtreamCreds(creds);
 
-        // BUG-1 §2.3 Step 4 + hotfix 2026-05-14: se la cache è legacy
-        // (`fetchedAt === 0`, sintetizzata da loginXtream) oppure VOD/Series
-        // sono in errore/stale, fai partire un refresh forzato in background
-        // (non bloccante). L'utente entra subito nell'app con la cache, e i
-        // dati si aggiornano dietro le quinte.
-        if (content.health) {
-          const isLegacyCache = content.health.fetchedAt === 0;
-          const blocksNeedRefresh =
-            content.health.vod.status    === 'error' ||
-            content.health.series.status === 'error' ||
-            content.health.vod.status    === 'stale' ||
-            content.health.series.status === 'stale';
-          if (isLegacyCache || blocksNeedRefresh) {
-            console.warn('[App] Catalog needs background refresh', { isLegacyCache, health: content.health });
-            setTimeout(() => {
-                refreshContentFromServerRef.current?.({ background: true }).catch(() => { /* swallow */ });
-            }, isLegacyCache ? 1_500 : 5_000);
+    if (platformService.isWails) {
+      // Delegate to Go backend
+      await host.playlist.ProcessXtreamPlaylist(creds);
+    } else {
+      // Fallback to original TS implementation for web/mobile
+      try {
+          const content = await loginXtream(creds);
+          setLiveCategories(content.live);
+          setVodCategories(content.vod);
+          setSeriesCategories(content.series);
+          setCatalogHealth(content.health ?? null);
+          
+          if (content.health) {
+            const isLegacyCache = content.health.fetchedAt === 0;
+            const blocksNeedRefresh =
+              content.health.vod.status    === 'error' ||
+              content.health.series.status === 'error' ||
+              content.health.vod.status    === 'stale' ||
+              content.health.series.status === 'stale';
+            if (isLegacyCache || blocksNeedRefresh) {
+              console.warn('[App] Catalog needs background refresh', { isLegacyCache, health: content.health });
+              setTimeout(() => {
+                  refreshContentFromServerRef.current?.({ background: true }).catch(() => { /* swallow */ });
+              }, isLegacyCache ? 1_500 : 5_000);
+            }
           }
-        }
-
-        if (saveToProfile && activeProfile) {
-            const updatedProfile = ProfileService.updateCredentials(activeProfile.id, creds);
-            setActiveProfile(updatedProfile);
-        }
-        
-        setActiveTab('home');
-        setCurrentChannel(null);
-        setSelectedSeries(null);
-        setPlayQueue([]);
-    } finally {
-        setIsLoading(false);
+      } finally {
+          setIsLoading(false);
+      }
     }
+
+    if (saveToProfile && activeProfile) {
+        const updatedProfile = ProfileService.updateCredentials(activeProfile.id, creds);
+        setActiveProfile(updatedProfile);
+    }
+    
+    setActiveTab('home');
+    setCurrentChannel(null);
+    setSelectedSeries(null);
+    setPlayQueue([]);
   };
 
   const refreshContentFromServer = useCallback(async (options: { background?: boolean } = {}) => {
@@ -735,6 +767,25 @@ function App() {
           if (intervalId !== null) window.clearInterval(intervalId);
       };
   }, [activeProfile?.id, activeProfile?.xtreamCreds, activeProfile?.preferences?.contentAutoRefreshEnabled, activeProfile?.preferences?.contentAutoRefreshIntervalMinutes, activeProfile?.preferences?.contentLastRefreshAt, refreshContentFromServer]);
+
+  const allChannels = useMemo(() => {
+      return [
+          ...liveCategories.flatMap(c => c.channels),
+          ...vodCategories.flatMap(c => c.channels),
+          ...seriesCategories.flatMap(c => c.channels)
+      ];
+  }, [liveCategories, vodCategories, seriesCategories]);
+
+  useEffect(() => {
+    if (activeProfile?.preferences?.tmdbEnrichmentEnabled && activeProfile.preferences.tmdbApiKey && allChannels.length > 0) {
+      TmdbEnricherService.startBackgroundEnrichment(
+        allChannels,
+        activeProfile.preferences.tmdbApiKey,
+        activeProfile.preferences.language,
+        () => {} // No-op progress for automatic background task
+      );
+    }
+  }, [activeProfile, allChannels]);
 
   const getCurrentCategories = () => {
       switch (activeTab) {
@@ -854,14 +905,6 @@ function App() {
       }
   };
 
-  const allChannels = useMemo(() => {
-      return [
-          ...liveCategories.flatMap(c => c.channels),
-          ...vodCategories.flatMap(c => c.channels),
-          ...seriesCategories.flatMap(c => c.channels)
-      ];
-  }, [liveCategories, vodCategories, seriesCategories]);
-
   // Ottieni il progresso salvato per il canale corrente
   const getInitialProgress = (): number => {
       if (!activeProfile || !currentChannel) return 0;
@@ -968,6 +1011,7 @@ function App() {
                     isContentRefreshing={contentRefreshStatus.state === 'refreshing'}
                     contentRefreshMessage={contentRefreshStatus.message}
                     catalogHealth={catalogHealth}
+                    allChannels={allChannels}
                 />
             </Suspense>
         );
@@ -1011,6 +1055,7 @@ function App() {
                     history={activeProfile.history}
                     watchlistIds={activeProfile.watchlist}
                     onToggleWatchlist={handleToggleWatchlist}
+                    tmdbApiKey={activeProfile.preferences?.tmdbApiKey}
                 />
             </Suspense>
         );
@@ -1085,6 +1130,7 @@ function App() {
             catalogHealth={catalogHealth}
             onRefreshCatalog={() => refreshContentFromServer().catch(() => { /* errore già nello status */ })}
             contentRefreshStatus={contentRefreshStatus}
+            geminiApiKey={activeProfile.preferences?.geminiApiKey}
         />
     );
   };
@@ -1108,6 +1154,7 @@ function App() {
                 onShowDetails={handleShowDetails}
                 history={activeProfile.history}
                 geminiApiKey={activeProfile.preferences?.geminiApiKey}
+                tmdbApiKey={activeProfile.preferences?.tmdbApiKey}
             />
           </Suspense>
         )}
@@ -1257,6 +1304,13 @@ function Root() {
     return (
       <Suspense fallback={<PlayerLoadingFallback />}>
         <NativeMpvSmokeTest />
+      </Suspense>
+    );
+  }
+  if (shouldShowPerformanceProfiler()) {
+    return (
+      <Suspense fallback={<PlayerLoadingFallback />}>
+        <PerformanceProfiler />
       </Suspense>
     );
   }

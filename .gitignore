@@ -82,3 +82,5 @@ build/icons/
 
 # SPIKE-1 smoke reports (generati da task spike:1:smoke)
 /dist/spike1/
+/.ai-skeleton.md
+/bash

@@ -24,8 +24,8 @@
 ## 🎬 Fase 11 — Player & Rendering Avanzato (P1)
 
 - [ ] **MPV-ZERO-COPY** — Implementare DMA-BUF rendering su Linux (Zero-copy).
-- [ ] **MPV-SIDELOAD-SUBS** — UI/UX per caricamento sottotitoli esterni.
-- [ ] **MPV-TRACK-SYNC** — Verifica integrità cambio tracce audio/sub istantaneo.
+- [✅] **MPV-SIDELOAD-SUBS** — UI/UX per caricamento sottotitoli esterni.
+- [✅] **MPV-TRACK-SYNC** — Verifica integrità cambio tracce audio/sub istantaneo.
 - [ ] **MPV-TIMELINE-PREVIEW** — Anteprima frame su hover timeline (opzionale).
 
 ---
@@ -40,8 +40,8 @@
 
 ## ♻️ Fase 13 — Refactoring & Qualità (P2)
 
-- [ ] **REF-PLAYER-UI** — Splitting `VideoPlayerNew.tsx` in sotto-componenti.
-- [ ] **PURGE-ELECTRON** — Rimozione definitiva rami di codice `if (isElectron)`.
+- [✅] **REF-PLAYER-UI** — Splitting `VideoPlayerNew.tsx` in sotto-componenti.
+- [✅] **PURGE-ELECTRON** — Rimozione definitiva rami di codice `if (isElectron)`.
 - [ ] **TEST-GO-70** — Aumento copertura test Go al 70%.
 
 ---
@@ -50,3 +50,9 @@
 
 - [ ] **AUTO-UPDATE** — Sistema di aggiornamento automatico sicuro.
 - [ ] **CI-CROSS** — GitHub Actions per Windows/macOS.
+
+---
+
+## 📡 Varie
+
+- [ ] **CAST-SEEK** — Implementare comando `Seek` nel servizio `cast` (`Fase 3-bis` del piano di migrazione).

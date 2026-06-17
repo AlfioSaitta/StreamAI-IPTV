@@ -1,6 +1,9 @@
 import { Channel, Recommendation, StreamType, WatchHistoryItem } from "../types.ts";
 import { CacheService } from "./cacheService.ts";
+import { IndexedChannel, searchIndexedChannels } from "./catalogIndex.ts";
+import { MetadataService } from "./metadata.ts";
 
+const AI_MODEL = "gemini-3.5-flash";
 const AI_RECOMMENDATION_TTL_MS = 60 * 60 * 1000;
 const AI_ENRICHMENT_TTL_MS = 24 * 60 * 60 * 1000;
 const AI_CACHE_MAX_ENTRIES = 120;
@@ -11,22 +14,10 @@ interface RecommendationOptions {
   preferredGenres?: string[];
 }
 
-// API Key - usa solo variabile d'ambiente Vite. Non inserire chiavi nel codice sorgente.
-const getApiKey = (customApiKey?: string): string => {
-  if (customApiKey?.trim()) {
-    return customApiKey.trim();
-  }
-  if (import.meta.env?.VITE_GEMINI_API_KEY) {
-    return import.meta.env.VITE_GEMINI_API_KEY;
-  }
-  return '';
-};
-
-const apiKey = getApiKey();
-
 // Lazy load del modulo Gemini
 let aiInstance: any = null;
 let currentKey: string | null = null;
+let lastCheckedKey: string | null = null;
 
 // Circuit Breaker State
 const SUSPENSION_KEY = 'ai_service_suspended_until';
@@ -49,6 +40,11 @@ const suspendService = () => {
   const until = Date.now() + SUSPENSION_DURATION;
   localStorage.setItem(SUSPENSION_KEY, until.toString());
   console.warn(`[AI Service] Suspended for 30 minutes due to critical error.`);
+};
+
+const resetSuspension = () => {
+  localStorage.removeItem(SUSPENSION_KEY);
+  console.log("[AI Service] Suspension lifted.");
 };
 
 const stableHash = (input: string): string => {
@@ -133,25 +129,71 @@ const scoreChannelForAI = (
   return score;
 };
 
+const parseJsonResponse = <T>(responseText: string): T | null => {
+  let jsonString = '';
+  // 1. Prova a estrarre da un blocco markdown ```json
+  const markdownMatch = responseText.match(/```json\n([\s\S]*?)\n```/);
+  if (markdownMatch && markdownMatch[1]) {
+    jsonString = markdownMatch[1];
+  } else {
+    // 2. Fallback: cerca il primo array o oggetto JSON "grezzo"
+    const rawJsonMatch = responseText.match(/(\[[\s\S]*?]|{[\s\S]*?})/);
+    if (rawJsonMatch && rawJsonMatch[0]) {
+      jsonString = rawJsonMatch[0];
+    }
+  }
+
+  if (jsonString) {
+    try {
+      return JSON.parse(jsonString) as T;
+    } catch (e) {
+      console.error("AI JSON Parsing Failed:", e, "Raw text:", responseText);
+    }
+  }
+  console.warn("Nessun JSON valido trovato nella risposta AI:", responseText);
+  return null;
+};
+
+
 export const hasAiApiKey = (customApiKey?: string): boolean => {
-  return !!getApiKey(customApiKey);
+  return !!customApiKey?.trim();
 };
 
 export const isAiTemporarilySuspended = (): boolean => isSuspended();
 
 export const isAiAvailable = (customApiKey?: string): boolean => {
+  const activeKey = customApiKey?.trim() || '';
+  
+  if (lastCheckedKey !== null && lastCheckedKey !== activeKey && activeKey !== '') {
+    resetSuspension();
+    aiInstance = null;
+    currentKey = null;
+    console.log("[AI Service] New API key detected in UI, resetting suspension.");
+  }
+  lastCheckedKey = activeKey;
+
   return !isSuspended() && hasAiApiKey(customApiKey);
 };
 
 const getAI = async (customApiKey?: string) => {
+  const activeKey = customApiKey?.trim();
+
+  if (!activeKey) {
+    console.log("[AI Service] Missing API Key.");
+    return null;
+  }
+
+  if (currentKey !== activeKey) {
+    resetSuspension();
+    aiInstance = null;
+    console.log("[AI Service] New API key detected in getAI, resetting suspension and AI instance.");
+  }
+
   if (isSuspended()) {
     console.log("[AI Service] Service is currently suspended.");
     return null;
   }
 
-  const activeKey = getApiKey(customApiKey) || apiKey;
-
-  // Se la chiave è cambiata, ricrea l'istanza
   if (aiInstance && currentKey === activeKey) return aiInstance;
   
   try {
@@ -171,6 +213,7 @@ export interface MovieEnrichment {
   cast: string[];
   similarMovies: string[];
   funFact?: string;
+  summary?: string;
 }
 
 export const getMovieEnrichment = async (
@@ -196,6 +239,7 @@ export const getMovieEnrichment = async (
 
   const prompt = `Analizza il film "${movieTitle}".
 Restituisci un JSON con questi campi:
+- "summary": una sinossi di 2-3 frasi del film (in italiano).
 - "cast": array di stringhe con i 5 attori principali.
 - "similarMovies": array di stringhe con 5 titoli di film simili per genere o atmosfera.
 - "funFact": una curiosità breve e interessante sul film (in italiano).
@@ -204,16 +248,14 @@ Rispondi SOLO con il JSON.`;
 
   try {
     const result = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
+      model: AI_MODEL,
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       config: { temperature: 0.1 }
     });
 
-    const text = result?.text || "";
-    const jsonMatch = text.match(/\{[\s\S]*?}/);
+    const data = parseJsonResponse<MovieEnrichment>(result?.text || "");
 
-    if (jsonMatch) {
-      const data = JSON.parse(jsonMatch[0]) as MovieEnrichment;
+    if (data) {
       if (useCache) {
         CacheService.saveApiData(cacheKey, data);
         CacheService.pruneApiCache('ai_', AI_CACHE_MAX_ENTRIES).catch(() => undefined);
@@ -222,12 +264,107 @@ Rispondi SOLO con il JSON.`;
     }
   } catch (e: any) {
     console.error("AI Enrichment error:", e);
-    // Se è un errore server (5xx) o di quota (429), sospendi il servizio
     if (e.message?.includes('500') || e.message?.includes('503') || e.message?.includes('429')) {
       suspendService();
     }
   }
   return null;
+};
+
+export const getSemanticSearchResults = async (
+  channels: IndexedChannel[],
+  query: string,
+  context: StreamType = 'live',
+  useCache: boolean = true,
+  geminiApiKey?: string,
+  tmdbApiKey?: string,
+): Promise<string[]> => {
+  if (isSuspended() || !hasAiApiKey(geminiApiKey)) return [];
+
+  const catalogFingerprint = stableHash(`${channels.length}:${channels[0]?.id || ''}:${channels[channels.length - 1]?.id || ''}`);
+  const cacheKey = `ai_search_${context}_${catalogFingerprint}_${stableHash(query.toLowerCase().trim())}`;
+  
+  if (useCache) {
+    try {
+      const cached = await CacheService.getApiData(cacheKey, { maxAgeMs: AI_RECOMMENDATION_TTL_MS });
+      if (cached?.results) {
+        return cached.results;
+      }
+    } catch (e) {
+      console.warn("Cache error:", e);
+    }
+  }
+
+  const ai = await getAI(geminiApiKey);
+  if (!ai) return [];
+
+  // Fase 1: Pre-filtraggio locale per creare una lista di candidati pertinenti
+  const candidateChannels = searchIndexedChannels(channels, query, 200);
+  
+  if (candidateChannels.length === 0) {
+    return [];
+  }
+
+  // Fase 1.5: Arricchimento on-the-fly dei candidati con dati TMDB (se disponibili)
+  const enrichedCandidates = await Promise.all(
+    candidateChannels.map(async (c) => {
+      if ((c.type === 'movie' || c.type === 'series') && tmdbApiKey) {
+        let tmdbData = null;
+        if (c.tmdbId) {
+          tmdbData = await MetadataService.getDetails(c.tmdbId, c.type, 'it', tmdbApiKey);
+        } else {
+          tmdbData = await MetadataService.getDetailsByTitle(c.name, c.type, c.year, 'it', tmdbApiKey);
+        }
+        if (tmdbData?.overview) {
+          return { ...c, description: tmdbData.overview };
+        }
+      }
+      return c;
+    })
+  );
+
+  const selectedItems = enrichedCandidates.map(c => ({
+    name: c.cleanName || c.name,
+    genre: c.genre || 'N/A',
+    year: c.year || 'N/A',
+    plot: c.description ? c.description.substring(0, 200) : "" // Aumenta la lunghezza per dare più contesto
+  }));
+
+  // Fase 2: Analisi Semantica AI sulla lista pre-filtrata e arricchita
+  const prompt = `Dalla seguente lista di candidati, seleziona i 10 titoli che meglio corrispondono alla richiesta dell'utente.
+Richiesta Utente: "${query}"
+
+REGOLE:
+1. Analizza la richiesta per capire la trama, il genere o l'intento.
+2. Confronta la richiesta con i campi "name", "genre", e "plot" di ogni candidato.
+3. Restituisci ESCLUSIVAMENTE un array JSON di stringhe contenente i nomi ("name") dei migliori 10 candidati, ordinati per pertinenza.
+
+LISTA CANDIDATI:
+${JSON.stringify(selectedItems)}`;
+
+  try {
+    const result = await ai.models.generateContent({
+      model: AI_MODEL,
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      config: { temperature: 0.2, topP: 0.8 }
+    });
+
+    const data = parseJsonResponse<string[]>(result?.text || "");
+
+    if (data) {
+      if (useCache) {
+        CacheService.saveApiData(cacheKey, { results: data });
+        CacheService.pruneApiCache('ai_', AI_CACHE_MAX_ENTRIES).catch(() => undefined);
+      }
+      return data;
+    }
+  } catch (e: any) {
+    console.error("AI Search error:", e);
+    if (e.message?.includes('500') || e.message?.includes('503') || e.message?.includes('429')) {
+      suspendService();
+    }
+  }
+  return [];
 };
 
 export const getRecommendations = async (
@@ -269,7 +406,7 @@ export const getRecommendations = async (
 
   const ai = await getAI(customApiKey);
 
-  if (!ai || (!apiKey && !customApiKey)) {
+  if (!ai) {
     return [
       { channelName: "Errore", reason: "Servizio AI non disponibile o API Key mancante." }
     ];
@@ -331,7 +468,7 @@ ${JSON.stringify(selectedItems)}`;
 
   try {
     const result = await ai.models.generateContent({ 
-      model: "gemini-2.0-flash",
+      model: AI_MODEL,
       contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
       config: {
         systemInstruction: `${getPromptProfile(context)} Il tuo compito è fornire raccomandazioni precise basate esclusivamente sul catalogo fornito dall'utente. Rispondi sempre in formato JSON puro, senza blocchi di codice markdown. Non includere spiegazioni fuori dal JSON.`,
@@ -341,17 +478,13 @@ ${JSON.stringify(selectedItems)}`;
       }
     });
 
-    const text = result?.text || "";
+    const data = parseJsonResponse<Recommendation[]>(result?.text || "");
 
-    // Estrai JSON dalla risposta
-    const jsonMatch = text.match(/\[[\s\S]*?]/);
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]) as Recommendation[];
-      const results = parsed.filter(rec =>
+    if (data) {
+      const results = data.filter(rec =>
         channels.some(c => c.name === rec.channelName)
       ).slice(0, 3);
 
-      // Save to cache
       if (results.length > 0 && useCache) {
         CacheService.saveApiData(cacheKey, { results, timestamp: Date.now() });
         CacheService.pruneApiCache('ai_', AI_CACHE_MAX_ENTRIES).catch(() => undefined);
@@ -365,7 +498,6 @@ ${JSON.stringify(selectedItems)}`;
     console.error("Gemini API Error:", error);
     const errorMessage = error?.message || "";
     
-    // Circuit Breaker Trigger
     if (errorMessage.includes("500") || errorMessage.includes("503") || errorMessage.includes("429") || errorMessage.includes("fetch failed")) {
       suspendService();
       return [{ channelName: "Servizio Sospeso", reason: "L'AI è temporaneamente non disponibile. Riprova più tardi." }];

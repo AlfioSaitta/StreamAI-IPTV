@@ -27,9 +27,10 @@ interface MovieDetailProps {
   onShowDetails?: (channel: Channel) => void;
   history: WatchHistoryItem[];
   geminiApiKey?: string;
+  tmdbApiKey?: string;
 }
 
-const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watchlistIds, onToggleWatchlist, allChannels, onShowDetails, history, geminiApiKey }) => {
+const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watchlistIds, onToggleWatchlist, allChannels, onShowDetails, history, geminiApiKey, tmdbApiKey }) => {
   const { language, t } = useLanguage();
   const [loading, setLoading] = useState(true);
   const [tmdbData, setTmdbData] = useState<any>(null);
@@ -50,11 +51,11 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
         setTmdbData(null);
 
         if (movie.tmdbId) {
-          const details = await MetadataService.getDetails(movie.tmdbId, 'movie', language);
+          const details = await MetadataService.getDetails(movie.tmdbId, 'movie', language, tmdbApiKey);
           setTmdbData(details);
         } else {
           const searchTitle = movie.cleanName || movie.name;
-          const details = await MetadataService.getDetailsByTitle(searchTitle, 'movie', movie.year, language);
+          const details = await MetadataService.getDetailsByTitle(searchTitle, 'movie', movie.year, language, tmdbApiKey);
           setTmdbData(details);
         }
       } catch (err) {
@@ -66,7 +67,7 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
     };
 
     fetchDetails();
-  }, [movie, language, t]);
+  }, [movie, language, t, tmdbApiKey]);
 
   // Use shared hooks for images and metadata
   const { backdrop, poster } = useMediaImages({ 
@@ -216,15 +217,14 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
                 <Badge tone="neutral" icon={Tv}>HD</Badge>
                 {genre && <span className="text-content-secondary ml-1">{genre}</span>}
               </div>
-              {!MetadataService.isConfigured() && (
+              {!MetadataService.isConfigured(tmdbApiKey) && (
                 <Card
                   elevation="flat"
                   padding="sm"
                   className="!border-state-warning/30 !bg-state-warning/10"
                 >
                   <p className="text-sm text-state-warning">
-                    TMDB non configurato: poster, trama e suggerimenti arricchiti possono usare solo i dati del provider IPTV. Imposta{' '}
-                    <code className="text-state-warning font-mono">VITE_TMDB_API_KEY</code> per abilitarli.
+                    TMDB non configurato: poster, trama e suggerimenti arricchiti possono usare solo i dati del provider IPTV. Imposta la chiave TMDB nelle preferenze del profilo per abilitarli.
                   </p>
                 </Card>
               )}
@@ -278,7 +278,7 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
               </Button>
             </div>
 
-            <p className="text-lg text-content-secondary leading-relaxed max-w-3xl">{plot}</p>
+            <p className="text-lg text-content-secondary leading-relaxed max-w-3xl">{aiData?.summary || plot}</p>
 
             {/* AI Fun Fact */}
             {aiData?.funFact ? (
@@ -390,4 +390,3 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
 };
 
 export default MovieDetail;
-

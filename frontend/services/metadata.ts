@@ -30,12 +30,10 @@ const normalizeTmdbLanguage = (language: string): string => {
   return defaults[language] || 'en-US';
 };
 
-// Configura la chiave in .env come VITE_TMDB_API_KEY. Non inserire chiavi nel codice sorgente.
-const TMDB_API_KEY = import.meta.env.VITE_TMDB_API_KEY || '';
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 
 export const MetadataService = {
-  isConfigured: (): boolean => Boolean(TMDB_API_KEY),
+  isConfigured: (apiKey?: string): boolean => Boolean(apiKey),
   extractYear,
   isTitleMatch: isLikelyTitleMatch,
 
@@ -48,8 +46,8 @@ export const MetadataService = {
   /**
    * Searches TMDB for a movie or series.
    */
-  searchTMDB: async (query: string, type: 'movie' | 'series', year?: string, language: string = 'it') => {
-    if (!TMDB_API_KEY) return null;
+  searchTMDB: async (query: string, type: 'movie' | 'series', year?: string, language: string = 'it', apiKey?: string) => {
+    if (!apiKey) return null;
     
     // Normalize query
     const cleanQuery = cleanTitle(query).trim();
@@ -72,7 +70,7 @@ export const MetadataService = {
       const languagesToTry = Array.from(new Set([normalizedLanguage, 'en-US']));
 
       for (const lang of languagesToTry) {
-        let url = `${TMDB_BASE_URL}/search/${searchType}?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(cleanQuery)}&language=${lang}&include_adult=false`;
+        let url = `${TMDB_BASE_URL}/search/${searchType}?api_key=${apiKey}&query=${encodeURIComponent(cleanQuery)}&language=${lang}&include_adult=false`;
         if (expectedYear) url += type === 'series' ? `&first_air_date_year=${expectedYear}` : `&primary_release_year=${expectedYear}`;
 
         try {
@@ -108,8 +106,8 @@ export const MetadataService = {
   /**
    * Gets full details (images, plot, cast) by TMDB ID.
    */
-  getDetails: async (tmdbId: number, type: 'movie' | 'series', language: string = 'it') => {
-    if (!TMDB_API_KEY) return null;
+  getDetails: async (tmdbId: number, type: 'movie' | 'series', language: string = 'it', apiKey?: string) => {
+    if (!apiKey) return null;
 
     const cacheKey = `details_${type}_${tmdbId}_${language}`;
     if (tmdbCache.has(cacheKey)) return tmdbCache.get(cacheKey);
@@ -124,7 +122,7 @@ export const MetadataService = {
 
       const searchType = type === 'series' ? 'tv' : 'movie';
       const normalizedLanguage = normalizeTmdbLanguage(language);
-      const url = `${TMDB_BASE_URL}/${searchType}/${tmdbId}?api_key=${TMDB_API_KEY}&append_to_response=credits,images,similar,recommendations&language=${normalizedLanguage}`;
+      const url = `${TMDB_BASE_URL}/${searchType}/${tmdbId}?api_key=${apiKey}&append_to_response=credits,images,similar,recommendations&language=${normalizedLanguage}`;
 
       const res = await fetch(url);
       if (!res.ok) throw new Error(res.statusText);
@@ -157,11 +155,11 @@ export const MetadataService = {
    * @param language - Language code for results (default: 'it')
    * @returns Full TMDB details if found, null otherwise
    */
-  getDetailsByTitle: async (title: string, type: 'movie' | 'series', year?: string, language: string = 'it') => {
+  getDetailsByTitle: async (title: string, type: 'movie' | 'series', year?: string, language: string = 'it', apiKey?: string) => {
     try {
-      const result = await MetadataService.searchTMDB(title, type, year, language);
+      const result = await MetadataService.searchTMDB(title, type, year, language, apiKey);
       if (result?.id) {
-        return await MetadataService.getDetails(result.id, type, language);
+        return await MetadataService.getDetails(result.id, type, language, apiKey);
       }
       return null;
     } catch (err) {

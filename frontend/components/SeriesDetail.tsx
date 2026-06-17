@@ -26,6 +26,7 @@ interface SeriesDetailProps {
   history: WatchHistoryItem[];
   watchlistIds: string[];
   onToggleWatchlist: (channelId: string) => void;
+  tmdbApiKey?: string;
 }
 
 interface Episode {
@@ -37,7 +38,7 @@ interface Episode {
   season: number;
 }
 
-const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisode, onBack, history, watchlistIds, onToggleWatchlist }) => {
+const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisode, onBack, history, watchlistIds, onToggleWatchlist, tmdbApiKey }) => {
   const { language, t } = useLanguage();
   const [loading, setLoading] = useState(true);
   const [info, setInfo] = useState<any>(null);
@@ -71,8 +72,16 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
         if (firstSeason) setActiveSeason(firstSeason);
 
         const fetchTmdb = async () => {
+            if (series.tmdbId) {
+                const details = await MetadataService.getDetails(series.tmdbId, 'series', language, tmdbApiKey);
+                if (details) {
+                    setTmdbData(details);
+                    return;
+                }
+            }
+
             const searchTitle = series.cleanName || series.name;
-            const details = await MetadataService.getDetailsByTitle(searchTitle, 'series', series.year, language);
+            const details = await MetadataService.getDetailsByTitle(searchTitle, 'series', series.year, language, tmdbApiKey);
             if (details) {
                 setTmdbData(details);
             }
@@ -87,7 +96,7 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
       }
     };
     fetchDetails();
-  }, [series, creds, language]);
+  }, [series, creds, language, tmdbApiKey]);
 
   const createChannelFromEpisode = useCallback((ep: Episode): Channel => {
       let baseUrl = creds.url.trim().replace(/\/$/, '');
@@ -210,14 +219,14 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
 
               <p className="text-lg text-content-secondary leading-relaxed font-light mb-8">{plot}</p>
 
-              {!MetadataService.isConfigured() && (
+              {!MetadataService.isConfigured(tmdbApiKey) && (
                 <Card
                   elevation="flat"
                   padding="sm"
                   className="!border-state-warning/30 !bg-state-warning/10"
                 >
                   <p className="text-sm text-state-warning">
-                    TMDB non configurato: metadata e immagini arricchite possono essere limitati ai dati del provider IPTV.
+                    TMDB non configurato: impostalo nelle preferenze del profilo per immagini arricchite e metadata.
                   </p>
                 </Card>
               )}

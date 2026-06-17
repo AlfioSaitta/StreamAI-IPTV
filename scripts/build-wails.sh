@@ -8,7 +8,9 @@
 #   build/bin/streamai-debug  # debug (-N -l)
 #
 # Vincoli:
-#   - Esegue prima `vite build` (output in frontend/dist/) così
+#   - Esegue `wails generate bindings` PRIMA di `vite build` per
+#     garantire che il frontend TS abbia i tipi Go aggiornati.
+#   - Esegue `vite build` (output in frontend/dist/) così
 #     `assets.go` con `//go:embed all:frontend/dist` ha contenuti reali.
 #   - Build-tag `gtk3` di default su Linux (webkit2gtk-4.1). Override:
 #     `TAGS="" bash scripts/build-wails.sh` su distro con webkitgtk-6.0.
@@ -59,6 +61,28 @@ fi
 COMMIT_SHA="${COMMIT_SHA:0:7}"
 
 if [[ "$SKIP_FRONTEND" != "1" ]]; then
+  echo "▶ Generating Wails bindings..."
+
+  # Trova il comando Wails in modo robusto
+  WAILS_CMD=""
+  if command -v wails >/dev/null 2>&1; then
+    WAILS_CMD="wails"
+  elif command -v wails3 >/dev/null 2>&1; then
+    WAILS_CMD="wails3"
+  elif [[ -x "$HOME/go/bin/wails" ]]; then
+    WAILS_CMD="$HOME/go/bin/wails"
+  elif [[ -x "$HOME/go/bin/wails3" ]]; then
+    WAILS_CMD="$HOME/go/bin/wails3"
+  fi
+
+  if [[ -z "$WAILS_CMD" ]]; then
+    echo "✗ 'wails' or 'wails3' command not found in PATH or ~/go/bin. Please install Wails CLI." >&2
+    exit 5
+  fi
+
+  echo "  Using Wails command: $WAILS_CMD"
+  "$WAILS_CMD" generate bindings
+
   echo "▶ Vite build → frontend/dist/ (consumato da //go:embed in assets.go)"
   if [[ ! -x "$ROOT/node_modules/.bin/vite" ]]; then
     echo "✗ node_modules/.bin/vite non trovato. Esegui prima 'npm install'." >&2
@@ -95,4 +119,3 @@ if command -v file >/dev/null 2>&1; then
 fi
 
 echo "✓ Built $OUT (v${VERSION}${COMMIT_SHA:+_${COMMIT_SHA}})"
-
