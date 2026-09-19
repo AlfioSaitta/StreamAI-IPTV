@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { Channel, XtreamCredentials, WatchHistoryItem } from '../types.ts';
 import { getSeriesInfo } from '../services/xtream.ts';
 import { MetadataService } from '../services/metadata.ts';
@@ -48,6 +48,12 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
   const [tmdbData, setTmdbData] = useState<any>(null);
   
   const containerRef = useRef<HTMLDivElement>(null);
+  /** Striscia delle stagioni: è il contenitore che scorre in orizzontale. */
+  const seasonsStripRef = useRef<HTMLDivElement>(null);
+  /** Intestazione dell'elenco puntate (titolo + stagioni). */
+  const seasonsHeaderRef = useRef<HTMLDivElement>(null);
+  /** Il riallineamento dello scroll salta il primo render (vedi l'effetto). */
+  const skipSeasonScrollRef = useRef(true);
 
   useFocusTrap(!loading && !error, containerRef, { onEscape: onBack, initialSelector: '[data-initial-focus="true"]' });
 
@@ -138,8 +144,40 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
     onPlayEpisode(currentChannel, fullPlaylist);
   };
 
-  const seasons = Object.keys(episodes).sort((a, b) => Number(a) - Number(b));
-  const currentEpisodes = episodes[activeSeason] || [];
+  const seasons = useMemo(
+      () => Object.keys(episodes).sort((a, b) => Number(a) - Number(b)),
+      [episodes],
+  );
+  const currentEpisodes = useMemo(() => episodes[activeSeason] || [], [episodes, activeSeason]);
+
+  /**
+   * Molte stagioni non stanno in una riga: la striscia scorre in orizzontale e
+   * senza riportare in vista quella selezionata si cambia stagione "alla cieca",
+   * perché la selezione resta fuori schermo. `inline: 'center'` la centra nella
+   * striscia, `block: 'nearest'` evita di spostare la pagina in verticale.
+   */
+  useEffect(() => {
+      const strip = seasonsStripRef.current;
+      if (!strip) return;
+      const idx = seasons.indexOf(activeSeason);
+      const chip = idx >= 0 ? (strip.children[idx] as HTMLElement | undefined) : undefined;
+      chip?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+  }, [activeSeason, seasons]);
+
+  /**
+   * Cambiando stagione cambia l'elenco delle puntate: restando dov'era lo scroll,
+   * su una lista lunga ci si ritrova a metà di quella nuova (o nel vuoto), con
+   * l'intestazione — e quindi le stagioni — fuori dallo schermo. Si riporta in
+   * vista l'intestazione, saltando il primo render: appena aperta la pagina non
+   * c'è nulla da riallineare.
+   */
+  useEffect(() => {
+      if (skipSeasonScrollRef.current) {
+          skipSeasonScrollRef.current = false;
+          return;
+      }
+      seasonsHeaderRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [activeSeason]);
 
   // Use shared hooks for images and metadata. Devono restare prima dei return condizionali
   // per rispettare l'ordine stabile degli hook React tra loading e schermata dettagli.
@@ -169,7 +207,12 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
   return (
     <div
       ref={containerRef}
-      className="fixed inset-0 bg-surface-0 text-content-primary overflow-y-auto z-40 outline-none safe-area-screen"
+      // `overflow-x-hidden`: la pagina non deve mai scorrere in orizzontale. Con
+      // `overflow-y-auto` soltanto, l'asse orizzontale diventa comunque
+      // scorrevole (una volta che un asse è `auto`, l'altro non può restare
+      // `visible`), e la striscia delle stagioni — arrivata in fondo — trascinava
+      // con sé l'intera vista: le puntate uscivano dallo schermo.
+      className="fixed inset-0 bg-surface-0 text-content-primary overflow-y-auto overflow-x-hidden z-40 outline-none safe-area-screen"
       tabIndex={-1}
       role="dialog"
       aria-modal="true"
@@ -232,13 +275,22 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
               )}
           </div>
 
-          {/* Right Panel */}
-          <div className="flex-1 pb-20">
-              <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+          {/* Right Panel — `min-w-0` è indispensabile: un figlio flex ha
+              `min-width: auto`, quindi la colonna non scende sotto la larghezza
+              minima del suo contenuto e la striscia delle stagioni, invece di
+              scorrere, allargava la pagina. */}
+          <div className="flex-1 min-w-0 pb-20">
+              <div ref={seasonsHeaderRef} className="flex items-center justify-between mb-6 flex-wrap gap-3 min-w-0">
                   <h3 className="text-2xl font-bold text-content-primary">{t.episodes}</h3>
 
-                  {/* Seasons */}
-                  <div className="flex gap-2 overflow-x-auto pb-2 max-w-full no-scrollbar">
+                  {/* Seasons — contenitore di scorrimento con `min-w-0` (per
+                      poter restringere) e `overscroll-x-contain`: arrivati in
+                      fondo, il gesto non si propaga alla pagina. */}
+                  <div
+                    ref={seasonsStripRef}
+                    data-seasons-strip
+                    className="flex min-w-0 gap-2 overflow-x-auto overscroll-x-contain pb-2 no-scrollbar"
+                  >
                     {seasons.map(season => (
                       <Chip
                         key={season}

@@ -169,7 +169,10 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
   return (
     <div
       ref={modalRef}
-      className="fixed inset-0 z-[90] text-content-primary overflow-y-auto bg-surface-overlay-hard backdrop-blur-md safe-area-screen"
+      // `overflow-x-hidden` come nel dettaglio serie: con `overflow-y-auto`
+      // soltanto anche l'asse orizzontale diventa scorrevole, e una striscia
+      // arrivata in fondo trascinerebbe la pagina invece di fermarsi.
+      className="fixed inset-0 z-[90] text-content-primary overflow-y-auto overflow-x-hidden bg-surface-overlay-hard backdrop-blur-md safe-area-screen"
       role="dialog"
       aria-modal="true"
       aria-label={`Dettagli ${movie.cleanName || movie.name}`}
@@ -344,7 +347,7 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
             <h3 className="text-2xl font-bold mb-4 flex items-center gap-2">
               <Sparkles className="w-icon-lg h-icon-lg text-brand-accent" aria-hidden="true" /> Consigliati dall'AI
             </h3>
-            <div className="flex gap-4 overflow-x-auto no-scrollbar pb-4">
+            <div className="flex gap-4 overflow-x-auto overscroll-x-contain no-scrollbar pb-4">
               {aiSimilarChannels.map(ch => (
                 <button
                   key={ch.id}
@@ -370,7 +373,7 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
         {isVod && similarContent.length > 0 && (
           <div className="mt-12">
             <h3 className="text-2xl font-bold mb-4">{t.similarContent}</h3>
-            <div className="flex gap-4 overflow-x-auto no-scrollbar pb-4">
+            <div className="flex gap-4 overflow-x-auto overscroll-x-contain no-scrollbar pb-4">
               {similarContent.map(sim => (
                 <button
                   key={sim.id}
