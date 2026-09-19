@@ -6,46 +6,86 @@ import { proxyFetch } from './proxyFetch.ts';
 const MAX_CONCURRENT_DOWNLOADS = 10; // Download paralleli aumentati per Wails
 const DOWNLOAD_TIMEOUT_MS = 15000; // Timeout leggermente aumentato
 
+/**
+ * Quanti download (in corso + in attesa) oltre i quali i prefetch smettono di
+ * accodarsi. Vedi `preloadVisible`.
+ */
+const PRELOAD_QUEUE_LIMIT = 24;
+
 /** Per quanto un URL resta escluso dopo un fallimento, prima di poter ritentare. */
 const FAILED_URL_TTL_MS = 5 * 60 * 1000;
 
 /**
- * Attese per uno slot di download libero.
+ * Attese per uno slot di download libero, **ordinate per priorità**.
  *
- * Sostituiscono il busy-wait a polling che c'era in `download`: ogni waiter
- * viene svegliato quando uno slot si libera, invece di riprovare ogni 50ms.
+ * Erano una semplice coda FIFO, e il parametro `priority` veniva ignorato (si
+ * chiamava `_priority`): così i prefetch delle righe già superate restavano in
+ * testa e le copertine visibili aspettavano dietro decine di immagini che
+ * nessuno stava più guardando. È la differenza fra "le copertine compaiono
+ * mentre scorri" e "compaiono dopo".
+ *
+ * A parità di priorità vince il **più recente**: fra due prefetch, quello
+ * appena chiesto è la riga che l'utente sta guardando adesso, l'altro è quella
+ * che ha già lasciato indietro.
  */
-const slotWaiters: Array<() => void> = [];
+interface SlotWaiter {
+  priority: number;
+  seq: number;
+  wake: () => void;
+}
+
+const slotWaiters: SlotWaiter[] = [];
+let waiterSeq = 0;
+
+/** Estrae il waiter da servire: priorità più alta, a parità il più recente. */
+const takeNextWaiter = (): SlotWaiter | undefined => {
+  let bestIdx = -1;
+  for (let i = 0; i < slotWaiters.length; i++) {
+    if (bestIdx === -1) {
+      bestIdx = i;
+      continue;
+    }
+    const candidate = slotWaiters[i];
+    const best = slotWaiters[bestIdx];
+    if (candidate.priority > best.priority || (candidate.priority === best.priority && candidate.seq > best.seq)) {
+      bestIdx = i;
+    }
+  }
+  return bestIdx === -1 ? undefined : slotWaiters.splice(bestIdx, 1)[0];
+};
 
 /**
- * Rilascia lo slot di `url` e sveglia il primo waiter in coda.
+ * Rilascia lo slot di `url` e sveglia il waiter con la priorità più alta.
  * Ogni percorso di uscita di `download` passa da qui (via `finally`), cosi' lo
  * slot non puo' restare occupato per sempre.
  */
 const releaseSlot = (url: string): void => {
   DownloadManager.processing.delete(url);
-  const next = slotWaiters.shift();
-  if (next) next();
+  takeNextWaiter()?.wake();
 };
 
 /**
  * Attende che si liberi uno slot. Risolve `false` se nel frattempo arriva un
  * abort (il waiter viene tolto dalla coda, cosi' non resta appeso).
  */
-const waitForSlot = (signal?: AbortSignal): Promise<boolean> =>
+const waitForSlot = (priority: number, signal?: AbortSignal): Promise<boolean> =>
   new Promise((resolve) => {
     if (signal?.aborted) {
       resolve(false);
       return;
     }
+    const waiter: SlotWaiter = {
+      priority,
+      seq: ++waiterSeq,
+      wake: () => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve(true);
+      },
+    };
     const onAbort = () => {
       const idx = slotWaiters.indexOf(waiter);
       if (idx !== -1) slotWaiters.splice(idx, 1);
       resolve(false);
-    };
-    const waiter = () => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve(true);
     };
     signal?.addEventListener('abort', onAbort, { once: true });
     slotWaiters.push(waiter);
@@ -99,7 +139,9 @@ export const DownloadManager = {
     downloaded: 0,
     failed: 0,
     fromCache: 0,
-    totalBytes: 0
+    totalBytes: 0,
+    /** Prefetch non accodati perché la pipeline era già piena (vedi preloadVisible). */
+    preloadSkipped: 0
   },
 
   // Pausa tutti i download (chiamato quando si avvia un live)
@@ -122,7 +164,7 @@ export const DownloadManager = {
     // restituendo l'URL originale. Senza questo resterebbero parcheggiate fino
     // al prossimo slot liberato (o al timeout di un download in volo).
     const waiters = slotWaiters.splice(0, slotWaiters.length);
-    waiters.forEach(wake => wake());
+    waiters.forEach(waiter => waiter.wake());
   },
 
   // Riprendi i download
@@ -198,7 +240,7 @@ export const DownloadManager = {
   },
 
   // Download effettivo
-  download: async (url: string, _priority: number, signal?: AbortSignal): Promise<string | null> => {
+  download: async (url: string, priority: number, signal?: AbortSignal): Promise<string | null> => {
     if (DownloadManager.paused || signal?.aborted) return url;
 
     DownloadManager.queued.add(url);
@@ -210,7 +252,7 @@ export const DownloadManager = {
       // cioe' ~3800 timer/s di pura attesa sul main thread.
       while (DownloadManager.processing.size >= MAX_CONCURRENT_DOWNLOADS) {
         if (DownloadManager.paused || signal?.aborted) return url;
-        const gotSlot = await waitForSlot(signal);
+        const gotSlot = await waitForSlot(priority, signal);
         if (!gotSlot || DownloadManager.paused || signal?.aborted) return url;
       }
 
@@ -297,6 +339,16 @@ export const DownloadManager = {
 
   // Precarica immagini visibili (chiamato quando si scrolla)
   preloadVisible: (urls: string[]) => {
+    // Backpressure: se la pipeline è già piena, i prefetch non si accodano.
+    // Servono a rendere fluido lo scorrimento; se invece lo rallentano — perché
+    // occupano gli slot che servono alle copertine sotto gli occhi dell'utente —
+    // hanno smesso di servire a qualcosa. Le richieste visibili non passano di
+    // qui e non sono soggette a questo tetto.
+    if (DownloadManager.processing.size + DownloadManager.queued.size >= PRELOAD_QUEUE_LIMIT) {
+      DownloadManager.stats.preloadSkipped++;
+      return;
+    }
+
     const validUrls = urls.filter(u =>
       u?.startsWith('http') &&
       !DownloadManager.cachedUrls.has(u) &&
