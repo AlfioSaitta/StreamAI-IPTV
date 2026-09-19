@@ -1,10 +1,11 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 
 import { Channel } from '../types';
 import type { XtreamCredentials } from '../types';
 import { platformService } from '../services/platformService';
 import { host } from '../services/hostBridge';
 import { nativeVideoPlayer } from '../services/nativeVideoPlayer';
+import { DownloadManager } from '../services/downloadManager';
 import { streamInfoService } from '../services/streamInfoService';
 import type { VodProbeResult } from '../services/streamInfo/vodProbe';
 import { subtitleService, loadSubtitleFromFile, type ActiveSubtitle } from '../services/subtitleService';
@@ -13,7 +14,7 @@ import { usePlayerOsd } from '../hooks/usePlayerOsd';
 import { useInteractiveTimeline } from '../hooks/useInteractiveTimeline';
 import { usePlayerShortcuts } from '../hooks/usePlayerShortcuts';
 import { usePlayerMediaSession } from '../hooks/usePlayerMediaSession';
-import { useRemoteControl } from '../hooks/useRemoteControl';
+import { useRemoteControl, type RemotePlayerAdapter } from '../hooks/useRemoteControl';
 import { useNativePlayerEngine } from '../hooks/useNativePlayerEngine';
 import { useNativeMpvEngine } from '../hooks/useNativeMpvEngine';
 import { useMpvCanvasRenderer } from '../hooks/useMpvCanvasRenderer';
@@ -114,11 +115,9 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   const [isCastLoading, setIsCastLoading] = useState(false);
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
-  const [isPiP, setIsPiP] = useState(false);
   const [showPlaylist, setShowPlaylist] = useState(false);
   const [showAudioMenu, setShowAudioMenu] = useState(false);
   const [audioTracks, setAudioTracks] = useState<any[]>([]);
-  const [networkSpeed, setNetworkSpeed] = useState<number | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
   const [showInfoPanel, setShowInfoPanel] = useState(false);
   const [streamInfoData, setStreamInfoData] = useState<StreamCodecInfo | null>(null);
@@ -128,7 +127,6 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   const { recentErrors, clear: clearRecentErrors } = usePlayerErrorRing(playbackError);
   const [infoLoading, setInfoLoading] = useState(false);
   const [streamSourceInfo, setStreamSourceInfo] = useState<StreamSourceInfo | null>(null);
-  const [nativePiPSupported, setNativePiPSupported] = useState(false);
   const [showMiniEpg, setShowMiniEpg] = useState(false);
   // Feedback transitorio per il pulsante "Copia report errore" nel popup di errore.
   const [errorReportCopied, setErrorReportCopied] = useState(false);
@@ -145,6 +143,19 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
 
   // OSD (extracted hook)
   const { osd, showOsd } = usePlayerOsd();
+
+  // PiP disponibile? Dipende dalla piattaforma, non dal singolo stream:
+  //   - Android nativo: lo decide il plugin (`supportsPiP` verifica anche la
+  //     versione di Android, PiP da API 26);
+  //   - desktop Wails: sempre, perché la finestra PiP è creata dal backend
+  //     (`internal/services/pip`) e non dipende dal webview.
+  //
+  // Derivato e non in uno stato: prima era un `useState(false)` il cui setter
+  // non veniva MAI chiamato, quindi il pulsante PiP restava disabilitato anche
+  // dove la funzione era disponibile, e nessuno poteva accorgersene.
+  const pipSupported = isUsingNativePlayer
+    ? nativeVideoPlayer.supportsPiP
+    : Boolean(host?.pip);
 
   // Native MPV (Wails v3 + libmpv) engine.
   const isMpv = playerEngineRef.current === 'mpv';
@@ -167,8 +178,107 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     poll: isMpv,
   });
 
+  // Tetto di cadenza del render, in base alle capacità della macchina.
+  //
+  // Il path attuale (render software + readback in RAM + upload texture) costa
+  // ~4 ms di CPU per frame più il trasferimento: su hardware datato chiedere 60
+  // fps significa solo accumulare ritardo. 30 fps è anche la cadenza nativa di
+  // quasi tutto il contenuto IPTV (film 24p, broadcast 25/30p), quindi non si
+  // perde nulla di percepibile; il loop ha comunque un'aggiustamento adattivo
+  // che scende ulteriormente se il frame costa troppo.
+  const frameCapFps = useMemo(() => {
+    const cores = typeof navigator !== 'undefined' ? (navigator.hardwareConcurrency ?? 4) : 4;
+    const memory = typeof navigator !== 'undefined'
+      ? ((navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 8)
+      : 8;
+    // Il contenuto 50/60p (sport) resta fluido solo con margine reale di CPU.
+    return cores >= 8 && memory > 4 ? 60 : 30;
+  }, []);
+
+  // Stato PiP reale.
+  //
+  // Su desktop il PiP è una **seconda finestra Wails** (`internal/services/pip`),
+  // non le API PiP del webview: `document.pictureInPictureElement` non può
+  // essere valorizzato perché il video è un `<canvas>`, non un `<video>`.
+  // Lo stato arriva quindi dal backend, sia per gli eventi sia — al mount —
+  // da una lettura esplicita: la finestra PiP sopravvive a un reload della
+  // webview principale, che invece azzera lo stato JS.
+  //
+  // Dichiarato PRIMA di `useMpvCanvasRenderer` perché il loop di render lo usa
+  // per rallentarsi quando il disegno passa alla finestra PiP.
+  const [isPiP, setIsPiP] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const st = await host?.pip?.state?.();
+        if (!cancelled) setIsPiP(Boolean(st?.open));
+      } catch (err) {
+        console.warn('[Player] lettura stato PiP fallita:', err);
+      }
+    })();
+    const off = host?.onPipStateChange?.((state: { open: boolean }) => {
+      setIsPiP(Boolean(state?.open));
+    });
+    return () => {
+      cancelled = true;
+      off?.();
+    };
+  }, []);
+
   // Start the RAF loop to draw libmpv frames to canvas.
-  useMpvCanvasRenderer(canvasRef, isMpv, { onResize: resizeMpv });
+  // `paused` rallenta il loop quando non c'è riproduzione attiva: in pausa mpv
+  // restituisce sempre lo stesso frame, quindi renderizzarlo alla cadenza piena
+  // bruciava CPU (colorspace conversion SW), banda (fetch del frame) e GPU
+  // (upload texture) per un'immagine identica.
+  // Con il PiP aperto il loop di questa finestra viene fermato del tutto
+  // (`enabled: false`), non solo rallentato.
+  //
+  // Il motivo è la cache dei frame nel backend: è una sola, indicizzata per
+  // dimensione. Due finestre che chiedono frame di dimensioni diverse (480×270
+  // il PiP, fino a 720p qui) se la invaliderebbero a vicenda, e ogni richiesta
+  // rifarebbe la conversione colori invece di riusare il frame — esattamente
+  // l'ottimizzazione che il gating esiste per fare. Fermare il loop qui la
+  // lascia interamente alla finestra PiP, che è quella che l'utente sta
+  // guardando. Il canvas principale resta sull'ultimo frame disegnato, con
+  // l'avviso "Video in Picture-in-Picture".
+  useMpvCanvasRenderer(canvasRef, isMpv && !isPiP, {
+    onResize: resizeMpv,
+    paused: !isPlaying,
+    targetFPS: frameCapFps,
+  });
+
+  // Velocità di rete mostrata nell'overlay: derivata dal bitrate riportato dal
+  // player, perché anche questo era uno stato il cui setter non veniva mai
+  // chiamato (l'overlay non appariva mai).
+  const networkSpeed = useMemo(() => {
+    const kbps = mpvState?.bitrateKbps ?? 0;
+    return kbps > 0 ? kbps / 1000 : null;
+  }, [mpvState?.bitrateKbps]);
+
+  // Sospende il download delle immagini durante la riproduzione di un canale
+  // LIVE.
+  //
+  // `DownloadManager.pause()` era una funzionalità documentata ma di fatto
+  // MORTA: nessuno la chiamava, quindi il preload dei loghi continuava a
+  // competere con lo stream per la banda proprio mentre si guarda un canale —
+  // su una connessione modesta è una causa diretta di rebuffering. Su VOD (e
+  // quindi anche in PiP mentre si naviga) i download restano attivi, così le
+  // immagini continuano a popolarsi.
+  useEffect(() => {
+    const shouldPauseImages = channel?.type === 'live' && isPlaying;
+
+    if (shouldPauseImages) {
+      DownloadManager.pause();
+    } else {
+      DownloadManager.resume();
+    }
+
+    return () => {
+      // Alla chiusura del player la pausa non deve sopravvivere.
+      DownloadManager.resume();
+    };
+  }, [channel?.type, isPlaying]);
 
   // EPG (D.1) — only loads when the channel is Live and we have a tvgId + creds.
   const isLive = channel?.type === 'live';
@@ -269,9 +379,35 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     ? 'Il server non supporta il seek (Accept-Ranges: none). Solo Play/Pausa disponibili.'
     : null;
 
+  /**
+   * Il PiP resta aperto mentre l'utente cambia canale qui: senza questo
+   * aggiornamento la sua barra continuerebbe a mostrare il canale precedente e
+   * — ora che ha la timeline — verrebbe disegnata la barra di posizione su un
+   * canale live, o nessuna barra su un film. `update` non porta la finestra in
+   * primo piano: rubare il focus mentre si naviga qui sarebbe peggio del
+   * difetto che risolve.
+   */
+  useEffect(() => {
+    if (!isPiP || !host?.pip?.update) return;
+    void host.pip.update({
+      title: channel?.name ?? 'StreamAI',
+      isLive,
+      seekDisabled,
+    });
+  }, [isPiP, channel, isLive, seekDisabled]);
+
   // Hooks
   const castSession = useCastSession();
 
+  /**
+   * Stop mpv in volo. `cleanupPlaybackEngines` non può attendere (è chiamata
+   * da un effect di reset), ma l'effetto che carica il nuovo canale DEVE
+   * attendere che lo stop sia completato: `stop` e `loadfile` passano su IPC
+   * e vengono serializzati dal backend nel loro ordine di arrivo al mutex, non
+   * in quello di invio. Se `stop` vince la corsa dopo `loadfile`, mpv resta
+   * idle: schermo nero, `isBuffering` bloccato, nessun errore e nessun retry.
+   */
+  const stopInFlightRef = useRef<Promise<void> | null>(null);
 
   const cleanupPlaybackEngines = useCallback(() => {
     if (retryTimerRef.current) {
@@ -287,9 +423,11 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       nativeProgressIntervalRef.current = null;
     }
     
-    // Wails libmpv engine cleanup.
+    // Wails libmpv engine cleanup. Tracciamo la promise: l'effect di load del
+    // nuovo canale la attende prima di inviare `loadfile` (vedi
+    // `stopInFlightRef`).
     if (playerEngineRef.current === 'mpv') {
-      stopMpv().catch(() => {});
+      stopInFlightRef.current = stopMpv().catch(() => undefined);
     }
   }, [stopMpv]);
 
@@ -551,10 +689,17 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         if (channel?.type === 'live' && pauseDuration > 45000) {
           console.info('[Player] Pausa prolungata su Live (>45s), ricarico stream...');
           setIsBuffering(true);
-          loadMpv(channel.url).catch(err => {
-             console.error('[Player] MPV reload failed:', err);
-             setError('Impossibile ricaricare lo stream live');
-          });
+          // `loadfile` NON resetta la property `pause` di mpv (impostata a
+          // "yes" dal Pause che ha preceduto questa ripresa): senza la
+          // `playMpv()` successiva lo stream veniva ricaricato restando in
+          // pausa, con `isBuffering` bloccato su true e l'OSD che mostrava
+          // "Play" senza che partisse nulla.
+          loadMpv(channel.url)
+            .then(() => playMpv())
+            .catch(err => {
+              console.error('[Player] MPV reload failed:', err);
+              setError('Impossibile ricaricare lo stream live');
+            });
         } else {
           playMpv().catch(err => {
             console.warn('[Player] MPV play failed:', err);
@@ -708,7 +853,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
 
   const togglePiP = useCallback(async () => {
     if (isUsingNativePlayer) {
-      if (!nativePiPSupported) {
+      if (!pipSupported) {
         showOsd(<PictureInPicture2 className="w-12 h-12 text-white" />, 'PiP non supportato su questo device');
         return;
       }
@@ -717,8 +862,33 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       return;
     }
 
-    // TODO: Implement PiP for Wails
-  }, [isUsingNativePlayer, nativePiPSupported, showOsd]);
+    // Desktop (Wails): finestra PiP dedicata. `open()` è idempotente lato Go,
+    // quindi qui basta decidere se aprire o chiudere in base allo stato reale.
+    if (!host?.pip) {
+      showOsd(<PictureInPicture2 className="w-12 h-12 text-white" />, 'PiP non disponibile');
+      return;
+    }
+    try {
+      const st = await host.pip.state();
+      if (st?.open) {
+        await host.pip.close();
+        showOsd(<PictureInPicture2 className="w-12 h-12 text-white" />, 'PiP chiuso');
+      } else {
+        const ok = await host.pip.open({
+          title: channel?.name ?? 'StreamAI',
+          isLive,
+          seekDisabled,
+        });
+        showOsd(
+          <PictureInPicture2 className="w-12 h-12 text-white" />,
+          ok ? 'PiP attivo' : 'PiP non disponibile',
+        );
+      }
+    } catch (err) {
+      console.warn('[Player] toggle PiP fallito:', err);
+      showOsd(<PictureInPicture2 className="w-12 h-12 text-white" />, 'PiP non disponibile');
+    }
+  }, [isUsingNativePlayer, pipSupported, showOsd, channel, isLive, seekDisabled]);
 
   const restartFromBeginning = () => {
     if (isUsingNativePlayer) {
@@ -803,6 +973,9 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
   usePlayerShortcuts(
     {
       togglePlay,
+      togglePip: () => {
+        void togglePiP();
+      },
       skip,
       setVolume: (v) => handleVolumeChange(v),
       currentVolume: volume,
@@ -847,7 +1020,6 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     setBufferStats(null);
     clearRecentErrors();
     setAudioTracks([]);
-    setNativePiPSupported(false);
     setVodProbe(null);
     // D.4 — detach any sideloaded subtitle when the channel changes.
     subtitleService.detach();
@@ -860,7 +1032,15 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
       retryCountRef.current = 0;
       lastSourceRef.current = source;
     }
-    const detectedSource = detectStreamSource(source, channel.type);
+    // Il terzo argomento è il backend che riprodurrà davvero lo stream, così la
+    // diagnostica non riporta più engine web rimossi. Usiamo
+    // `platformService.isNative` (non `isUsingNativePlayer`, il cui state non è
+    // ancora aggiornato in questo punto sincrono dell'effect).
+    const detectedSource = detectStreamSource(
+      source,
+      channel.type,
+      platformService.isNative ? 'native' : 'mpv',
+    );
     setStreamSourceInfo(detectedSource);
     playerEngineRef.current = platformService.isNative 
       ? 'native' 
@@ -886,7 +1066,6 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     setDuration,
     setPlaybackError,
     setError,
-    setNativePiPSupported,
     showOsd,
     scheduleRetry,
     nativeProgressIntervalRef,
@@ -947,6 +1126,14 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
 
     const startMpv = async () => {
       try {
+        // Attende lo stop emesso dall'effect di reset: se `loadfile` arrivasse
+        // al backend prima di `stop`, lo stop lascerebbe mpv idle con lo stream
+        // appena caricato scartato.
+        const pendingStop = stopInFlightRef.current;
+        if (pendingStop) {
+          stopInFlightRef.current = null;
+          await pendingStop;
+        }
         await loadMpv(channel.url);
         await playMpv();
       } catch (err) {
@@ -979,8 +1166,21 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
     onNext,
   });
 
-  // Remote Control Handler (extracted hook)
-  useRemoteControl({ broadcastStatus });
+  // Remote Control Handler (extracted hook).
+  // L'adapter espone i controlli già usati dalla UI, così il controllo remoto
+  // funziona su qualunque engine (libmpv desktop, player nativo Android)
+  // invece di parlare direttamente con l'API di video.js.
+  const remotePlayerAdapter = useMemo<RemotePlayerAdapter>(() => ({
+    play: handlePlay,
+    pause: handlePause,
+    seek: handleSeek,
+    skip,
+    setVolume: handleVolumeChange,
+    toggleMute,
+    getVolume: () => volume,
+  }), [handlePlay, handlePause, handleSeek, skip, handleVolumeChange, toggleMute, volume]);
+
+  useRemoteControl({ player: remotePlayerAdapter, broadcastStatus });
 
   // --- UI EFFECTS ---
 
@@ -1107,10 +1307,10 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
           </button>
           <button
             onClick={togglePiP}
-            disabled={!nativePiPSupported}
-            className={`tv-focus touch-target px-5 py-2 rounded-lg flex items-center gap-2 ${nativePiPSupported ? 'bg-white/10 hover:bg-white/20 text-white' : 'bg-white/5 text-gray-500 cursor-not-allowed'}`}
+            disabled={!pipSupported}
+            className={`tv-focus touch-target px-5 py-2 rounded-lg flex items-center gap-2 ${pipSupported ? 'bg-white/10 hover:bg-white/20 text-white' : 'bg-white/5 text-gray-500 cursor-not-allowed'}`}
           >
-            <PictureInPicture2 className="w-5 h-5" /> {nativePiPSupported ? 'PiP' : 'PiP non disponibile'}
+            <PictureInPicture2 className="w-5 h-5" /> {pipSupported ? 'PiP' : 'PiP non disponibile'}
           </button>
         </div>
       </div>
@@ -1125,6 +1325,17 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         onDoubleClick={toggleFullscreen}
         onClick={togglePlay}
       />
+
+      {/* Con il PiP aperto il loop di render di questa finestra è fermo (vedi
+          `useMpvCanvasRenderer`): il canvas resta sull'ultimo frame. Senza un
+          avviso esplicito sembrerebbe un'app bloccata. */}
+      {isPiP && (
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/60">
+          <PictureInPicture2 className="h-10 w-10 text-gray-300" />
+          <p className="text-sm text-gray-300">Video in Picture-in-Picture</p>
+          <p className="text-xs text-gray-500">Premi P per riportarlo qui</p>
+        </div>
+      )}
 
       {/* OSD Overlay */}
       {osd.visible && (
@@ -1304,7 +1515,7 @@ const VideoPlayerNew: React.FC<VideoPlayerProps> = ({
         subtitleEnabled={subtitleEnabled}
         sleepTimer={sleepTimer}
         formatSleepRemaining={formatSleepRemaining}
-        nativePiPSupported={nativePiPSupported}
+        pipSupported={pipSupported}
         togglePiP={togglePiP}
         isFullscreen={isFullscreen}
         toggleFullscreen={toggleFullscreen}

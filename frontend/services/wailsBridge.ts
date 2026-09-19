@@ -27,6 +27,15 @@ import * as Player from '../bindings/github.com/AlfioSaitta/StreamAI-IPTV/intern
 import * as Proxy from '../bindings/github.com/AlfioSaitta/StreamAI-IPTV/internal/services/proxy/service';
 import * as Migration from '../bindings/github.com/AlfioSaitta/StreamAI-IPTV/internal/services/migration/service';
 import * as Notifications from '../bindings/github.com/AlfioSaitta/StreamAI-IPTV/internal/services/notifications/service';
+// NB: il generatore nomina questo file `playlistservice` (dal tipo Go
+// `PlaylistService`), non `service` come gli altri package.
+import * as Playlist from '../bindings/github.com/AlfioSaitta/StreamAI-IPTV/internal/services/playlist/playlistservice';
+import { XtreamCredentials as GoXtreamCredentials } from '../bindings/github.com/AlfioSaitta/StreamAI-IPTV/internal/services/playlist/models';
+// Picture-in-Picture: finestra dedicata gestita dal backend (vedi
+// internal/services/pip). Non usa le API PiP del webview, che richiedono un
+// <video> che il player basato su canvas non ha.
+import * as Pip from '../bindings/github.com/AlfioSaitta/StreamAI-IPTV/internal/services/pip/service';
+import { OpenOptions as PipOpenOptions } from '../bindings/github.com/AlfioSaitta/StreamAI-IPTV/internal/services/pip/models';
 
 /**
  * Sottoinsieme dell'API `window.electronAPI` esposta a `services/hostBridge.ts`.
@@ -74,6 +83,23 @@ export interface HostAPI {
   ) => Promise<string>;
   proxyPort: () => Promise<number>;
 
+  // Playlist Xtream — pipeline lato Go. `ProcessXtreamPlaylist` avvia il
+  // lavoro in una goroutine e ritorna SUBITO (vedi
+  // internal/services/playlist/service.go): l'esito non è il valore di
+  // ritorno, ma gli eventi `playlist:success` / `playlist:error`.
+  playlist: {
+    ProcessXtreamPlaylist: (creds: unknown) => Promise<void>;
+    /**
+     * Copia locale del catalogo, salvata su disco dal backend
+     * (`internal/services/playlist/cache.go`).
+     *
+     * Ritorna `null` quando non c'è nulla di utilizzabile — primo avvio, cache
+     * cancellata, formato vecchio, file corrotto: per il chiamante sono tutti lo
+     * stesso caso, e significa "vai di rete".
+     */
+    LoadCachedCatalog: (creds: unknown) => Promise<{ playlist: unknown; savedAt: number } | null>;
+  };
+
   // Migration (Fase 7-bis.8: Electron v1 -> Wails v2)
   HasLegacyData: () => Promise<boolean>;
   GetLegacyData: () => Promise<string>;
@@ -86,6 +112,55 @@ export interface HostAPI {
   // Window control (Wails v3)
   toggleFullscreen: () => Promise<void>;
   isFullscreen: () => Promise<boolean>;
+
+  // Picture-in-Picture — finestra Wails dedicata. `open()` è idempotente:
+  // se la finestra esiste già la riporta in primo piano e aggiorna i dati del
+  // canale.
+  pip: {
+    open: (opts?: PipOptions) => Promise<boolean>;
+    /**
+     * Aggiorna titolo e tipo di canale di una finestra PiP già aperta, **senza**
+     * portarla in primo piano: si usa quando l'utente cambia canale nella
+     * finestra principale mentre il PiP è aperto. No-op se il PiP è chiuso.
+     */
+    update: (opts?: PipOptions) => Promise<void>;
+    close: () => Promise<void>;
+    state: () => Promise<PipWindowState>;
+    /**
+     * Avvia il ridimensionamento dal bordo indicato ("n-resize",
+     * "se-resize", …). Da usare solo dove `state().edgeResize` è true: altrove
+     * ci pensa il runtime di Wails.
+     */
+    startResize: (edge: string) => Promise<void>;
+    /** Tutto schermo per la finestra PiP (non per quella principale). */
+    toggleFullscreen: () => Promise<boolean>;
+  };
+  /**
+   * Notifica apertura, aggiornamento e chiusura della finestra PiP. Serve a
+   * entrambe le finestre: la principale per fermare/riprendere il proprio loop
+   * di render, quella PiP per conoscere titolo, tipo di canale e stato del
+   * fullscreen.
+   */
+  onPipStateChange: (cb: (state: PipWindowState) => void) => () => void;
+}
+
+/** Dati del canale che la vista PiP deve conoscere per disegnare i controlli. */
+export interface PipOptions {
+  title?: string;
+  /** Canale live: nessuna timeline (durata ignota e non cercabile). */
+  isLive?: boolean;
+  /** Il server non supporta il seek: timeline presente ma non trascinabile. */
+  seekDisabled?: boolean;
+}
+
+/** Stato osservabile della finestra PiP. */
+export interface PipWindowState {
+  open: boolean;
+  title?: string;
+  edgeResize?: boolean;
+  isLive?: boolean;
+  seekDisabled?: boolean;
+  fullscreen?: boolean;
 }
 
 /**
@@ -103,6 +178,20 @@ function onEvent<T>(name: string, cb: (payload: T) => void): () => void {
   });
   return typeof off === 'function' ? off : () => undefined;
 }
+
+/**
+ * Costruisce l'`OpenOptions` che il backend Go si aspetta.
+ *
+ * I booleani si passano esplicitamente: i campi non valorizzati arriverebbero
+ * `undefined` e per `isLive` valgono "mostra la timeline" — cioè esattamente il
+ * comportamento sbagliato per un canale live.
+ */
+const toPipOptions = (opts?: PipOptions): PipOpenOptions =>
+  new PipOpenOptions({
+    title: opts?.title ?? '',
+    isLive: opts?.isLive ?? false,
+    seekDisabled: opts?.seekDisabled ?? false,
+  });
 
 export const wailsBridge: HostAPI = {
   isWails: true,
@@ -198,6 +287,27 @@ export const wailsBridge: HostAPI = {
     Proxy.BuildProxyURL(streamUrl, userAgent ?? '', headers ?? {}) as unknown as Promise<string>,
   proxyPort: () => Proxy.Port() as unknown as Promise<number>,
 
+  // --- Playlist Xtream ---
+  playlist: {
+    ProcessXtreamPlaylist: (creds) => {
+      // Il tipo frontend usa `url`, il binding Go `serverUrl`: senza questa
+      // mappatura il backend riceveva `serverUrl: ""` e la pipeline falliva
+      // pur essendo la chiamata formalmente valida.
+      const c = creds as { url: string; username: string; password: string };
+      return Playlist.ProcessXtreamPlaylist(
+        new GoXtreamCredentials({ serverUrl: c.url, username: c.username, password: c.password }),
+      ) as unknown as Promise<void>;
+    },
+    LoadCachedCatalog: (creds) => {
+      // Stessa mappatura `url` → `serverUrl` di ProcessXtreamPlaylist: senza,
+      // il backend cercherebbe la cache di un profilo con server vuoto.
+      const c = creds as { url: string; username: string; password: string };
+      return Playlist.LoadCachedCatalog(
+        new GoXtreamCredentials({ serverUrl: c.url, username: c.username, password: c.password }),
+      ) as unknown as Promise<{ playlist: unknown; savedAt: number } | null>;
+    },
+  },
+
   // --- Migration ---
   HasLegacyData: () => Migration.HasLegacyData() as unknown as Promise<boolean>,
   GetLegacyData: () => Migration.GetLegacyData() as unknown as Promise<string>,
@@ -214,6 +324,36 @@ export const wailsBridge: HostAPI = {
   // --- Window control ---
   toggleFullscreen: () => Window.ToggleFullscreen(),
   isFullscreen: () => Window.IsFullscreen(),
+
+  // --- Picture-in-Picture ---
+  pip: {
+    open: (opts) => Pip.Open(toPipOptions(opts)) as unknown as Promise<boolean>,
+    update: (opts) => Pip.Update(toPipOptions(opts)) as unknown as Promise<void>,
+    close: () => Pip.Close() as unknown as Promise<void>,
+    state: () => Pip.State() as unknown as Promise<PipWindowState>,
+    startResize: (edge) => Pip.StartResize(edge) as unknown as Promise<void>,
+    toggleFullscreen: () => Pip.ToggleFullscreen() as unknown as Promise<boolean>,
+  },
+  onPipStateChange: (cb) => {
+    // Tre eventi distinti (apertura, cambio canale, chiusura senza payload): li
+    // normalizziamo in un solo callback con uno stato uniforme, così i consumer
+    // non devono sapere quanti e quali eventi esistono.
+    //
+    // `pip:opened` e `pip:updated` portano lo stato completo (`WindowState` lato
+    // Go): la vista PiP ci ricava titolo, tipo di canale e fullscreen.
+    const offOpen = onEvent<PipWindowState>('pip:opened', (data) =>
+      cb({ ...(data ?? {}), open: true }),
+    );
+    const offUpdated = onEvent<PipWindowState>('pip:updated', (data) =>
+      cb({ ...(data ?? {}), open: true }),
+    );
+    const offClosed = onEvent<null>('pip:closed', () => cb({ open: false }));
+    return () => {
+      offOpen();
+      offUpdated();
+      offClosed();
+    };
+  },
 };
 
 export default wailsBridge;

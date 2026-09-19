@@ -18,7 +18,7 @@
  * insieme al completamento di `wailsBridge` (Fase 6/7-bis).
  */
 import platformService from './platformService';
-import wailsBridge, { type HostAPI } from './wailsBridge';
+import wailsBridge, { type HostAPI, type PipOptions, type PipWindowState } from './wailsBridge';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type HostLike = any | null;
 
@@ -68,5 +68,5 @@ export function requireHost(): NonNullable<HostLike> {
   }
   return h;
 }
-export type { HostAPI };
+export type { HostAPI, PipOptions, PipWindowState };
 export default host;
