@@ -46,11 +46,11 @@ type kpiCollector struct {
 
 func newKPICollector(clipURL string, w, h int, hwdec string) *kpiCollector {
 	return &kpiCollector{
-		samples:  make([]frameSample, 0, 16384),
-		clipURL:  clipURL,
-		fboWidth: w,
+		samples:   make([]frameSample, 0, 16384),
+		clipURL:   clipURL,
+		fboWidth:  w,
 		fboHeight: h,
-		hwdec:    hwdec,
+		hwdec:     hwdec,
 	}
 }
 
@@ -80,10 +80,10 @@ type reportKPI struct {
 }
 
 type reportHardware struct {
-	CPU   string `json:"cpu"`
-	GPU   string `json:"gpu"` // popolato dal chiamante (lettura `glGetString(GL_RENDERER)`)
-	RAMGB int    `json:"ram_gb"`
-	OS    string `json:"os"`
+	CPU    string `json:"cpu"`
+	GPU    string `json:"gpu"` // popolato dal chiamante (lettura `glGetString(GL_RENDERER)`)
+	RAMGB  int    `json:"ram_gb"`
+	OS     string `json:"os"`
 	Goarch string `json:"goarch"`
 }
 
@@ -94,13 +94,13 @@ type reportFBO struct {
 }
 
 type reportFrameTime struct {
-	P50      float64   `json:"p50"`
-	P95      float64   `json:"p95"`
-	P99      float64   `json:"p99"`
-	Max      float64   `json:"max"`
-	Mean     float64   `json:"mean"`
-	Buckets  []float64 `json:"histogram_buckets_ms"`
-	Counts   []int     `json:"histogram_counts"`
+	P50     float64   `json:"p50"`
+	P95     float64   `json:"p95"`
+	P99     float64   `json:"p99"`
+	Max     float64   `json:"max"`
+	Mean    float64   `json:"mean"`
+	Buckets []float64 `json:"histogram_buckets_ms"`
+	Counts  []int     `json:"histogram_counts"`
 }
 
 type reportDropped struct {
@@ -242,4 +242,3 @@ func ratio(n, tot int) float64 {
 
 // formatPercent serializza ratio come "0.137%". Usato dai log human-friendly.
 func formatPercent(r float64) string { return fmt.Sprintf("%.3f%%", r*100) }
-

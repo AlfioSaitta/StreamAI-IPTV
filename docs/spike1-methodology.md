@@ -2,6 +2,14 @@
 
 > Status: ◐ in progress (scaffolding 2026-05-21) — vedi
 > [`plan-go-wails-migration.md`](plan-go-wails-migration.md) §6.0.
+>
+> ⚠️ **Nota del 2026-09-18:** questo harness misura il transport **T1/GL**,
+> che **non** è quello in produzione (il player spedito usa
+> `MPV_RENDER_API_TYPE_SW` + HTTP loopback). Inoltre le sue metriche
+> includono il tempo di vsync, quindi i gate sotto non sono utilizzabili
+> come criteri di accettazione finché non si applica il refactor
+> `glFenceSync` + `eglSwapInterval(0)`. Dettagli e misure del path reale:
+> [`stage-b-assessment.md`](stage-b-assessment.md) §3 e §4-bis.
 
 ## Obiettivo
 

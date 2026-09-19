@@ -2,7 +2,7 @@
 // Used by VideoPlayerNew so the OS-level media controls work on Desktop/Android.
 // Extracted from components/VideoPlayerNew.tsx during refactor B.1.
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { platformService } from '../services/platformService';
 import type { Channel } from '../types';
 
@@ -30,6 +30,19 @@ export function usePlayerMediaSession({
   // Disabilita navigator.mediaSession su Wails in favore dell'integrazione nativa Go (Fase 7-bis)
   const isWails = platformService.isWails;
 
+  // Callback lette tramite ref al momento dell'invocazione.
+  //
+  // L'effetto che registra gli handler non deve dipendere dalla loro identita':
+  // `skip`, in VideoPlayerNew, ha `currentTime` fra le proprie dipendenze e
+  // cambia quindi a ogni tick (~1-4 volte al secondo). Con le callback nelle
+  // deps, l'effetto azzerava e ri-registrava 6 azioni MediaSession alla stessa
+  // frequenza: un comando proveniente dai controlli OS/headset che arrivava nel
+  // gap di deregistrazione veniva perso.
+  const callbacksRef = useRef({ togglePlay, skip, onPrev, onNext });
+  useEffect(() => {
+    callbacksRef.current = { togglePlay, skip, onPrev, onNext };
+  });
+
   // Metadata + action handlers
   useEffect(() => {
     if (isWails || !('mediaSession' in navigator) || !channel) return;
@@ -43,12 +56,12 @@ export function usePlayerMediaSession({
     });
 
     const actionHandlers: [MediaSessionAction, () => void][] = [
-      ['play', togglePlay],
-      ['pause', togglePlay],
-      ['previoustrack', () => onPrev?.()],
-      ['nexttrack', () => onNext?.()],
-      ['seekbackward', () => skip(-10)],
-      ['seekforward', () => skip(10)],
+      ['play', () => callbacksRef.current.togglePlay()],
+      ['pause', () => callbacksRef.current.togglePlay()],
+      ['previoustrack', () => callbacksRef.current.onPrev?.()],
+      ['nexttrack', () => callbacksRef.current.onNext?.()],
+      ['seekbackward', () => callbacksRef.current.skip(-10)],
+      ['seekforward', () => callbacksRef.current.skip(10)],
     ];
 
     for (const [action, handler] of actionHandlers) {
@@ -64,7 +77,7 @@ export function usePlayerMediaSession({
         try { navigator.mediaSession.setActionHandler(action, null); } catch { /* noop */ }
       });
     };
-  }, [channel, togglePlay, skip, onPrev, onNext]);
+  }, [channel, isWails]);
 
   // Position state
   useEffect(() => {

@@ -34,7 +34,6 @@ export interface NativePlayerEngineOptions {
   setDuration: (v: number) => void;
   setPlaybackError: (v: PlaybackErrorState | null) => void;
   setError: (v: string | null) => void;
-  setNativePiPSupported: (v: boolean) => void;
   showOsd: (icon: ReactNode, text?: string) => void;
   scheduleRetry: (err: PlaybackErrorState) => void;
   nativeProgressIntervalRef: MutableRefObject<number | null>;
@@ -61,7 +60,6 @@ export const useNativePlayerEngine = (opts: NativePlayerEngineOptions): void => 
     setDuration,
     setPlaybackError,
     setError,
-    setNativePiPSupported,
     showOsd,
     scheduleRetry,
     nativeProgressIntervalRef,
@@ -143,7 +141,6 @@ export const useNativePlayerEngine = (opts: NativePlayerEngineOptions): void => 
         pipEnabled: platformService.isAndroid,
       })
       .then(success => {
-        setNativePiPSupported(nativeVideoPlayer.supportsPiP);
         if (!success) {
           const nativeError = classifyPlaybackError(null, detectedSource, source, retryCountRef.current, 'native', 'initPlayer returned false');
           setPlaybackError(nativeError);

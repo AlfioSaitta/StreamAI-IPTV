@@ -70,6 +70,7 @@ func TestService_StubBackend_PropagatesNotBuilt(t *testing.T) {
 		{"BufferInfo", func() error { _, err := s.BufferInfo(); return err }},
 		{"State", func() error { _, err := s.State(); return err }},
 		{"RenderFrame", func() error { _, err := s.RenderFrame(1920, 1080); return err }},
+		{"RenderFrameEx", func() error { _, _, _, err := s.RenderFrameEx(1920, 1080); return err }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -183,4 +184,3 @@ func TestAssetMiddleware_RoutesAndValidates(t *testing.T) {
 		})
 	}
 }
-

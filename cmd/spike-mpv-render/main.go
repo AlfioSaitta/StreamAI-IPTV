@@ -86,15 +86,15 @@ import (
 // ---- CLI -------------------------------------------------------------------
 
 type cliFlags struct {
-	URL         string
-	Duration    time.Duration
-	Warmup      time.Duration
-	FboW, FboH  int
-	WSAddr      string
-	WSThrottle  int
-	OutputPath  string
-	Hwdec       string
-	Verbose     bool
+	URL        string
+	Duration   time.Duration
+	Warmup     time.Duration
+	FboW, FboH int
+	WSAddr     string
+	WSThrottle int
+	OutputPath string
+	Hwdec      string
+	Verbose    bool
 }
 
 func parseFlags() cliFlags {
@@ -230,10 +230,10 @@ func run(f cliFlags) error {
 
 // renderLoop pilota mpv_render_context fino a scadenza durata. Per ogni
 // frame:
-//   1. attende l'update flag (canale `redraw` triggerato dal callback C
-//      installato con mpv_render_context_set_update_callback);
-//   2. misura wall-clock di spike1_render_fbo + glReadPixels;
-//   3. accumula sample (dopo warmup) e (se attivo) push verso wsHub.
+//  1. attende l'update flag (canale `redraw` triggerato dal callback C
+//     installato con mpv_render_context_set_update_callback);
+//  2. misura wall-clock di spike1_render_fbo + glReadPixels;
+//  3. accumula sample (dopo warmup) e (se attivo) push verso wsHub.
 //
 // In parallelo droppa eventi mpv (mpv_wait_event timeout 0) per non far
 // crescere all'infinito la coda interna — bloccare la coda è una causa
@@ -405,7 +405,7 @@ func installUpdateCallback(rctx *C.mpv_render_context) <-chan struct{} {
 // per evitare di saturare la connessione locale a 4K60 (~ 1.9 GB/s).
 // Protocollo: ogni messaggio binary è:
 //
-//   uint32 LE width | uint32 LE height | uint32 LE seqno | byte[w*h*4] RGBA8
+//	uint32 LE width | uint32 LE height | uint32 LE seqno | byte[w*h*4] RGBA8
 //
 // L'handshake WebSocket è implementato manualmente (RFC 6455) per non
 // introdurre dipendenze esterne nello spike — sufficiente per un PoC
@@ -531,4 +531,3 @@ var _ = binary.LittleEndian
 // Sentinel per evitare warning "imported and not used" su io quando si
 // taglia il package per build più piccole.
 var _ io.Writer = (*os.File)(nil)
-

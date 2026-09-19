@@ -28,11 +28,21 @@ package player
 
 import (
 	"errors"
+	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/rs/zerolog/log"
+)
+
+const (
+	// renderSampleWindow è quanti tempi di render tenere per p50/p95.
+	renderSampleWindow = 512
+	// renderStatsLogInterval è ogni quanto loggare il riepilogo della pipeline.
+	renderStatsLogInterval = 30 * time.Second
 )
 
 // errNotBuilt è ritornato dal backend stub quando il binario è stato
@@ -133,7 +143,28 @@ type backend interface {
 	// Fase 6.1 Stage A: path RGBA readback "slow but everywhere"; lo
 	// switch a OpenGL render-API + zero-copy DMA-BUF è in Stage B.
 	RenderFrame(width, height int) ([]byte, error)
+	// RenderFrameEx è `RenderFrame` con la sequenza del frame e il flag
+	// "è nuovo". `isNew == false` significa che mpv non ha prodotto un frame
+	// nuovo: il buffer è identico al precedente e il chiamante può saltare
+	// l'upload. Vedi mpv_cgo.go per la garanzia di non-regressione del gating.
+	RenderFrameEx(width, height int) (buf []byte, seq uint64, isNew bool, err error)
+	// RenderStats espone i contatori della pipeline di render per la
+	// diagnostica (frame renderizzati/saltati, sequenza, frame scartati).
+	RenderStats() RenderCounters
 	Close() error
+}
+
+// RenderCounters è lo snapshot dei contatori di render.
+type RenderCounters struct {
+	Renders uint64 `json:"renders"`
+	Skips   uint64 `json:"skips"`
+	Seq     uint64 `json:"seq"`
+	// Dropped è `frame-drop-count` di libmpv: frame che il decoder ha dovuto
+	// scartare perché la pipeline non li ha consumati in tempo.
+	Dropped int64 `json:"droppedFrames"`
+	// FrameGating indica se il salto dei frame duplicati è attivo: è false
+	// finché libmpv non ha segnalato almeno un update (vedi RenderFrameEx).
+	FrameGating bool `json:"frameGating"`
 }
 
 // Service è il Wails v3 Service del player.
@@ -148,6 +179,15 @@ type Service struct {
 	mu      sync.Mutex
 	backend backend
 
+	// renderMu serializza i render tra loro SENZA bloccare il resto del
+	// player. Un `RenderFrame` software costa ~4 ms di CPU (misurato a
+	// 540p→1080p su sorgente 1080p, vedi TestRenderCostPerFrame) e il
+	// frontend lo invoca a 60 fps: eseguirlo sotto `mu` (il mutex condiviso da
+	// Load/Play/Pause/Seek/SetVolume/State) teneva il lock occupato dal 20% al
+	// 100% del tempo, accodando ogni comando dell'utente dietro uno o più
+	// render — seek e pausa con latenze di centinaia di ms.
+	renderMu sync.Mutex
+
 	// Subscriber pattern + metadati track-level (Fase 6.5, events.go).
 	evMu           sync.RWMutex
 	subscribers    []subscriber
@@ -157,6 +197,15 @@ type Service struct {
 	trackArtURL    string
 	watcherRunning bool
 	watcherStop    chan struct{}
+
+	// Statistiche della pipeline di render (Fase 0 Stage B). Protette da
+	// `statsMu`, che è distinto da `mu` e `renderMu`: qui si scrive a ogni
+	// frame e non deve interferire con i comandi del player.
+	statsMu       sync.Mutex
+	renderSamples []float64
+	renderCount   uint64
+	skipCount     uint64
+	statsLastLog  time.Time
 }
 
 // New costruisce il servizio. Il backend reale è creato a build-time
@@ -213,6 +262,30 @@ func (s *Service) Load(url string, headers map[string]string) error {
 		s.sourceURL = url
 		s.evMu.Unlock()
 		s.emitState()
+
+		// Diagnostica della pipeline di decodifica.
+		//
+		// `hwdec-current` diventa significativo solo quando la decodifica è
+		// iniziata, quindi lo leggiamo poco dopo il load. È IL dato che dice se
+		// si sta decodificando sulla GPU o in CPU: su hardware datato è la
+		// differenza fra riproduzione fluida e stutter, e senza questo log non
+		// c'era modo di saperlo se non aprendo il pannello diagnostico.
+		time.AfterFunc(3*time.Second, func() {
+			info, hwErr := s.HwAccelInfo()
+			if hwErr != nil {
+				return
+			}
+			hwdec := info.HwdecCurrent
+			if hwdec == "" {
+				hwdec = "(idle)"
+			}
+			log.Info().
+				Str("hwdec", hwdec).
+				Bool("accelerated", info.Accelerated).
+				Str("codec", info.VideoCodec).
+				Str("mpv", info.MpvVersion).
+				Msg("player: decoding pipeline")
+		})
 	}
 	return err
 }
@@ -410,8 +483,122 @@ const AssetMiddlewarePath = "/player/frame"
 // per smoke test devtools) e usato internamente da AssetMiddleware().
 func (s *Service) RenderFrame(width, height int) ([]byte, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.backend.RenderFrame(width, height)
+	b := s.backend
+	s.mu.Unlock()
+	if b == nil {
+		return nil, errors.New("player: RenderFrame before init")
+	}
+
+	s.renderMu.Lock()
+	defer s.renderMu.Unlock()
+
+	buf, err := b.RenderFrame(width, height)
+	if err != nil {
+		return nil, err
+	}
+	return buf, nil
+}
+
+// RenderFrameEx è `RenderFrame` più la sequenza del frame e il flag "è nuovo",
+// e alimenta le statistiche della pipeline (Fase 0 dello Stage B: senza misure
+// in-app non si può decidere né verificare alcuna ottimizzazione del render).
+func (s *Service) RenderFrameEx(width, height int) ([]byte, uint64, bool, error) {
+	s.mu.Lock()
+	b := s.backend
+	s.mu.Unlock()
+	if b == nil {
+		return nil, 0, false, errors.New("player: RenderFrame before init")
+	}
+
+	s.renderMu.Lock()
+	started := time.Now()
+	buf, seq, isNew, err := b.RenderFrameEx(width, height)
+	s.renderMu.Unlock()
+	if err != nil {
+		return nil, 0, false, err
+	}
+
+	// Il tempo misurato è quello del ciclo completo (render + eventuale
+	// conversione), lo stesso che misurava l'harness SPIKE-1: è il numero da
+	// confrontare fra Stage A e un futuro path OpenGL.
+	s.recordRenderSample(time.Since(started).Seconds()*1000, isNew, width, height)
+
+	return buf, seq, isNew, nil
+}
+
+// recordRenderSample accumula le statistiche della pipeline e logga un riepilogo
+// periodico: è il modo per misurare il path di render su hardware reale, dove
+// non c'è un harness a disposizione.
+func (s *Service) recordRenderSample(ms float64, isNew bool, width, height int) {
+	s.statsMu.Lock()
+	if isNew {
+		s.renderSamples = append(s.renderSamples, ms)
+		if len(s.renderSamples) > renderSampleWindow {
+			s.renderSamples = s.renderSamples[len(s.renderSamples)-renderSampleWindow:]
+		}
+		s.renderCount++
+	} else {
+		s.skipCount++
+	}
+	shouldLog := time.Since(s.statsLastLog) >= renderStatsLogInterval && len(s.renderSamples) > 0
+	var p50, p95 float64
+	if shouldLog {
+		p50, p95 = percentiles(s.renderSamples)
+		s.statsLastLog = time.Now()
+	}
+	s.statsMu.Unlock()
+
+	if !shouldLog {
+		return
+	}
+
+	counters := RenderCounters{}
+	// Snapshot dei contatori del backend per i frame scartati dal decoder.
+	s.mu.Lock()
+	backend := s.backend
+	s.mu.Unlock()
+	if backend != nil {
+		counters = backend.RenderStats()
+	}
+
+	total := counters.Renders + counters.Skips
+	skippedPct := 0.0
+	if total > 0 {
+		skippedPct = float64(counters.Skips) / float64(total) * 100
+	}
+
+	log.Info().
+		Int("size", width).
+		Int("height", height).
+		Float64("p50Ms", p50).
+		Float64("p95Ms", p95).
+		Uint64("renders", counters.Renders).
+		Uint64("skipped", counters.Skips).
+		Float64("skippedPct", math.Round(skippedPct*10)/10).
+		Bool("frameGating", counters.FrameGating).
+		Int64("droppedFrames", counters.Dropped).
+		Msg("player: render pipeline stats")
+}
+
+// percentiles ritorna p50 e p95 di un campione non ordinato.
+func percentiles(samples []float64) (float64, float64) {
+	if len(samples) == 0 {
+		return 0, 0
+	}
+	sorted := make([]float64, len(samples))
+	copy(sorted, samples)
+	sort.Float64s(sorted)
+	at := func(q float64) float64 {
+		idx := int(math.Round(q * float64(len(sorted)-1)))
+		if idx < 0 {
+			idx = 0
+		}
+		if idx >= len(sorted) {
+			idx = len(sorted) - 1
+		}
+		return sorted[idx]
+	}
+	return at(0.50), at(0.95)
 }
 
 // AssetMiddleware ritorna un middleware HTTP che intercetta le richieste a
@@ -436,7 +623,7 @@ func (s *Service) AssetMiddleware() func(http.Handler) http.Handler {
 				http.Error(w, "invalid query param 'h' (expected 16..4320)", http.StatusBadRequest)
 				return
 			}
-			buf, err := s.RenderFrame(width, height)
+			buf, seq, isNew, err := s.RenderFrameEx(width, height)
 			if err != nil {
 				if errors.Is(err, errNotBuilt) {
 					http.Error(w, err.Error(), http.StatusServiceUnavailable)
@@ -445,16 +632,31 @@ func (s *Service) AssetMiddleware() func(http.Handler) http.Handler {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			w.Header().Set("Content-Type", "application/octet-stream")
-			w.Header().Set("Content-Length", strconv.Itoa(len(buf)))
+
+			seqStr := strconv.FormatUint(seq, 10)
+
+			w.Header().Set("X-Frame-Seq", seqStr)
+			w.Header().Set("Cache-Control", "no-store")
 			w.Header().Set("X-Frame-Width", strconv.Itoa(width))
 			w.Header().Set("X-Frame-Height", strconv.Itoa(height))
+
+			// Il client dichiara quale sequenza ha già caricato: se non è
+			// cambiata non serve trasferire di nuovo gli stessi byte (a 720p
+			// sono ~3.7 MB per richiesta) né rifare l'upload della texture.
+			// Il client risponde caricando solo quando `X-Frame-New: 1`.
+			if !isNew && r.Header.Get("X-Frame-Seq") == seqStr {
+				w.Header().Set("X-Frame-New", "0")
+				w.Header().Set("Content-Length", "0")
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Header().Set("Content-Length", strconv.Itoa(len(buf)))
+			w.Header().Set("X-Frame-New", "1")
+			// `rgb0` = 4 byte/pixel, R,G,B + padding. Il padding non è alpha.
 			w.Header().Set("X-Pixel-Format", "rgb0")
-			// Frame mai cacheable: ogni richiesta deve riflettere il
-			// frame istantaneo del decoder.
-			w.Header().Set("Cache-Control", "no-store")
 			_, _ = w.Write(buf)
 		})
 	}
 }
-

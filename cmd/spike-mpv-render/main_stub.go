@@ -26,4 +26,3 @@ Vedi cmd/spike-mpv-render/README.md per istruzioni.
 `, runtime.GOOS, runtime.GOARCH)
 	os.Exit(2)
 }
-

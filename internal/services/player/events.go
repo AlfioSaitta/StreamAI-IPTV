@@ -3,13 +3,13 @@
 //
 // Ogni mutazione di stato (Load/Play/Pause/Stop/Seek/SetVolume/SetMuted)
 // emette un PlayerStateEvent verso:
-//   1. Subscriber Go interni (PowerSave, MediaKeys, NetStatus, Tray)
-//      registrati via Service.Subscribe(...). I subscriber girano nello
-//      stesso goroutine del chiamante della Setter, in modo sincrono —
-//      la lavorazione che blocca a lungo deve essere fatta off-goroutine
-//      dal subscriber stesso.
-//   2. Frontend tramite Wails event `player-state` (rimpiazza il polling
-//      250 ms di `useNativeMpvEngine.ts`).
+//  1. Subscriber Go interni (PowerSave, MediaKeys, NetStatus, Tray)
+//     registrati via Service.Subscribe(...). I subscriber girano nello
+//     stesso goroutine del chiamante della Setter, in modo sincrono —
+//     la lavorazione che blocca a lungo deve essere fatta off-goroutine
+//     dal subscriber stesso.
+//  2. Frontend tramite Wails event `player-state` (rimpiazza il polling
+//     250 ms di `useNativeMpvEngine.ts`).
 //
 // Inoltre un goroutine "watcher" (avviato lazy al primo Subscribe) fa
 // poll backend.State() ogni 1 s mentre `loaded=true`, per catturare
@@ -199,4 +199,3 @@ func (s *Service) startWatcher() {
 // watcherInterval e' la frequenza del poll automatico position/duration.
 // 1 s e' sufficiente per timeline UI smooth (la frontend interpola).
 const watcherInterval = 1 * time.Second
-

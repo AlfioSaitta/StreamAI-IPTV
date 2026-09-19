@@ -1,5 +1,23 @@
 # SPIKE-1 — risultati smoke test (2026-05-22)
 
+> ⚠️ **Documento storico — non utilizzabile come gate (nota del 2026-09-18).**
+> Due limiti emersi successivamente, entrambi documentati in
+> [`stage-b-assessment.md`](stage-b-assessment.md) §3:
+>
+> 1. **Le metriche includono il vsync.** Il p50 è 16.65 ms = esattamente
+>    1/60 s: l'harness misura il ciclo frame intero, non il lavoro GPU/CPU.
+>    Da qui i `warn`/`fail` "per costruzione" anche su run visivamente
+>    perfetti. Serve il refactor `glFenceSync` + `eglSwapInterval(0)` già
+>    indicato sotto.
+> 2. **Misura un transport diverso da quello in produzione.** L'harness usa
+>    EGL/FBO + `glReadPixels` (il futuro T1); il player spedito usa il render
+>    **software** (`MPV_RENDER_API_TYPE_SW`) + HTTP loopback. I numeri non
+>    sono una baseline del codice attuale.
+>
+> L'unico dato robusto che resta è qualitativo: a 4K il trasferimento
+> integrale del frame verso la CPU è insostenibile (~2 GB/s su PCIe).
+> Le misure del path in produzione stanno in `render_cost_test.go`.
+
 Run #1 sul host di sviluppo openSUSE Tumbleweed con GPU NVIDIA RTX 3050 Ti
 Laptop, driver 580.159.03, libmpv 2.5.0, ffmpeg lavfi `testsrc2`.
 

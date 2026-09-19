@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { Events as WailsEvents } from '@wailsio/runtime';
 import { platformService } from '../services/platformService';
 import { Channel } from '../types';
@@ -61,7 +61,12 @@ export function usePlayerSystemIntegration({
     };
   }, [isWails, isPlaying, channel]);
 
-  // 2. MEDIA KEYS (Aggiornamento Stato e Metadati)
+  // 2a. MEDIA KEYS (stato, metadati, capabilities)
+  //
+  // Il VOLUME è deliberatamente escluso da questo effetto: era nelle stesse
+  // dipendenze, quindi ogni singola variazione di volume rifaceva anche
+  // SetPlaybackStatus + SetMetadata + SetCapabilities — cioè 3 chiamate IPC e
+  // D-Bus inutili per ogni passo dello slider (decine per un singolo drag).
   useEffect(() => {
     if (!isWails || !channel) return;
 
@@ -79,9 +84,6 @@ export function usePlayerSystemIntegration({
       trackId: channel.id,
     });
 
-    // Aggiorna volume
-    void MediaKeysService.SetVolume(volume);
-
     // Aggiorna capabilities
     void MediaKeysService.SetCapabilities({
       canPlay: true,
@@ -91,9 +93,26 @@ export function usePlayerSystemIntegration({
       canSeek: duration > 0,
       canControl: true,
     });
-  }, [isWails, channel, isPlaying, isPaused, duration, volume, onNext, onPrev]);
+  }, [isWails, channel, isPlaying, isPaused, duration, onNext, onPrev]);
+
+  // 2b. MEDIA KEYS (solo volume)
+  useEffect(() => {
+    if (!isWails || !channel) return;
+    void MediaKeysService.SetVolume(volume);
+  }, [isWails, channel, volume]);
 
   // 3. MEDIA KEYS EVENTS (Listener eventi hardware/OS)
+  //
+  // Il listener viene registrato UNA volta per sessione: l'handler reale è
+  // tenuto in un ref aggiornato a ogni render. In precedenza l'effect dipendeva
+  // da `currentTime`, che durante il playback cambia ~1-4 volte/s, quindi il
+  // listener veniva rimosso e ri-registrato alla stessa frequenza: un tasto
+  // multimediale premuto nella finestra tra `off()` e `On()` veniva perso, e
+  // ogni variazione di volume generava decine di IPC ridondanti.
+  const mediaKeyHandlerRef = useRef<(payload: { action?: string; offsetSeconds?: number; positionSeconds?: number }) => void>(
+    () => undefined,
+  );
+
   useEffect(() => {
     if (!isWails) return;
 
@@ -103,7 +122,18 @@ export function usePlayerSystemIntegration({
       if (!payload) return;
 
       console.log('[usePlayerSystemIntegration] Received media key event:', payload.action);
+      mediaKeyHandlerRef.current(payload);
+    });
 
+    return () => {
+      if (typeof off === 'function') off();
+    };
+  }, [isWails]);
+
+  // Mantiene l'handler al passo con stato e callback correnti senza
+  // ri-registrare il listener (sempre eseguito dopo ogni render).
+  useEffect(() => {
+    mediaKeyHandlerRef.current = (payload) => {
       switch (payload.action) {
         case 'play':
           play();
@@ -141,10 +171,6 @@ export function usePlayerSystemIntegration({
           // App gestirà il quit via lifecycle
           break;
       }
-    });
-
-    return () => {
-      if (typeof off === 'function') off();
     };
-  }, [isWails, play, pause, togglePlay, stop, onNext, onPrev, seek, currentTime]);
+  });
 }

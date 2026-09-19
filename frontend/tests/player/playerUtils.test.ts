@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from 'vitest';
-import { formatTime, sanitizeStreamUrl } from '../../components/player/playerUtils';
+import { describe, expect, it } from 'vitest';
+import {
+  DEFAULT_PLAYBACK_ENGINE,
+  detectStreamSource,
+  formatTime,
+  sanitizeStreamUrl,
+} from '../../components/player/playerUtils';
 
 describe('formatTime', () => {
   it.each([
@@ -55,59 +60,40 @@ describe('sanitizeStreamUrl', () => {
   });
 });
 
-// detectStreamSource depends on Hls.isSupported() and mpegts.isSupported().
-// We mock both to simulate environments without MediaSource (typical Node test).
+// `engine` non è più dedotto dal supporto di hls.js/mpegts.js (stack web-player
+// rimosso in Stage B): è il backend che riproduce davvero lo stream e viene
+// passato dal chiamante. Il default è libmpv (desktop Wails).
 describe('detectStreamSource', () => {
-  it('detects HLS by .m3u8 extension', async () => {
-    vi.resetModules();
-    vi.doMock('hls.js', () => ({ default: { isSupported: () => true } }));
-    vi.doMock('mpegts.js', () => ({ default: { isSupported: () => true } }));
-    const { detectStreamSource } = await import('../../components/player/playerUtils');
+  it('detects HLS by .m3u8 extension', () => {
     const info = detectStreamSource('https://x.test/stream/index.m3u8', 'live');
     expect(info.protocol).toBe('hls');
-    expect(info.engine).toBe('hlsjs');
+    expect(info.mimeType).toBe('application/x-mpegURL');
     expect(info.label).toBe('HLS (.m3u8)');
     expect(info.isLive).toBe(true);
   });
 
-  it('detects MPEG-TS for Xtream live without extension', async () => {
-    vi.resetModules();
-    vi.doMock('hls.js', () => ({ default: { isSupported: () => true } }));
-    vi.doMock('mpegts.js', () => ({ default: { isSupported: () => true } }));
-    const { detectStreamSource } = await import('../../components/player/playerUtils');
+  it('detects MPEG-TS for Xtream live without extension', () => {
     const info = detectStreamSource('http://srv.test:80/live/user/pass/123', 'live');
     expect(info.protocol).toBe('mpegts');
-    expect(info.engine).toBe('mpegts');
+    expect(info.mimeType).toBe('video/mp2t');
     expect(info.isXtreamLike).toBe(true);
     expect(info.isLive).toBe(true);
   });
 
-  it('assumes MP4 for Xtream VOD without extension', async () => {
-    vi.resetModules();
-    vi.doMock('hls.js', () => ({ default: { isSupported: () => true } }));
-    vi.doMock('mpegts.js', () => ({ default: { isSupported: () => true } }));
-    const { detectStreamSource } = await import('../../components/player/playerUtils');
+  it('assumes MP4 for Xtream VOD without extension', () => {
     const info = detectStreamSource('http://srv.test/movie/u/p/42', 'movie');
     expect(info.protocol).toBe('mp4');
-    expect(info.engine).toBe('videojs');
   });
 
-  it('falls back to videojs engine when hls.js is unsupported', async () => {
-    vi.resetModules();
-    vi.doMock('hls.js', () => ({ default: { isSupported: () => false } }));
-    vi.doMock('mpegts.js', () => ({ default: { isSupported: () => false } }));
-    const { detectStreamSource } = await import('../../components/player/playerUtils');
-    const info = detectStreamSource('https://x.test/a.m3u8');
-    expect(info.protocol).toBe('hls');
-    expect(info.engine).toBe('videojs');
+  it('defaults the engine to libmpv (desktop) and honours an explicit backend', () => {
+    expect(DEFAULT_PLAYBACK_ENGINE).toBe('mpv');
+    expect(detectStreamSource('https://x.test/a.m3u8').engine).toBe('mpv');
+    expect(detectStreamSource('https://x.test/a.m3u8', 'live', 'native').engine).toBe('native');
+    expect(detectStreamSource('http://srv.test/movie/u/p/42', 'movie', 'native').engine).toBe('native');
   });
 
   // MED-1 (Step 3-ter): MKV/Matroska riconosciuto come container progressivo.
-  it('detects MKV / Matroska VOD URLs', async () => {
-    vi.resetModules();
-    vi.doMock('hls.js', () => ({ default: { isSupported: () => true } }));
-    vi.doMock('mpegts.js', () => ({ default: { isSupported: () => true } }));
-    const { detectStreamSource } = await import('../../components/player/playerUtils');
+  it('detects MKV / Matroska VOD URLs', () => {
     const a = detectStreamSource('http://srv.test/movie/u/p/42.mkv', 'movie');
     expect(a.protocol).toBe('mkv');
     expect(a.mimeType).toBe('video/x-matroska');

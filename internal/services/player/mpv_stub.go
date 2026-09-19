@@ -30,4 +30,8 @@ func (*stubBackend) BufferInfo() (BufferInfo, error)      { return BufferInfo{},
 func (*stubBackend) State() (State, error)                { return State{}, errNotBuilt }
 func (*stubBackend) HwInfo() (HwAccelInfo, error)         { return HwAccelInfo{Built: false}, errNotBuilt }
 func (*stubBackend) RenderFrame(int, int) ([]byte, error) { return nil, errNotBuilt }
-func (*stubBackend) Close() error                         { return nil }
+func (*stubBackend) RenderFrameEx(int, int) ([]byte, uint64, bool, error) {
+	return nil, 0, false, errNotBuilt
+}
+func (*stubBackend) RenderStats() RenderCounters { return RenderCounters{} }
+func (*stubBackend) Close() error                { return nil }

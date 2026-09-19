@@ -47,17 +47,36 @@ package player
 // // Helper C: costruisce l'array di mpv_render_param per il render SW
 // // a partire dai puntatori già allocati lato Go. Tenere la logica qui
 // // evita la gymnastica unsafe.Pointer↔*C.mpv_render_param sul lato Go.
+// //
+// // BLOCK_FOR_TARGET_TIME=0: per default `mpv_render_context_render` NON
+// // torna finché non è il momento di mostrare il frame (pacing sul tempo di
+// // presentazione, ~33 ms a 30 fps). Per un lettore embedded che disegna in un
+// // canvas questo è dannoso e ingannevole:
+// //   - parka un goroutine e una connessione HTTP per tutto il tempo di
+// //     presentazione di OGNI frame, per un lavoro che dura ~4 ms;
+// //   - falsa le metriche: il tempo per frame misurato diventa il pacing
+// //     della sorgente, non il costo del render (misurato: ~31 ms contro
+// //     ~7 ms reali a 720p, vedi scaler_cost_test.go);
+// //   - il loop adattivo del frontend interpreta quell'attesa come carico e
+// //     abbassa la cadenza, peggiorando la fluidità su hardware che invece
+// //     avrebbe margine.
+// // La sincronizzazione A/V resta garantita da mpv (`video-sync=audio`), non
+// // dal blocco della call di render: senza blocco otteniamo il frame corrente
+// // subito, e i frame non ancora maturi arrivano come "nessun frame nuovo"
+// // (vedi il gating in RenderFrameEx).
 // static int streamai_sw_render(mpv_render_context *ctx,
 //                               int w, int h,
 //                               const char *fmt,
 //                               size_t stride,
 //                               void *buffer) {
 //     int size[2] = { w, h };
+//     int block_for_target_time = 0;
 //     mpv_render_param params[] = {
 //         { MPV_RENDER_PARAM_SW_SIZE,    size },
 //         { MPV_RENDER_PARAM_SW_FORMAT,  (void*)fmt },
 //         { MPV_RENDER_PARAM_SW_STRIDE,  &stride },
 //         { MPV_RENDER_PARAM_SW_POINTER, buffer },
+//         { MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME, &block_for_target_time },
 //         { 0, NULL }
 //     };
 //     return mpv_render_context_render(ctx, params);
@@ -71,6 +90,17 @@ package player
 //     };
 //     return mpv_render_context_create(out, mpv, params);
 // }
+//
+// // Registrazione del callback di update (definita in callback_cgo.c).
+// // Contesto passato come `void*` per coerenza con la dichiarazione in
+// // callback_cgo.go, che non può includere header mpv.
+// int streamai_set_update_callback(void *ctx);
+//
+// // mpv_render_context_update() ritorna un bitfield: avvolgiamo la chiamata
+// // per non dover gestire l'enum dal lato Go.
+// static unsigned long long streamai_render_update(mpv_render_context *ctx) {
+//     return (unsigned long long)mpv_render_context_update(ctx);
+// }
 import "C"
 
 import (
@@ -81,6 +111,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/rs/zerolog/log"
@@ -101,7 +132,32 @@ type cgoBackend struct {
 	mu        sync.Mutex // protegge `handle` e `renderCtx` durante init/close concorrenti
 	handle    *C.mpv_handle
 	renderCtx *C.mpv_render_context
-	bufPool   sync.Pool
+
+	// renderMu serializza i render tra loro e rispetto a `Close()` (l'API
+	// render di mpv non è thread-safe, e `mpv_render_context_free` non deve
+	// correre con un `mpv_render_context_render` in corso). È distinto da `mu`
+	// per non bloccare Load/Play/Pause/Seek per la durata di un frame.
+	renderMu sync.Mutex
+
+	// --- Rendering su richiesta (vedi RenderFrameEx) ---
+	//
+	// `needsUpdate` è alzato dal callback di update di libmpv (thread di mpv);
+	// `sawUpdateSignal` dice se quel meccanismo ha MAI funzionato su questa
+	// piattaforma/libmpv, ed è la condizione che abilita il salto dei frame
+	// duplicati (vedi il commento in RenderFrameEx).
+	needsUpdate     atomic.Bool
+	sawUpdateSignal atomic.Bool
+
+	// Ultimo frame renderizzato, riusato quando mpv non ne ha prodotto uno
+	// nuovo. È di sola lettura una volta pubblicato: il chiamante lo consuma
+	// (o lo scrive su HTTP) in modo sincrono.
+	cachedFrame []byte
+	cachedW     int
+	cachedH     int
+
+	frameSeq atomic.Uint64
+	renders  atomic.Uint64
+	skips    atomic.Uint64
 }
 
 // ensureInit crea il mpv_handle se non esiste. Da chiamare con `mu` preso.
@@ -142,9 +198,16 @@ func (b *cgoBackend) ensureInit() error {
 		{"terminal", "no"},
 		{"idle", "yes"},
 		{"keep-open", "always"}, // post-EOS resta in pausa, no chiusura auto
-		{"hwdec", "auto-safe"},
 		{"hwdec-codecs", "all"},
-		{"video-sync", "display-resample"},
+		// `video-sync=audio` (default di mpv) e non `display-resample`: il
+		// resample sincronizzato al refresh del display è pensato per il
+		// path OpenGL diretto, mentre qui ogni frame passa da una readback in
+		// RAM + conversione in CPU. Quando il renderer non tiene il ritmo del
+		// display, `display-resample` reagisce resamplando l'audio e
+		// accumulando latenza; con `audio` mpv lascia scorrere il video e,
+		// grazie a `framedrop=vo`, scarta i frame che non riesce a disegnare.
+		// È la modalità più stabile su hardware lento.
+		{"video-sync", "audio"},
 		{"audio-buffer", "0.2"},
 		{"audio-stream-silence", "yes"},
 		{"framedrop", "vo"},
@@ -178,6 +241,37 @@ func (b *cgoBackend) ensureInit() error {
 		}
 	}
 
+	// Decodifica hardware con COPY-BACK.
+	//
+	// Il render-API software (`vo=libmpv` + MPV_RENDER_API_TYPE_SW) non può
+	// consumare frame che vivono nella GPU: con `hwdec=auto-safe` mpv rileva che
+	// il VO non supporta l'hardware decoding e ricade in SILENZIO sulla
+	// decodifica in CPU. Su hardware datato significa decodificare 1080p
+	// H.264/HEVC con la CPU, che è la causa principale di stutter e ventole.
+	//
+	// Le varianti `*-copy` decodificano sulla GPU e riscaricano il frame in RAM
+	// nel formato atteso dal renderer software: si paga una copia per frame, ma
+	// si sposta il carico da CPU a GPU — che è esattamente ciò che serve qui.
+	//
+	// La catena è in ordine di preferenza perché i valori disponibili variano
+	// per versione di libmpv; `mpv_set_option_string` valida gli enum e
+	// fallisce su un valore sconosciuto, quindi il primo accettato è anche il
+	// migliore supportato da questa build. Se nessuno è disponibile restiamo sul
+	// default di mpv (decodifica software) senza far fallire l'init.
+	hwdecCandidates := []string{"auto-copy-safe", "auto-copy", "auto-safe", "auto"}
+	hwdecSet := ""
+	for _, candidate := range hwdecCandidates {
+		if err := setOption(h, "hwdec", candidate); err == nil {
+			hwdecSet = candidate
+			break
+		}
+	}
+	if hwdecSet == "" {
+		log.Warn().Msg("player: no supported hwdec mode accepted, falling back to libmpv default")
+	} else {
+		log.Info().Str("hwdec", hwdecSet).Msg("player: hardware decoding (copy-back) requested")
+	}
+
 	if rc := C.mpv_initialize(h); rc < 0 {
 		errMsg := C.GoString(C.mpv_error_string(rc))
 		C.mpv_terminate_destroy(h)
@@ -198,8 +292,53 @@ func (b *cgoBackend) ensureInit() error {
 
 	b.handle = h
 	b.renderCtx = rctx
+
+	// Notifica di "frame nuovo" da libmpv. È il meccanismo che permette di non
+	// rirenderizzare frame duplicati (vedi RenderFrameEx): il render SW costa
+	// ~4 ms per frame, quindi ripeterlo su frame identici è lavoro puro.
+	activeBackend.Store(b)
+	if rc := C.streamai_set_update_callback(unsafe.Pointer(rctx)); rc != 0 {
+		log.Warn().Msg("player: mpv update callback not registered, will render on every call")
+	}
+
 	runtime.SetFinalizer(b, func(bb *cgoBackend) { _ = bb.Close() })
 	return nil
+}
+
+// getPropertyInt64 legge una property intera (es. `frame-drop-count`).
+func getPropertyInt64(h *C.mpv_handle, key string) int64 {
+	ck := C.CString(key)
+	defer C.free(unsafe.Pointer(ck))
+	var value C.int64_t
+	if rc := C.mpv_get_property(h, ck, C.MPV_FORMAT_INT64, unsafe.Pointer(&value)); rc < 0 {
+		return 0
+	}
+	return int64(value)
+}
+
+// RenderStats espone i contatori della pipeline di render.
+func (b *cgoBackend) RenderStats() RenderCounters {
+	b.mu.Lock()
+	h := b.handle
+	b.mu.Unlock()
+
+	return RenderCounters{
+		Renders:     b.renders.Load(),
+		Skips:       b.skips.Load(),
+		Seq:         b.frameSeq.Load(),
+		Dropped:     droppedFrames(h),
+		FrameGating: b.sawUpdateSignal.Load(),
+	}
+}
+
+// droppedFrames legge il contatore di frame scartati da libmpv. È la metrica
+// che dice se la pipeline riesce a stare dietro al contenuto: se cresce, il
+// collo di bottiglia è nel render/upload, non nella rete.
+func droppedFrames(h *C.mpv_handle) int64 {
+	if h == nil {
+		return 0
+	}
+	return getPropertyInt64(h, "frame-drop-count")
 }
 
 func setOption(h *C.mpv_handle, key, value string) error {
@@ -497,11 +636,29 @@ func (b *cgoBackend) State() (State, error) {
 	if b.handle == nil {
 		return State{}, nil
 	}
-	st := State{Loaded: true}
+	// `Loaded` NON può derivare dalla sola esistenza dell'handle: l'handle
+	// viene creato all'init del backend e `Stop()` invia solo il comando
+	// `stop`, senza distruggerlo. Il risultato era che il player si
+	// dichiarava `Loaded: true` già all'avvio dell'app e restava tale anche a
+	// stream fermo; a valle `cmd/streamai/main.go` attivava quindi l'inibitore
+	// di sospensione del display, annunciava "playing" su MPRIS e trasmetteva
+	// lo status in broadcast LAN ogni secondo senza che nulla fosse in
+	// riproduzione. Deriviamo lo stato reale da mpv.
+	st := State{}
+	if idle, err := getPropertyBool(b.handle, "idle-active"); err == nil {
+		st.Loaded = !idle
+	} else if pos, err := getPropertyFloat(b.handle, "playlist-pos"); err == nil {
+		st.Loaded = pos >= 0
+	}
 
-	if paused, err := getPropertyBool(b.handle, "pause"); err == nil {
-		st.Paused = paused
-		st.Playing = !paused
+	// `pause` viene letto solo se c'è davvero un media: a player idle mpv
+	// mantiene l'ultimo valore di `pause`, che descriverebbe uno stato
+	// inesistente (e farebbe scattare `Loaded && !Paused` nei consumer).
+	if st.Loaded {
+		if paused, err := getPropertyBool(b.handle, "pause"); err == nil {
+			st.Paused = paused
+			st.Playing = !paused
+		}
 	}
 	if pos, err := getPropertyFloat(b.handle, "time-pos"); err == nil {
 		st.Position = pos
@@ -566,6 +723,12 @@ func (b *cgoBackend) HwInfo() (HwAccelInfo, error) {
 }
 
 func (b *cgoBackend) Close() error {
+	// Attende i render in corso prima di liberare il render context: liberarlo
+	// mentre un altro thread è dentro `mpv_render_context_render` è un
+	// use-after-free lato libmpv. Ordine di lock: renderMu → mu (stesso ordine
+	// di RenderFrame, nessuna inversione possibile).
+	b.renderMu.Lock()
+	defer b.renderMu.Unlock()
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.handle == nil {
@@ -582,6 +745,12 @@ func (b *cgoBackend) Close() error {
 	}
 	C.mpv_terminate_destroy(b.handle)
 	b.handle = nil
+
+	// Non notificare più un backend distrutto (il callback di update vive
+	// quanto il render context, ma la notifica arriverebbe a un backend chiuso).
+	activeBackend.CompareAndSwap(b, nil)
+	b.cachedFrame = nil
+
 	log.Debug().Msg("player: mpv_terminate_destroy finished")
 	return nil
 }
@@ -590,9 +759,22 @@ func (b *cgoBackend) Close() error {
 // memoria Go e lo ritorna come []byte (lunghezza = w*h*4). Path SW:
 // nessuna dipendenza su EGL/GL. Stride implicito = `w*4`.
 //
-// Costo: ogni call esegue colorspace conversion + scaling YUV→BGRA
-// **interamente in CPU** dentro libmpv. Sul dev host (Ryzen 7 6800H,
-// libmpv 2.5.0) il tempo per 480p è ~3 ms, 720p ~7 ms, 1080p ~17 ms.
+// Costo: ogni call esegue colorspace conversion + scaling YUV→RGBA
+// **interamente in CPU** dentro libmpv. Misurato su sorgente 1080p30
+// (Ryzen 7 6800H, libmpv 2.5.0 — vedi TestRenderCostPerFrame):
+//
+//	output  960×540 → 3.31 ms/frame  (~10% di un core a 30 fps)
+//	output 1280×720 → 4.36 ms/frame  (~13%)
+//	output 1920×1080 → 4.53 ms/frame (~14%)
+//
+// Il costo cresce poco con la risoluzione di OUTPUT: domina la conversione
+// colori sul frame in INGRESSO, non lo scaling. È anche il motivo per cui il
+// tuning dei filtri di scaling non produce guadagni misurabili (provato, esito
+// nullo: docs/stage-b-assessment.md §4-bis). L'unico modo per togliere questo
+// costo è portarlo sulla GPU (`MPV_RENDER_API_TYPE_OPENGL`, Fase 2).
+//
+// NB: i valori storicamente riportati qui (3/7/17 ms) erano gonfiati dal
+// blocco sul tempo di presentazione, non dal lavoro di conversione.
 // Per ora va bene per dimostrare il pipeline end-to-end; il path
 // HW-accelerated (MPV_RENDER_API_TYPE_OPENGL + DMA-BUF) arriva in
 // Step B della Fase 6.1 dopo SPIKE-3.
@@ -610,56 +792,104 @@ func (b *cgoBackend) Close() error {
 // (R,G,B,A) — il consumer lato JS può fare swap se necessario; il
 // nostro hook attuale tratta il buffer come "BGRA, alpha=0xff".
 func (b *cgoBackend) RenderFrame(w, h int) ([]byte, error) {
+	buf, _, _, err := b.RenderFrameEx(w, h)
+	return buf, err
+}
+
+// RenderFrameEx è `RenderFrame` con due informazioni in più: la sequenza del
+// frame (`seq`) e se questo è un frame NUOVO (`isNew`).
+//
+// `isNew == false` significa che mpv non ha prodotto un frame nuovo dall'ultima
+// chiamata: il buffer ritornato è identico al precedente e il chiamante può
+// saltare l'upload GPU (era il caso più frequente: il frontend chiede un frame
+// a cadenza fissa, mentre il contenuto è 24/25/30p, quindi una quota
+// significativa delle richieste riportava lo stesso identico frame — con 3-17
+// ms di conversione in CPU spesi per ricrearlo).
+//
+// GARANZIA DI NON-REGRESSIONE: il salto avviene **solo** se il callback di
+// update di libmpv ha già segnalato almeno un frame (`sawUpdateSignal`). Se il
+// meccanismo non funziona su una data piattaforma/libmpv, `sawUpdateSignal`
+// resta false e il comportamento è esattamente quello precedente: si
+// renderizza a ogni chiamata. Il salto non può quindi mai produrre un frame
+// mancante o uno stallo.
+func (b *cgoBackend) RenderFrameEx(w, h int) ([]byte, uint64, bool, error) {
 	if w <= 0 || h <= 0 {
-		return nil, fmt.Errorf("player: RenderFrame: invalid size %dx%d", w, h)
+		return nil, 0, false, fmt.Errorf("player: RenderFrame: invalid size %dx%d", w, h)
 	}
+	// `mpv_render_context_render` non è thread-safe e non deve correre con
+	// `mpv_render_context_free`: `renderMu` serializza i render tra loro e
+	// rispetto a `Close()`. Deliberatamente NON teniamo `b.mu` per la durata
+	// del render — quel mutex è condiviso con Load/Play/Pause/Seek/Stop e un
+	// render software dura ~4 ms, quindi tenerlo qui bloccherebbe i comandi
+	// dell'utente per la maggior parte del tempo a 60 fps.
+	b.renderMu.Lock()
+	defer b.renderMu.Unlock()
+
+	// Snapshot del contesto di render: lettura brevissima, sotto `b.mu`.
+	// `renderMu` (già preso) garantisce che `Close()` non lo liberi mentre
+	// stiamo renderizzando.
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.handle == nil || b.renderCtx == nil {
-		// Player non ancora inizializzato: ritorniamo un buffer nero
+	rctx := b.renderCtx
+	b.mu.Unlock()
+
+	if rctx == nil {
+		// Player non ancora inizializzato: buffer nero opaco.
 		buf := make([]byte, w*h*4)
 		for i := 3; i < len(buf); i += 4 {
 			buf[i] = 0xff // alpha = opaco
 		}
-		return buf, nil
+		return buf, b.frameSeq.Load(), true, nil
 	}
 
+	// Chiediamo a mpv se c'è un frame da renderizzare. `update()` va chiamata
+	// dopo OGNI callback di update (è un requisito di render.h) e il suo valore
+	// di ritorno contiene MPV_RENDER_UPDATE_FRAME quando un frame è pronto.
+	pending := b.needsUpdate.Swap(false)
+	flags := uint64(C.streamai_render_update(rctx))
+	hasFrame := flags&uint64(C.MPV_RENDER_UPDATE_FRAME) != 0
+
+	if pending || hasFrame {
+		b.sawUpdateSignal.Store(true)
+	}
+
+	// Salto del frame duplicato: la politica (e le sue condizioni di sicurezza)
+	// sta in gating.go, così è testabile senza cgo.
+	hasValidCache := b.cachedFrame != nil && b.cachedW == w && b.cachedH == h
+	if shouldReuseFrame(b.sawUpdateSignal.Load(), pending, hasFrame, hasValidCache) == GatingReuse {
+		b.skips.Add(1)
+		return b.cachedFrame, b.frameSeq.Load(), false, nil
+	}
+
+	// Buffer di proprietà della richiesta: `AssetMiddleware` lo scrive nel
+	// ResponseWriter in modo sincrono prima di ritornare, quindi non serve
+	// copiarlo né riciclarlo. La versione precedente allocava comunque un
+	// buffer nuovo a ogni frame *e* ci copiava dentro il frame del pool: a
+	// 720p/60fps erano ~3.7 MB di memcpy in più per frame (~220 MB/s) e
+	// pressione sul GC, senza alcun risparmio di allocazioni.
 	size := w * h * 4
-	var buf []byte
-	if p := b.bufPool.Get(); p != nil {
-		b := p.([]byte)
-		if len(b) >= size {
-			buf = b[:size]
-		}
-	}
-	if buf == nil {
-		buf = make([]byte, size)
-	}
+	buf := make([]byte, size)
 
 	fmt0 := C.CString("rgba")
 	defer C.free(unsafe.Pointer(fmt0))
 	stride := C.size_t(w * 4)
 	rc := C.streamai_sw_render(
-		b.renderCtx,
+		rctx,
 		C.int(w), C.int(h),
 		fmt0,
 		stride,
 		unsafe.Pointer(&buf[0]),
 	)
 	if rc < 0 {
-		return nil, fmt.Errorf("player: mpv_render_context_render(SW): %s",
+		return nil, 0, false, fmt.Errorf("player: mpv_render_context_render(SW): %s",
 			C.GoString(C.mpv_error_string(rc)))
 	}
 
-	// Copiamo il buffer prima di ritornarlo perché Wails lo leggerà
-	// in modo asincrono nel middleware, e noi vogliamo rimettere il
-	// buffer nel pool il prima possibile.
-	// NOTA: In realtà, dato che l'AssetMiddleware scrive subito nel ResponseWriter,
-	// potremmo passare il buffer direttamente, ma per sicurezza e per permettere
-	// il riciclo immediato facciamo una copia. In futuro potremmo ottimizzare.
-	res := make([]byte, size)
-	copy(res, buf)
-	b.bufPool.Put(buf)
-	return res, nil
-}
+	// Il frame appena prodotto diventa la cache per le chiamate in cui mpv non
+	// avrà nulla di nuovo da dare.
+	b.cachedFrame = buf
+	b.cachedW = w
+	b.cachedH = h
+	b.renders.Add(1)
 
+	return buf, b.frameSeq.Add(1), true, nil
+}

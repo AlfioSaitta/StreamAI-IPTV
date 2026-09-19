@@ -114,6 +114,16 @@ export function useNativeMpvEngine(opts: UseNativeMpvEngineOptions = {}): UseNat
   const [hwInfo, setHwInfo] = useState<PlayerHwAccelInfo | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const resizeTimerRef = useRef<number | null>(null);
+  /**
+   * Timestamp dell'ultimo `PlayerStateEvent` ricevuto (0 = mai).
+   *
+   * Serve al polling di fallback per NON interrogare il backend quando gli
+   * eventi push arrivano regolarmente: il watcher Go emette ~1 volta al
+   * secondo, quindi il vecchio polling fisso a 1 s raddoppiava IPC e letture di
+   * property mpv (sette `mpv_get_property` sotto il mutex del player, lo stesso
+   * che serializza Load/Play/Seek) senza aggiungere informazione.
+   */
+  const lastEventAtRef = useRef(0);
 
   // Push-based state updates: il PlayerService Go fa fanout di un
   // `PlayerStateEvent` a ogni mutazione + watcher 1 s lazy. Sostituisce
@@ -124,6 +134,7 @@ export function useNativeMpvEngine(opts: UseNativeMpvEngineOptions = {}): UseNat
     const off = WailsEvents.On(PLAYER_STATE_EVENT, (event: unknown) => {
       const data = (event as { data?: PlayerStateEventPayload } | null | undefined)?.data;
       if (data) {
+        lastEventAtRef.current = Date.now();
         // Estrae solo i campi di `State` (i metadati track-level sono
         // consumati altrove via hook dedicato, qui ci interessa lo stato
         // di playback). Il cast funziona perché PlayerStateEvent embed-a
@@ -147,19 +158,24 @@ export function useNativeMpvEngine(opts: UseNativeMpvEngineOptions = {}): UseNat
     };
   }, [poll]);
 
-  // Fallback polling 1 s: cattura stato se per qualche motivo l'evento
-  // push non arriva (runtime Wails non ancora pronto, suspend/resume
-  // del DE, devtools che mette in pausa lo script). Frequenza bassa
-  // perché la fonte primaria sono gli eventi push.
+  // Safety net: interroga il backend SOLO se gli eventi push hanno smesso di
+  // arrivare (runtime Wails non ancora pronto, suspend/resume del DE, devtools
+  // che mette in pausa lo script). Con gli eventi che arrivano regolarmente il
+  // tick non fa nulla: nessun IPC, nessuna lettura di property mpv in più.
   useEffect(() => {
     if (!poll) return;
     let cancelled = false;
     const tick = async () => {
+      const lastEventAt = lastEventAtRef.current;
+      const eventsAreFlowing =
+        lastEventAt !== 0 && Date.now() - lastEventAt < FALLBACK_POLL_INTERVAL_MS * 3;
+      if (eventsAreFlowing) return;
+
       const s = await callBackend(() => PlayerService.State(), setError);
       if (!cancelled && s) setState(s);
     };
-    // Primo tick immediato per popolare lo state al mount (l'evento
-    // potrebbe non arrivare se nessuno chiama Load/Play prima).
+    // Primo tick immediato per popolare lo state al mount (l'evento potrebbe
+    // non arrivare se nessuno chiama Load/Play prima).
     void tick();
     const interval = window.setInterval(tick, FALLBACK_POLL_INTERVAL_MS);
     return () => {

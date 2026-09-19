@@ -63,7 +63,7 @@ interface PlayerControlsProps {
     remainingSeconds: number;
   };
   formatSleepRemaining: (s: number) => string;
-  nativePiPSupported: boolean;
+  pipSupported: boolean;
   togglePiP: () => void;
   isFullscreen: boolean;
   toggleFullscreen: () => void;
@@ -115,7 +115,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   subtitleEnabled,
   sleepTimer,
   formatSleepRemaining,
-  nativePiPSupported,
+  pipSupported,
   togglePiP,
   isFullscreen,
   toggleFullscreen,
@@ -301,7 +301,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
             >
               <Cast className={`w-6 h-6 ${castSession.isConnecting ? 'animate-pulse' : ''}`} />
             </button>
-            <button onClick={togglePiP} disabled={!nativePiPSupported} aria-label="Picture-in-Picture" className={`tv-focus touch-target p-2 rounded-full ${nativePiPSupported ? (isPiP ? 'text-brand-primary bg-white/10' : 'text-white hover:bg-white/10') : 'text-gray-600 cursor-not-allowed'}`} title="Picture-in-Picture (P)">
+            <button onClick={togglePiP} disabled={!pipSupported} aria-label="Picture-in-Picture" className={`tv-focus touch-target p-2 rounded-full ${pipSupported ? (isPiP ? 'text-brand-primary bg-white/10' : 'text-white hover:bg-white/10') : 'text-gray-600 cursor-not-allowed'}`} title="Picture-in-Picture (P)">
               <PictureInPicture2 className="w-6 h-6" />
             </button>
             <button onClick={toggleFullscreen} aria-label={isFullscreen ? "Esci da fullscreen" : "Vai in fullscreen"} className="tv-focus touch-target p-2 hover:bg-white/10 rounded-full" title="Fullscreen (F)">

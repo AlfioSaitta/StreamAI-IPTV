@@ -275,5 +275,3 @@ func glGetString(name uint32) string {
 	}
 	return C.GoString(cs)
 }
-
-

@@ -42,7 +42,28 @@ export const sanitizeStreamUrl = (rawUrl: string): string => {
   }
 };
 
-export const detectStreamSource = (url: string, channelType?: Channel['type']): StreamSourceInfo => {
+/**
+ * Backend che riproduce lo stream quando il chiamante non ne specifica uno:
+ * libmpv (desktop Wails). Su Android il chiamante passa `'native'`.
+ */
+export const DEFAULT_PLAYBACK_ENGINE: PlayerEngine = 'mpv';
+
+/**
+ * Rileva protocollo e metadati di uno stream.
+ *
+ * `engine` è il backend che lo riprodurrà davvero — libmpv su desktop, player
+ * nativo su Android — e va passato dal chiamante, che sa su quale runtime sta
+ * girando. I valori `hlsjs`/`mpegts`/`videojs` sono residui dello stack
+ * web-player rimosso in Stage B: la diagnostica li riportava come se fossero
+ * ancora in uso, e la scelta dipendeva dalla presenza di `MediaSource`, che non
+ * ha più alcun ruolo (mpv demuxa per conto proprio e noi riceviamo frame già
+ * decodificati).
+ */
+export const detectStreamSource = (
+  url: string,
+  channelType?: Channel['type'],
+  engine: PlayerEngine = DEFAULT_PLAYBACK_ENGINE,
+): StreamSourceInfo => {
   const lowerUrl = url.toLowerCase();
   const path = (() => {
     try { return new URL(url).pathname.toLowerCase(); } catch { return lowerUrl; }
@@ -52,28 +73,28 @@ export const detectStreamSource = (url: string, channelType?: Channel['type']): 
   const isLive = channelType === 'live' || path.includes('/live/');
 
   if (lowerUrl.includes('.m3u8')) {
-    return { protocol: 'hls', mimeType: 'application/x-mpegURL', engine: (typeof window !== 'undefined' && !!(window as any).MediaSource) ? 'hlsjs' : 'videojs', isXtreamLike, isExtensionless, isLive, label: 'HLS (.m3u8)' };
+    return { protocol: 'hls', mimeType: 'application/x-mpegURL', engine, isXtreamLike, isExtensionless, isLive, label: 'HLS (.m3u8)' };
   }
   if (lowerUrl.includes('.mpd')) {
-    return { protocol: 'dash', mimeType: 'application/dash+xml', engine: 'videojs', isXtreamLike, isExtensionless, isLive, label: 'DASH (.mpd)' };
+    return { protocol: 'dash', mimeType: 'application/dash+xml', engine, isXtreamLike, isExtensionless, isLive, label: 'DASH (.mpd)' };
   }
   if (/\.(ts|mpeg|mpg)(?:$|[?#])/.test(lowerUrl) || (isXtreamLike && isLive)) {
-    return { protocol: 'mpegts', mimeType: 'video/mp2t', engine: (typeof window !== 'undefined' && !!(window as any).MediaSource) ? 'mpegts' : 'videojs', isXtreamLike, isExtensionless, isLive, label: 'MPEG-TS' };
+    return { protocol: 'mpegts', mimeType: 'video/mp2t', engine, isXtreamLike, isExtensionless, isLive, label: 'MPEG-TS' };
   }
   if (/\.(webm)(?:$|[?#])/.test(lowerUrl)) {
-    return { protocol: 'webm', mimeType: 'video/webm', engine: 'videojs', isXtreamLike, isExtensionless, isLive, label: 'WebM progressivo' };
+    return { protocol: 'webm', mimeType: 'video/webm', engine, isXtreamLike, isExtensionless, isLive, label: 'WebM progressivo' };
   }
   // MED-1 (Step 3-ter): MKV/Matroska supportato nativamente da Media3 su Android.
   // Sul web rimane "best effort" (i browser ne supportano un subset via <video>).
   if (/\.(mkv|matroska)(?:$|[?#])/.test(lowerUrl)) {
-    return { protocol: 'mkv', mimeType: 'video/x-matroska', engine: 'videojs', isXtreamLike, isExtensionless, isLive, label: 'MKV/Matroska' };
+    return { protocol: 'mkv', mimeType: 'video/x-matroska', engine, isXtreamLike, isExtensionless, isLive, label: 'MKV/Matroska' };
   }
 
   const shouldAssumeMp4 = /\.(mp4|m4v|mov)(?:$|[?#])/.test(lowerUrl) || (isXtreamLike && (channelType === 'movie' || channelType === 'series')) || isExtensionless;
   return {
     protocol: shouldAssumeMp4 ? 'mp4' : 'unknown',
     mimeType: shouldAssumeMp4 ? 'video/mp4' : 'application/octet-stream',
-    engine: 'videojs',
+    engine,
     isXtreamLike,
     isExtensionless,
     isLive,
