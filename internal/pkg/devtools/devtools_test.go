@@ -55,4 +55,3 @@ func TestKeyBindingsCallbackNilSafe(t *testing.T) {
 		_ = accel
 	}
 }
-

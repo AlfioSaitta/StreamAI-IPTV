@@ -1,8 +1,10 @@
 package advertising
+
 import (
 	"fmt"
 	ssdp "github.com/koron/go-ssdp"
 )
+
 // startSSDPLocked annuncia l'app come DLNA MediaRenderer:1 + DIAL service.
 // La LOCATION URL punta al device descriptor XML servito dal DIAL HTTP
 // receiver (Fase 2-bis). Fallback a s.httpPort se DIAL HTTP non e' partito.

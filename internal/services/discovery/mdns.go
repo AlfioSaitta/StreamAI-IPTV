@@ -1,9 +1,11 @@
 package discovery
+
 import (
 	"context"
-	"time"
 	"github.com/grandcat/zeroconf"
+	"time"
 )
+
 // mDNSServiceTypes elenca i service-type mDNS interessanti per IPTV/streaming.
 // Lista derivata dal mix di servizi annunciati da Chromecast (_googlecast._tcp),
 // AirPlay (_airplay._tcp, _raop._tcp) e DIAL (_dial._tcp).
@@ -14,6 +16,7 @@ var mDNSServiceTypes = []string{
 	"_dial._tcp",
 	"_dlna._tcp", // raro ma presente su alcuni renderer
 }
+
 // browseMDNS interroga il network locale per servizi mDNS interessanti.
 // Per ogni risposta valida fa il probe TCP per costruire il Device.
 //

@@ -44,5 +44,3 @@ func TestService_LifecycleNoCrash(t *testing.T) {
 		t.Fatalf("ServiceShutdown (second): %v", err)
 	}
 }
-
-

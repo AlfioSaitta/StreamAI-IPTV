@@ -3,10 +3,10 @@
 //
 // Mapping (vedi docs/plan-go-wails-migration.md sez. 3 + Fase 4):
 //
-//main.js setupWebSocketServer  -> remote.Service (ServiceStartup avvia :1902)
-//ws.send {type:"status",...}   -> remote.BroadcastStatus(status)
-//ws.on('message', cmd)         -> wails.Events.On("remote-control-command", cb)
-//ws.send {type:"ping"} keepal. -> goroutine per-conn (tick 30 s)
+// main.js setupWebSocketServer  -> remote.Service (ServiceStartup avvia :1902)
+// ws.send {type:"status",...}   -> remote.BroadcastStatus(status)
+// ws.on('message', cmd)         -> wails.Events.On("remote-control-command", cb)
+// ws.send {type:"ping"} keepal. -> goroutine per-conn (tick 30 s)
 //
 // Implementazione (Fase 4):
 //   - HTTP server :1902 con `coder/websocket` (rename moderno di
@@ -18,61 +18,74 @@
 //     funzionano senza restart (vs. main.js che era hard-coded sui
 //     validInterfaces all'avvio).
 package remote
+
 import (
-"context"
-"encoding/json"
-"net"
-"net/http"
-"strconv"
-"sync"
-"time"
+	"context"
+	"encoding/json"
 	"github.com/AlfioSaitta/StreamAI-IPTV/internal/pkg/wailsevents"
 	"github.com/coder/websocket"
 	"github.com/rs/zerolog/log"
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"net"
+	"net/http"
+	"strconv"
+	"sync"
+	"time"
 )
+
 const (
-// DefaultPort porta WS di controllo remoto (uguale a main.js WS_CONTROL_PORT).
-DefaultPort = 1902
-// EventRemoteCommand canale verso il frontend per comandi entranti.
-EventRemoteCommand = "remote-control-command"
-// pingInterval keepalive WS (uguale a main.js: 30 s).
-pingInterval = 30 * time.Second
-// readMessageMax limite per messaggio entrante (i comandi sono piccoli JSON).
-readMessageMax = 64 * 1024
+	// DefaultPort porta WS di controllo remoto (uguale a main.js WS_CONTROL_PORT).
+	DefaultPort = 1902
+	// EventRemoteCommand canale verso il frontend per comandi entranti.
+	EventRemoteCommand = "remote-control-command"
+	// pingInterval keepalive WS (uguale a main.js: 30 s).
+	pingInterval = 30 * time.Second
+	// readMessageMax limite per messaggio entrante (i comandi sono piccoli JSON).
+	readMessageMax = 64 * 1024
+	// broadcastWriteTimeout è il tempo massimo concesso a un singolo client per
+	// ricevere uno status broadcast.
+	broadcastWriteTimeout = 500 * time.Millisecond
+	// readTimeout è il tempo massimo di silenzio di un client prima che la
+	// connessione venga considerata morta. Volutamente più lungo di pingInterval:
+	// un client vivo risponde/scambia traffico almeno a ogni ping.
+	readTimeout = 3 * pingInterval
 )
+
 // Service è il Wails v3 Service di remote control.
 type Service struct {
-port int
-mu      sync.Mutex
-server  *http.Server
-clients map[*websocket.Conn]struct{}
-lastSt  []byte
-stopped bool
+	port    int
+	mu      sync.Mutex
+	server  *http.Server
+	clients map[*websocket.Conn]struct{}
+	lastSt  []byte
+	stopped bool
 }
+
 // New costruisce il servizio. port==0 -> DefaultPort.
 func New(port int) *Service {
-if port == 0 {
-port = DefaultPort
+	if port == 0 {
+		port = DefaultPort
+	}
+	return &Service{port: port, clients: make(map[*websocket.Conn]struct{})}
 }
-return &Service{port: port, clients: make(map[*websocket.Conn]struct{})}
-}
+
 // ServiceStartup avvia il server WS :port su 0.0.0.0. Implementa
 // application.ServiceStartup di Wails v3.
 func (s *Service) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
-ln, err := net.Listen("tcp", ":"+strconv.Itoa(s.port))
-if err != nil {
-return err
+	ln, err := net.Listen("tcp", ":"+strconv.Itoa(s.port))
+	if err != nil {
+		return err
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", s.handleWS)
+	s.mu.Lock()
+	s.server = &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	srv := s.server
+	s.mu.Unlock()
+	go func() { _ = srv.Serve(ln) }()
+	return nil
 }
-mux := http.NewServeMux()
-mux.HandleFunc("/", s.handleWS)
-s.mu.Lock()
-s.server = &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
-srv := s.server
-s.mu.Unlock()
-go func() { _ = srv.Serve(ln) }()
-return nil
-}
+
 // ServiceShutdown chiude listener + tutti i WS attivi.
 func (s *Service) ServiceShutdown() error {
 	log.Info().Msg("remote: ServiceShutdown started")
@@ -100,105 +113,149 @@ func (s *Service) ServiceShutdown() error {
 	log.Info().Msg("remote: ServiceShutdown finished")
 	return nil
 }
+
 // Port ritorna la porta in ascolto.
 func (s *Service) Port() int { return s.port }
+
 // Clients ritorna il numero di client WS connessi.
 func (s *Service) Clients() int {
-s.mu.Lock()
-defer s.mu.Unlock()
-return len(s.clients)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.clients)
 }
+
 // BroadcastStatus invia {"type":"status","payload":<status>} a tutti i client.
 func (s *Service) BroadcastStatus(status any) {
-buf, err := json.Marshal(envelope{Type: "status", Payload: status})
-if err != nil {
-return
+	buf, err := json.Marshal(envelope{Type: "status", Payload: status})
+	if err != nil {
+		return
+	}
+	s.mu.Lock()
+	s.lastSt = buf
+	conns := make([]*websocket.Conn, 0, len(s.clients))
+	for c := range s.clients {
+		conns = append(conns, c)
+	}
+	s.mu.Unlock()
+
+	// Un timeout PER CLIENT, non uno condiviso, e scritture parallele.
+	// Con il ctx unico precedente bastava un client che non leggeva (TCP window
+	// piena, peer morto) perché la sua Write bloccasse fino alla scadenza e tutti i
+	// client successivi trovassero il ctx già scaduto: da quel momento nessun
+	// companion riceveva più status, in modo permanente. Inoltre il chiamante
+	// restava bloccato fino a 2s per ogni aggiornamento.
+	var wg sync.WaitGroup
+	for _, c := range conns {
+		wg.Add(1)
+		go func(c *websocket.Conn) {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), broadcastWriteTimeout)
+			defer cancel()
+			if err := c.Write(ctx, websocket.MessageText, buf); err != nil {
+				s.dropClient(c)
+			}
+		}(c)
+	}
+	wg.Wait()
 }
-s.mu.Lock()
-s.lastSt = buf
-conns := make([]*websocket.Conn, 0, len(s.clients))
-for c := range s.clients {
-conns = append(conns, c)
+
+// dropClient rimuove un client non più raggiungibile, così i broadcast
+// successivi non pagano di nuovo il timeout su un peer fantasma.
+func (s *Service) dropClient(conn *websocket.Conn) {
+	s.mu.Lock()
+	_, tracked := s.clients[conn]
+	delete(s.clients, conn)
+	s.mu.Unlock()
+	if tracked {
+		_ = conn.Close(websocket.StatusPolicyViolation, "write timeout")
+	}
 }
-s.mu.Unlock()
-ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-defer cancel()
-for _, c := range conns {
-_ = c.Write(ctx, websocket.MessageText, buf)
-}
-}
+
 // --- internals -------------------------------------------------------------
 type envelope struct {
-Type    string `json:"type"`
-Payload any    `json:"payload,omitempty"`
+	Type    string `json:"type"`
+	Payload any    `json:"payload,omitempty"`
 }
+
 func (s *Service) handleWS(w http.ResponseWriter, r *http.Request) {
-conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
-if err != nil {
-return
-}
-conn.SetReadLimit(readMessageMax)
-s.mu.Lock()
-if s.stopped {
-s.mu.Unlock()
-_ = conn.Close(websocket.StatusGoingAway, "shutting down")
-return
-}
-s.clients[conn] = struct{}{}
-lastSt := s.lastSt
-s.mu.Unlock()
-if len(lastSt) > 0 {
-ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-_ = conn.Write(ctx, websocket.MessageText, lastSt)
-cancel()
-}
-defer func() {
-s.mu.Lock()
-delete(s.clients, conn)
-s.mu.Unlock()
-_ = conn.Close(websocket.StatusNormalClosure, "")
-}()
-pingCtx, cancelPing := context.WithCancel(r.Context())
-defer cancelPing()
-go func() {
-t := time.NewTicker(pingInterval)
-defer t.Stop()
-pingBuf, _ := json.Marshal(envelope{Type: "ping"})
-for {
-select {
-case <-pingCtx.Done():
-return
-case <-t.C:
-ctx, cancel := context.WithTimeout(pingCtx, 5*time.Second)
-err := conn.Write(ctx, websocket.MessageText, pingBuf)
-cancel()
-if err != nil {
-return
-}
-}
-}
-}()
-for {
-_, data, err := conn.Read(r.Context())
-if err != nil {
-return
-}
-s.handleCommand(conn, data)
-}
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+	if err != nil {
+		return
+	}
+	conn.SetReadLimit(readMessageMax)
+	s.mu.Lock()
+	if s.stopped {
+		s.mu.Unlock()
+		_ = conn.Close(websocket.StatusGoingAway, "shutting down")
+		return
+	}
+	s.clients[conn] = struct{}{}
+	lastSt := s.lastSt
+	s.mu.Unlock()
+	if len(lastSt) > 0 {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		_ = conn.Write(ctx, websocket.MessageText, lastSt)
+		cancel()
+	}
+	defer func() {
+		s.mu.Lock()
+		delete(s.clients, conn)
+		s.mu.Unlock()
+		_ = conn.Close(websocket.StatusNormalClosure, "")
+	}()
+	pingCtx, cancelPing := context.WithCancel(r.Context())
+	defer cancelPing()
+	go func() {
+		t := time.NewTicker(pingInterval)
+		defer t.Stop()
+		pingBuf, _ := json.Marshal(envelope{Type: "ping"})
+		for {
+			select {
+			case <-pingCtx.Done():
+				return
+			case <-t.C:
+				ctx, cancel := context.WithTimeout(pingCtx, 5*time.Second)
+				err := conn.Write(ctx, websocket.MessageText, pingBuf)
+				cancel()
+				if err != nil {
+					// La conn è morta: va chiusa SUBITO. Senza la Close il read loop
+					// resta bloccato per sempre (`r.Context()` si cancella solo alla
+					// chiusura della connessione) e l'entry in `s.clients` non viene mai
+					// rimossa: da lì in poi ogni broadcast paga il timeout su un peer
+					// fantasma.
+					_ = conn.Close(websocket.StatusAbnormalClosure, "ping failed")
+					return
+				}
+			}
+		}
+	}()
+	for {
+		// Deadline rinnovato a ogni lettura: `conn.Read(r.Context())` da solo non
+		// scade mai se il peer sparisce senza chiudere (TCP half-open dopo una
+		// sospensione del portatile, NAT drop), lasciando una goroutine e una conn
+		// appese a tempo indefinito.
+		readCtx, cancelRead := context.WithTimeout(r.Context(), readTimeout)
+		_, data, err := conn.Read(readCtx)
+		cancelRead()
+		if err != nil {
+			return
+		}
+		s.handleCommand(conn, data)
+	}
 }
 func (s *Service) handleCommand(conn *websocket.Conn, data []byte) {
-var cmd map[string]any
-if err := json.Unmarshal(data, &cmd); err != nil {
-return
-}
-if action, _ := cmd["action"].(string); action == "ping" {
-resp, _ := json.Marshal(map[string]any{
-"type": "pong", "timestamp": time.Now().UnixMilli(),
-})
-ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-_ = conn.Write(ctx, websocket.MessageText, resp)
-cancel()
-return
-}
-wailsevents.Emit(EventRemoteCommand, cmd)
+	var cmd map[string]any
+	if err := json.Unmarshal(data, &cmd); err != nil {
+		return
+	}
+	if action, _ := cmd["action"].(string); action == "ping" {
+		resp, _ := json.Marshal(map[string]any{
+			"type": "pong", "timestamp": time.Now().UnixMilli(),
+		})
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = conn.Write(ctx, websocket.MessageText, resp)
+		cancel()
+		return
+	}
+	wailsevents.Emit(EventRemoteCommand, cmd)
 }

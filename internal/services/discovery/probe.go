@@ -1,14 +1,16 @@
 package discovery
+
 import (
 	"context"
 	"fmt"
+	"github.com/AlfioSaitta/StreamAI-IPTV/internal/pkg/wailsevents"
 	"net"
 	"sort"
 	"strings"
 	"sync"
 	"time"
-	"github.com/AlfioSaitta/StreamAI-IPTV/internal/pkg/wailsevents"
 )
+
 // probeTCP fa una connect TCP non-bloccante con timeout. Equivalente a
 // main.js -> probeTcp(ip, port).
 func probeTCP(ctx context.Context, ip string, port int, timeout time.Duration) bool {
@@ -23,6 +25,7 @@ func probeTCP(ctx context.Context, ip string, port int, timeout time.Duration) b
 	_ = conn.Close()
 	return true
 }
+
 // probeDeviceServices probe in parallelo le porte note e ritorna i servizi
 // disponibili, ordinati per priorita' (stesso ordine di main.js).
 func probeDeviceServices(ctx context.Context, ip string) []DeviceService {
@@ -49,6 +52,7 @@ func probeDeviceServices(ctx context.Context, ip string) []DeviceService {
 	})
 	return results
 }
+
 // classifyDevice deriva il "type" del dispositivo dai protocolli rilevati.
 // Compat 1-a-1 con main.js -> classifyDevice.
 func classifyDevice(services []DeviceService) string {
@@ -69,6 +73,7 @@ func classifyDevice(services []DeviceService) string {
 	}
 	return "unknown"
 }
+
 // buildDeviceFromIP fa probe del device e costruisce la struct Device; ritorna
 // nil se nessun servizio risponde. Equivalente a main.js -> buildDeviceFromIp.
 func buildDeviceFromIP(ctx context.Context, ip, fallbackName string) *Device {
@@ -102,6 +107,7 @@ func buildDeviceFromIP(ctx context.Context, ip, fallbackName string) *Device {
 		Services: services,
 	}
 }
+
 // emitDeviceFound emette l'evento Wails "device-found" verso il frontend.
 func emitDeviceFound(d Device) {
 	wailsevents.Emit(EventDeviceFound, d)

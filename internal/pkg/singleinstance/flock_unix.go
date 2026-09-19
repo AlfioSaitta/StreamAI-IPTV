@@ -18,4 +18,3 @@ func tryFlock(f *os.File) error {
 func unflock(f *os.File) error {
 	return unix.Flock(int(f.Fd()), unix.LOCK_UN)
 }
-

@@ -97,4 +97,3 @@ func TestInitAndCrashReport(t *testing.T) {
 		t.Fatalf("crash payload not written: %q", data)
 	}
 }
-

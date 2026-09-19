@@ -228,4 +228,3 @@ func sendFocus(sockPath string) error {
 	_, err = conn.Write([]byte(focusMessage))
 	return err
 }
-

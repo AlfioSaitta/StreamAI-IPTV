@@ -23,7 +23,7 @@
 
 ## 🎬 Fase 11 — Player & Rendering Avanzato (P1)
 
-- [ ] **MPV-ZERO-COPY** — Implementare DMA-BUF rendering su Linux (Zero-copy).
+- [ ] **MPV-ZERO-COPY** — Implementare DMA-BUF rendering su Linux (Zero-copy). **Prerequisito:** render-API OpenGL (`MPV_RENDER_API_TYPE_OPENGL`), perché senza contesto GL non c'è nulla da importare. Subordinato al gate di misura descritto in [`stage-b-assessment.md`](stage-b-assessment.md) §7. Il tuning dei filtri di scaling è già stato provato e respinto (esito nullo, §4-bis).
 - [✅] **MPV-SIDELOAD-SUBS** — UI/UX per caricamento sottotitoli esterni.
 - [✅] **MPV-TRACK-SYNC** — Verifica integrità cambio tracce audio/sub istantaneo.
 - [ ] **MPV-TIMELINE-PREVIEW** — Anteprima frame su hover timeline (opzionale).

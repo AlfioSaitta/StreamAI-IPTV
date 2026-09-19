@@ -141,9 +141,30 @@ L'ottimizzazione deve essere guidata dai dati, non da supposizioni.
 
 ### 3.4. Ottimizzazione Player & Zero-Copy Rendering (SPIKE-5)
 
+> **Stato aggiornato (2026-09-18):** vedi
+> [`stage-b-assessment.md`](stage-b-assessment.md). Fatte la Fase 0
+> (strumentazione) e la Fase 1 (rendering su richiesta); il costo dominante
+> trovato non era la conversione ma **il blocco sul tempo di presentazione**
+> (~26 ms/frame, ora rimosso). Il tuning dei filtri di scaling è stato
+> provato e respinto: esito nullo. Zero-copy ancora **da fare**, subordinato
+> a un gate di misura.
+
 - **Problema:** Copiare frame video (specialmente 4K YUV420p) dalla VRAM alla RAM e viceversa consuma troppa larghezza di banda del bus di sistema.
 - **Soluzione Linux (DMA-BUF):** Implementare EGL image extension. `libmpv` decodifica il video (via VAAPI/NVDEC) direttamente in un buffer DMA. Wails/WebKitGTK importa questo buffer DMA come una texture WebGL senza alcuna copia sulla CPU.
-- **Tuning libmpv:** Ottimizzare `mpv` settando `hwdec=auto-safe`, `vd-lavc-threads=N` (per codec software), e profili di caching (`cache=yes`, `demuxer-max-bytes=150M`) adattivi in base allo stato della rete misurato dal proxy. Per l'avvio, usare flag come `--no-config`, `--idle`, `--vo=gpu`.
+  - ⚠️ Presuppone il render-API **OpenGL** (Fase 2): senza un contesto GL non c'è nulla da importare. È il passo successivo, non il primo.
+- **Tuning libmpv — cosa è già attivo** (`internal/services/player/mpv_cgo.go`):
+  `cache=yes`, `cache-secs=10`, `demuxer-max-bytes=150MiB`,
+  `stream-buffer-size=8MiB`, `idle=yes`, `video-sync=audio`, `framedrop=vo`.
+  Non `--no-config` (irrilevante su libmpv), non `--vo=gpu` (usiamo
+  `vo=libmpv`: il frame arriva al canvas via render-API).
+- **`hwdec`:** il valore corretto è **`auto-copy-safe`** (copy-back), non
+  `auto-safe`: il renderer software non può consumare frame che vivono nella
+  GPU, e con `auto-safe` mpv ricadrebbe in silenzio sulla decodifica CPU. La
+  variante copy-back sposta il decode sulla GPU pagando una copia per frame —
+  che è esattamente ciò che serve finché si resta sul path SW. Il copy-back
+  sparirà con la Fase 2.
+- **`vd-lavc-threads=N`:** non impostato (mpv usa già l'auto-detect). Da
+  valutare solo se si misura un caso in cui l'auto-detect sbaglia.
 
 ---
 
@@ -188,10 +209,18 @@ L'ottimizzazione deve essere guidata dai dati, non da supposizioni.
 | **P0** | Backend | Connection/Buffer pooling nel Proxy HTTP | Stabilità playback, - CPU | Basso |
 | **P1** | Frontend/Worker | Spostamento ricerca/filtri catalogo in Web Worker | Ricerca istantanea | Medio |
 | **P1** | Backend | Pipeline parsing M3U (Fan-out) + allocazioni zero | Avvio profili velocissimo | Alto |
-| **P2** | Backend/Player| Implementazione Zero-Copy rendering (DMA-BUF) | Playback 4K fluido su HW debole | Molto Alto |
+| **P2** | Backend/Player| Zero-Copy rendering (DMA-BUF) — **subordinato al gate di misura**; il prerequisito è il render-API OpenGL (`stage-b-assessment.md` §6-§7) | Playback 4K fluido su HW debole | Molto Alto |
 | **P2** | Frontend | Code splitting aggressivo e CSS Containment | Avvio < 300ms | Basso |
 | **P3** | Backend | Transizione a store locale (es. bbolt) per profili enormi | -30% RAM idle | Alto |
 
 ## 6. Checkpoint Continuo
 
-Dopo ogni task completato, misurare i KPI definiti nella sezione 1.1 per confermare che l'ottimizzazione abbia portato un beneficio reale e non abbia introdotto regressioni di stabilità. Usare i CI runners per eseguire benchmark automatici sulle performance chiave (es. tempo di parsing di un file M3U di test da 50MB).
+Dopo ogni task completato, misurare i KPI definiti nella sezione 1.1 per confermare che l'ottimizzazione abbia portato un beneficio reale e non abbia introdotto regressioni di stabilità.
+
+**Attenzione alla metodologia (lezioni del 2026-09-18, `stage-b-assessment.md` §4-bis):** una misura può sembrare pulita ed essere dominata da qualcos'altro — attese di vsync, pacing della sorgente, deriva di frequenza della CPU. Regole che hanno già evitato una decisione sbagliata:
+
+1. Misurare il **lavoro**, non il tempo di parete di una call che può bloccarsi.
+2. Per confronti fra configurazioni, campionare **interleaved** (round-robin), non A-poi-B: la deriva termica produce differenze apparenti del 35 % che non esistono. Sotto ~20 % su una singola macchina non è risolvibile.
+3. Una differenza si accetta solo se **cambia qualcosa anche nell'output** (es. hash dei pixel prodotti), non solo nel tempo.
+
+I benchmark non girano in CI (i workflow GitHub sono stati rimossi): vanno eseguiti a mano. Harness già pronti: `internal/services/player/render_cost_test.go` (build tag `mpv`, nessun display richiesto).

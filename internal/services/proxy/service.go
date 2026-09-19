@@ -193,9 +193,21 @@ func (s *Service) Insecure() bool {
 // SetInsecure abilita/disabilita TLS skip a runtime.
 func (s *Service) SetInsecure(insecure bool) {
 	s.mu.Lock()
+	previous := s.httpClient
 	s.insecure = insecure
 	s.httpClient = buildHTTPClient(insecure)
 	s.mu.Unlock()
+
+	// Il client precedente non è più raggiungibile da nessuno: chiudiamo subito
+	// le sue connessioni idle invece di lasciare decine di fd aperti fino alla
+	// prossima GC (ogni toggle di insecure mode ne accumulava un pool intero).
+	// `CloseIdleConnections` non tocca le richieste in volo, quindi gli stream
+	// già avviati continuano normalmente sul client vecchio.
+	if previous != nil {
+		if tr, ok := previous.Transport.(interface{ CloseIdleConnections() }); ok {
+			tr.CloseIdleConnections()
+		}
+	}
 }
 
 // AssetMiddleware ritorna un middleware HTTP che intercetta le richieste a
@@ -308,11 +320,83 @@ func (s *Service) handleProxy(w http.ResponseWriter, r *http.Request) {
 	rewriteResponseHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 
-	// Usa un buffer dal pool per copiare lo stream, riducendo le allocazioni.
+	// Il client ha `Timeout: 0` (necessario per gli stream live long-running),
+	// quindi il body non ha alcun limite complessivo: senza un watchdog di
+	// inattività una connessione che smette di inviare dati senza chiudersi
+	// (provider morto a metà stream, NAT drop) resta appesa per minuti o ore,
+	// tenendo occupate una goroutine e un fd per richiesta e mandando in
+	// buffering permanente il player.
+	body := newIdleTimeoutReader(resp.Body, idleBodyTimeout)
+	defer func() { _ = body.Close() }()
+
+	flushStream(w, body, upstreamURL)
+}
+
+// idleBodyTimeout è il tempo massimo di inattività del body upstream prima che
+// la connessione venga considerata morta.
+const idleBodyTimeout = 30 * time.Second
+
+// idleTimeoutReader chiude il reader sottostante se non arrivano byte per
+// `timeout`, e riarma il timer a ogni lettura fruttuosa.
+type idleTimeoutReader struct {
+	reader  io.ReadCloser
+	timer   *time.Timer
+	timeout time.Duration
+}
+
+func newIdleTimeoutReader(reader io.ReadCloser, timeout time.Duration) *idleTimeoutReader {
+	it := &idleTimeoutReader{reader: reader, timeout: timeout}
+	it.timer = time.AfterFunc(timeout, func() {
+		log.Warn().Dur("timeout", timeout).Msg("proxy: upstream body idle, closing connection")
+		_ = reader.Close()
+	})
+	return it
+}
+
+func (it *idleTimeoutReader) Read(p []byte) (int, error) {
+	n, err := it.reader.Read(p)
+	if n > 0 {
+		it.timer.Reset(it.timeout)
+	}
+	return n, err
+}
+
+func (it *idleTimeoutReader) Close() error {
+	it.timer.Stop()
+	return it.reader.Close()
+}
+
+// flushStream copia `src` in `dst` svuotando il buffer di net/http dopo ogni
+// blocco.
+//
+// `io.CopyBuffer` da solo non basta: senza `Flush` i dati restano nel bufio del
+// server (≈4KB) finché non si riempie, quindi su stream a basso bitrate
+// (audio/radio IPTV ≈16 KB/s) ogni chunk può attendere centinaia di ms prima
+// di partire, percepito come playback a scatti.
+func flushStream(dst http.ResponseWriter, src io.Reader, upstreamURL string) {
 	buffer := bufferPool.Get().(*[]byte)
 	defer bufferPool.Put(buffer)
-	if _, err := io.CopyBuffer(w, resp.Body, *buffer); err != nil && !errors.Is(err, context.Canceled) {
-		log.Printf("proxy: copy body %s: %v", sanitizeURL(upstreamURL), err)
+
+	flusher, canFlush := dst.(http.Flusher)
+	for {
+		n, err := src.Read(*buffer)
+		if n > 0 {
+			if _, werr := dst.Write((*buffer)[:n]); werr != nil {
+				if !errors.Is(werr, context.Canceled) {
+					log.Printf("proxy: copy body %s: %v", sanitizeURL(upstreamURL), werr)
+				}
+				return
+			}
+			if canFlush {
+				flusher.Flush()
+			}
+		}
+		if err != nil {
+			if !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
+				log.Printf("proxy: read body %s: %v", sanitizeURL(upstreamURL), err)
+			}
+			return
+		}
 	}
 }
 

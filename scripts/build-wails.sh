@@ -81,7 +81,13 @@ if [[ "$SKIP_FRONTEND" != "1" ]]; then
   fi
 
   echo "  Using Wails command: $WAILS_CMD"
-  "$WAILS_CMD" generate bindings
+  # Argomenti espliciti, come `npm run wails:bindings`: la forma nuda
+  # (`generate bindings` senza `-ts -d … ./...`) dipende dal binario trovato nel
+  # PATH e su alcune build di wails3 **svuota** la cartella dei binding invece di
+  # rigenerarli (verificato: 35 file → 1). Con i binding svuotati la build Vite
+  # fallisce, oppure — peggio — produce un bundle in cui `host.<servizio>` è
+  # `undefined` a runtime.
+  "$WAILS_CMD" generate bindings -ts -d frontend/bindings ./...
 
   echo "▶ Vite build → frontend/dist/ (consumato da //go:embed in assets.go)"
   if [[ ! -x "$ROOT/node_modules/.bin/vite" ]]; then

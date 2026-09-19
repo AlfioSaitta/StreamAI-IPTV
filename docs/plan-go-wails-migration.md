@@ -262,11 +262,12 @@ always-on-top, supportato out-of-box dal multi-window API di v3.
 │  React 19 + Vite + Tailwind + OSD/Timeline DOM HTML         │
 │  components/  services/*.ts  hooks/  contexts/              │
 │  + hooks/useNativeMpvEngine.ts (unico engine: canvas WebGL) │
-│  + hooks/usePictureInPicture.ts (Document PiP + fallback)   │
+│  + components/PipWindow.tsx (finestra PiP su `?pip=1`)      │
 └──────────────────────────┬──────────────────────────────────┘
                            │ Wails v3 generated bindings (frontend/bindings/*)
                            │ Events: wails.Events.On(...) / Service.EmitEvent
-                           │ shared-memory frame buffer (zero-copy, custom plugin)
+                           │ frame via middleware HTTP /player/frame (RGBA,    │
+                           │ render SW — lo shm zero-copy NON è implementato)  │
                            ▼
 ┌─────────────────────────────────────────────────────────────┐
 │              Backend Go — Wails v3 Application              │
@@ -339,7 +340,7 @@ Analisi delle 5 opzioni considerate:
 | A | `<video>` HTML5 puro (hls.js/mpegts.js) | Limitati (no HEVC su WebKit2GTK) | ✅ `requestPictureInPicture()` | ✅ | ❌ Codec insufficienti |
 | B | `<video>` + MSE alimentato da **transmuxing Go fMP4** | H.264/AAC/AC3 | ✅ nativo | ✅ | ❌ Branching codice extra, non risolve HEVC |
 | C | `<video>` + MSE alimentato da **transcoding Go** (HEVC→H.264) | Tutti (CPU/HW encode) | ✅ nativo | ✅ | ❌ Costo encode, latenza, perdita HW decode benefit |
-| D | **libmpv render-API + `<canvas>` WebGL2 in-DOM** | Tutti, HW decode | ✅ Document PiP API | ✅ | ✅ **Soluzione unica adottata** |
+| D | **libmpv render-API + `<canvas>` WebGL2 in-DOM** | Tutti, HW decode | ⚠️ richiede una finestra dedicata, non le API del webview | ✅ | ✅ **Soluzione unica adottata** — PiP realizzato come seconda finestra Wails, vedi [`pip-design.md`](pip-design.md) |
 | E | mpv `--wid=$XID` finestra native overlay | Tutti | ❌ DOM PiP impossibile | ⚠️ flicker | ❌ Viola vincolo |
 
 **Architettura adottata: solo backend D**, su tutti e 3 gli OS.
@@ -504,7 +505,13 @@ con tipi 1-a-1 (struct Go → interface TS).
 
 ### Fase 6 — Player video integrato + libmpv + WebGL2 (≈11 gg) — ✅ COMPLETATA 2026-05-25
 - ☑ **6.0-bis — Pre-spike scaffolding**
-- ☑ **6.1 — Integrazione libmpv & WebGL2 rendering**
+- ☑ **6.1 — Integrazione libmpv & WebGL2 rendering** — ⚠️ la parte
+  *transport* è in **software** (`MPV_RENDER_API_TYPE_SW`), non il
+  percorso GPU/zero-copy previsto "in Step B dopo SPIKE-3": SPIKE-3 non è
+  mai stato eseguito e il tentativo `d92246e` è stato revertito
+  (`fea28e2`). Fase 0 (strumentazione) + Fase 1 (rendering su richiesta)
+  fatte; Fase 2/3 rinviate — vedi
+  [`stage-b-assessment.md`](stage-b-assessment.md)
 - ☑ **6.6 — Ottimizzazioni UI & Performance Wails**
 - ☑ **6.2 — Stage B: Drop player legacy Web**
 - ☑ **6.7 — Stabilità & UX Wails**
@@ -735,7 +742,7 @@ con tipi 1-a-1 (struct Go → interface TS).
 | Feature | Stato post-MVP | Note |
 |---|---|---|
 | **Player integrato DOM** | ✅ **Pieno (vincolo)** | Backend D unico: `<canvas>` WebGL2 alimentato da libmpv render-API + OSD HTML sopra. Uguale su Linux/Win/macOS |
-| **PiP Desktop** | ✅ **Pieno (vincolo)** | Document PiP API su tutti e 3 gli OS target; fallback MediaStreamTrackGenerator |
+| **PiP Desktop** | ✅ **Pieno (vincolo)** | Strategia 3: **seconda finestra Wails** always-on-top (`internal/services/pip`) che carica `?pip=1` e disegna i frame da `/player/frame`. Le API PiP del webview non sono utilizzabili (richiedono un `<video>`; Document PiP non esiste su WebKitGTK/WKWebView). Design e stato: [`pip-design.md`](pip-design.md) |
 | PiP Android | ✅ Invariato | Capacitor + Media3 (fuori scope) |
 | Cast Chromecast | ✅ OK | go-chromecast |
 | Cast DLNA/UPnP | ✅ OK | SSDP advertise + scan in Go |
@@ -751,7 +758,7 @@ con tipi 1-a-1 (struct Go → interface TS).
 | **Logging file rotante** | ✅ **Nuovo (Fase 7-bis.6)** | zerolog + lumberjack, 10MB×5 file gzip |
 | OSD/Timeline | ✅ Invariato | DOM HTML sopra canvas mpv |
 | HEVC/AV1/HDR | ✅ Migliorato | libmpv HW accel universale su 3 OS (VAAPI/NVDEC/D3D11VA/VideoToolbox) |
-| **Playback 4K fluido** | ✅ **Pieno (vincolo §4.8)** | NV12/P010 zero-copy via shm + shader WebGL2; HW decode obbligatorio; framedrop=vo + UI warning su HW debole |
+| **Playback 4K fluido** | ⚠️ **Parziale — vedi [`stage-b-assessment.md`](stage-b-assessment.md)** | Il transport in produzione è **software** (`MPV_RENDER_API_TYPE_SW` + HTTP loopback), non lo zero-copy via shm qui indicato: il 4K@60 su HW modesto **non è dimostrato**. Fatte Fase 0 (strumentazione) + Fase 1 (rendering su richiesta); Fase 2 (T1/GPU) e Fase 3 (surface nativa) rinviate con gate misurabili |
 | **Sincronia A/V** | ✅ **Pieno (vincolo §4.8)** | libmpv `video-sync=audio`, audio-buffer tuned, refresh-rate matching; drift |Δ| ≤ 40 ms peak su 1h |
 | Codec audio (AC3/EAC3/TrueHD) | ✅ Migliorato | libmpv → ALSA/PipeWire/WASAPI/CoreAudio nativi |
 | Sottotitoli ASS/SRT/PGS | ✅ Migliorato | Rendering libmpv (animazioni ASS perfette, impossibili con MSE) |
@@ -795,10 +802,14 @@ Tutti devono essere ✅ prima del tag finale **su tutti e 3 gli OS**:
 - ☑ **PiP funziona (vincolo)** con scorciatoia `P` e pulsante UI, sia per
   H.264 che HEVC, su ogni OS supportato
 - ☑ **PiP fallback** automatico verificato disattivando Document PiP
-- ☑ **Qualità 4K (vincolo §4.8):**
-  - HEVC 10-bit 4K@60 HW-decoded: dropped frame ≤ 0.5% su 10 min
-  - AV1 4K@60 HW-decoded (dove supportato dal SoC): dropped frame ≤ 1%
-  - Nessun tearing visibile, nessun judder su contenuti 24p/30p
+- ☐ **Qualità 4K (vincolo §4.8)** — ⚠️ **non verificato**: il transport
+  attuale è software + HTTP loopback, non lo zero-copy descritto in §4.3;
+  SPIKE-1 chiude a `fail` a 4K ma con metriche vsync-polluted e su un
+  transport diverso da quello in produzione. Serve prima il refactor della
+  misura. Dettagli e piano: [`stage-b-assessment.md`](stage-b-assessment.md).
+  - ☐ HEVC 10-bit 4K@60 HW-decoded: dropped frame ≤ 0.5% su 10 min
+  - ☐ AV1 4K@60 HW-decoded (dove supportato dal SoC): dropped frame ≤ 1%
+  - ☐ Nessun tearing visibile, nessun judder su contenuti 24p/30p
 - ☑ **AV-sync (vincolo §4.8):**
   - Drift medio |Δ| ≤ 20 ms su HLS live HEVC 4K, sessione 1h
   - Drift peak |Δ| ≤ 40 ms, nessun re-snap udibile/visibile
@@ -809,7 +820,8 @@ Tutti devono essere ✅ prima del tag finale **su tutti e 3 gli OS**:
 - ☑ Refresh rate matching: contenuto 23.976p su display 60Hz non mostra judder
 - ☑ Sottotitoli ASS animati (es. anime karaoke) renderizzati fluidi
 - ☑ Audio AC3 5.1 pass-through verificato
-- ☑ Soak test 4K notturno verde su tutti e 3 gli OS (vedi §4.8.5)
+- ☐ Soak test 4K notturno verde su tutti e 3 gli OS (vedi §4.8.5) — nessun
+  referto nel repo; vedi [`stage-b-assessment.md`](stage-b-assessment.md) §7
 - ☑ Tutte le scorciatoie tastiera funzionano identicamente
 - ☑ Cast a Chromecast 3rd gen completa correttamente play/pause/seek/volume
 - ☑ Discovery SSDP trova ≥ 80% dei device trovati da Electron baseline

@@ -32,17 +32,44 @@ import (
 	"github.com/AlfioSaitta/StreamAI-IPTV/internal/pkg/logging"
 )
 
-// InitSignalHandler imposta un listener globale per i segnali fatali del sistema
-// operativo (es. SIGSEGV). Quando un segnale viene catturato, genera un report
-// di crash, lo invia a Sentry e termina il programma.
+// InitSignalHandler imposta il listener dei segnali FATALI del sistema
+// operativo (SIGSEGV, SIGABRT). Quando uno viene catturato genera un report di
+// crash con lo stack di TUTTE le goroutine e termina il processo re-inoltrando
+// il segnale, così da preservare il comportamento nativo (core dump, exit code
+// 128+signum) invece di forzare exit 1.
+//
+// I segnali di TERMINAZIONE (SIGINT, SIGTERM) NON sono trattati come crash:
+// sono richieste ordinate di uscita (Ctrl-C, `kill`, logout, stop di systemd) e
+// devono passare dallo shutdown di Wails — rilascio del lock di singola
+// istanza, `sentry.Flush`, `ServiceShutdown` dei servizi, chiusura della
+// webview e dei processi figli (mpv). Trattarli come fatali faceva uscire l'app
+// con codice 1 saltando tutti i defer di `main`.
+//
+// Se `onTerminate` è non nil, viene invocato alla ricezione di SIGINT/SIGTERM
+// (tipicamente `app.Quit()`); altrimenti quei segnali restano al comportamento
+// di default del runtime Go.
+//
 // Va chiamato una sola volta all'avvio dell'applicazione.
-func InitSignalHandler(appID, version, commitSHA string) {
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGSEGV, syscall.SIGABRT)
+func InitSignalHandler(appID, version, commitSHA string, onTerminate func()) {
+	if onTerminate != nil {
+		termSigs := make(chan os.Signal, 1)
+		signal.Notify(termSigs, syscall.SIGINT, syscall.SIGTERM)
+		go func() {
+			sig := <-termSigs
+			log.Info().
+				Str("signal", sig.String()).
+				Msg("Termination signal received, requesting graceful shutdown")
+			onTerminate()
+		}()
+	}
+
+	fatalSigs := make(chan os.Signal, 1)
+	signal.Notify(fatalSigs, syscall.SIGSEGV, syscall.SIGABRT)
 
 	go func() {
-		sig := <-sigs
-		// Un segnale è stato catturato. Generiamo il report con lo stack di TUTTE le goroutine.
+		sig := <-fatalSigs
+		// Un segnale fatale è stato catturato. Generiamo il report con lo stack
+		// di TUTTE le goroutine.
 		payload := buildPayload(fmt.Sprintf("Fatal OS signal: %s", sig), version, commitSHA, true)
 
 		// Scrivi il report su file, come per un panic normale.
@@ -66,11 +93,20 @@ func InitSignalHandler(appID, version, commitSHA string) {
 		sentry.Flush(5 * time.Second)
 		_ = logging.Close()
 
-		// Termina il processo.
+		// Re-inoltro del segnale: con il handler ripristinato il kernel riprende
+		// il comportamento di default (core dump se configurato, exit code
+		// corretto) invece del nostro exit 1 che lo mascherava.
+		signal.Reset(sig)
+		if s, ok := sig.(syscall.Signal); ok {
+			if err := syscall.Kill(syscall.Getpid(), s); err == nil {
+				// Diamo al segnale il tempo di essere consegnato prima di
+				// arrenderci con un exit esplicito.
+				time.Sleep(500 * time.Millisecond)
+			}
+		}
 		os.Exit(1)
 	}()
 }
-
 
 // Recover è il defer top-level per main(). Cattura panic, scrive un
 // crash report, fa flush del log file e termina con exit code 1.

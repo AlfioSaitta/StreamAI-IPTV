@@ -19,4 +19,3 @@ import "embed"
 //
 //go:embed all:frontend/dist
 var FS embed.FS
-

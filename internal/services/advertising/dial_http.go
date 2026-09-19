@@ -4,12 +4,12 @@
 // Espone un HTTP server LAN (0.0.0.0:8090, retry +1 fino a 8094) con due
 // handler:
 //
-//   GET  /dial.xml          → UPnP device descriptor DIAL 1.7
-//   GET  /apps/StreamAI IPTV → <state>running|stopped</state>
-//   POST /apps/StreamAI IPTV → launch request (body = URL stream o JSON
-//                              {url:"..."}); emessa via wailsevents
-//                              "dial-launch-request" → frontend chiama
-//                              Player.Load(url).
+//	GET  /dial.xml          → UPnP device descriptor DIAL 1.7
+//	GET  /apps/StreamAI IPTV → <state>running|stopped</state>
+//	POST /apps/StreamAI IPTV → launch request (body = URL stream o JSON
+//	                           {url:"..."}); emessa via wailsevents
+//	                           "dial-launch-request" → frontend chiama
+//	                           Player.Load(url).
 //
 // Senza /dial.xml i client DIAL nativi (YouTube, Netflix, Tubi, AppCast)
 // NON vedono StreamAI come receiver anche se SSDP è attivo. Vedi
@@ -123,7 +123,12 @@ func isAddrInUse(err error) bool {
 // nel link, ma il letterale resta possibile (gestito da handleDialApp).
 func (s *Service) handleDialXML(w http.ResponseWriter, _ *http.Request) {
 	host := s.advertisedHost()
-	port := s.actualHTTPPort
+	// Letto sotto lock: `startDIALHTTPLocked` scrive `actualHTTPPort` con `s.mu`
+	// tenuto, mentre questo handler gira su una goroutine del server HTTP.
+	// Leggere il campo nudo era una data race reale (rilevabile con `-race`) e
+	// nella finestra di startup poteva rispondere con porta 0 e quindi un
+	// `Application-URL` errato ai client DIAL.
+	port := s.ActualHTTPPort()
 	udn := s.udn()
 	appURL := fmt.Sprintf("http://%s:%d/apps/", host, port)
 	// Nota: friendlyName/manufacturer/modelName sono stringhe statiche;
@@ -248,9 +253,9 @@ func (s *Service) serveDialAppLaunch(w http.ResponseWriter, r *http.Request) {
 }
 
 // extractDialURL estrae la URL dal body DIAL. Pattern supportati:
-//   1. JSON `{"url":"http://..."}`
-//   2. form-urlencoded `v=http://...` o `url=http://...`
-//   3. raw `http://...` (intero body è la URL)
+//  1. JSON `{"url":"http://..."}`
+//  2. form-urlencoded `v=http://...` o `url=http://...`
+//  3. raw `http://...` (intero body è la URL)
 func extractDialURL(body []byte, contentType string) string {
 	if len(body) == 0 {
 		return ""
@@ -321,7 +326,14 @@ func (s *Service) advertisedHost() string {
 // udn ritorna l'UPnP Unique Device Name stabile per questa istanza.
 // Replica `uuid:${app.getName()}-${app.getVersion()}` di Electron.
 func (s *Service) udn() string {
+	// `SetAppVersion` scrive `appVersion` sotto `s.mu`: leggerlo nudo da un
+	// handler HTTP è una data race (una stringa è 2 word, quindi la lettura non
+	// è atomica). L'unico chiamante è `handleDialXML`, che non tiene il lock,
+	// quindi prenderlo qui è sicuro.
+	s.mu.Lock()
 	v := s.appVersion
+	s.mu.Unlock()
+
 	if v == "" {
 		v = "dev"
 	}
@@ -352,4 +364,3 @@ func (s *Service) ActualHTTPPort() int {
 // guard di compile-time sulle dipendenze opzionali (errors evita
 // "imported and not used" su rebuild parziali).
 var _ = errors.New
-

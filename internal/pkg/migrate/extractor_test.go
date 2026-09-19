@@ -21,8 +21,8 @@ func TestReadLevelDB(t *testing.T) {
 	}
 
 	testData := map[string]string{
-		"key1": "value1",
-		"key2": "value2",
+		"key1":         "value1",
+		"key2":         "value2",
 		"\x00\x01key3": "\x01value3",
 	}
 

@@ -44,9 +44,28 @@ L'app è ora stabile su Linux. Dobbiamo garantire la stessa qualità su Windows 
 Ottimizzazioni per contenuti 4K e miglioramento della gestione tracce.
 
 ### 11.1 Zero-copy Rendering (SPIKE-5)
+
+> ⚠️ **Stato e analisi aggiornata: [`stage-b-assessment.md`](stage-b-assessment.md).**
+> Il transport attuale è *software* (`MPV_RENDER_API_TYPE_SW` + HTTP
+> loopback) e a 4K il trasferimento integrale del frame in CPU non è
+> sostenibile. **Fase 0** (strumentazione: contatori render/skip, p50/p95
+> del costo per frame, `player: render pipeline stats` ogni 30 s) e
+> **Fase 1** (rendering su richiesta: nessuna riconversione quando mpv non
+> ha un frame nuovo, con garanzia di non-regressione testata in
+> `gating_test.go`) sono **✅ fatte (2026-09-18)**.
+>
+> **La misura ha inoltre trovato e corretto il costo dominante**, che non era
+> dove lo si cercava: `mpv_render_context_render` bloccava ~26 ms per frame in
+> attesa del tempo di presentazione (ora disattivato con
+> `BLOCK_FOR_TARGET_TIME=0`) — 31 ms → 4.4 ms per frame misurati. Il tuning
+> dei filtri di scaling è stato provato e **respinto**: esito nullo, il costo
+> è la conversione colori in ingresso. Dettagli in
+> [`stage-b-assessment.md`](stage-b-assessment.md) §4-bis. Le voci sotto
+> restano aperte e subordinate a un gate di misura — vedi il doc §7.
+
 - [ ] **Linux**: Implementare rendering via DMA-BUF (EGL_EXT_image_dma_buf_import) per evitare il passaggio dei frame dalla CPU (RGBA buffer).
 - [ ] **Windows**: Valutare D3D11 sharing se possibile via Wails/WebView2.
-- [ ] **Stats**: Aggiungere metriche di "Frame Drop" e "Jitter" reali nella Diagnostica Stream.
+- [🚧] **Stats**: frame drop reali già esposti da mpv (`hwdec-current`, `frame-drop-count`) nella Diagnostica Stream; i contatori *della pipeline di render* (Fase 0) sono al momento solo nel log Go — resta da esporli in `StreamDiagnostics`.
 
 ### 11.2 Gestione Tracce & Sottotitoli
 - [✅] **Sideload**: Migliorata l'UI per il caricamento di sottotitoli esterni (.srt/.vtt) inviandoli direttamente a MPV.

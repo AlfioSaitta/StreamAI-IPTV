@@ -1,7 +1,9 @@
 package advertising
+
 import (
 	"github.com/grandcat/zeroconf"
 )
+
 // mDNSAdvertisedServices elenca i service-type mDNS da annunciare:
 // vogliamo che StreamAI appaia come AirPlay-receiver (per device iOS/macOS),
 // raop (audio AirPlay), Chromecast e DIAL.
@@ -11,6 +13,7 @@ var mDNSAdvertisedServices = []struct{ Type, Domain string }{
 	{"_googlecast._tcp", "local."},
 	{"_dial._tcp", "local."},
 }
+
 func (s *Service) startMDNSLocked() error {
 	port := s.httpPort
 	if port <= 0 {

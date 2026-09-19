@@ -78,4 +78,3 @@ func (s *Service) Active() bool { return s.inh.Active() }
 // Reason ritorna la stringa motivo dell'inhibition corrente (vuota
 // se inattiva). Utile per debugging cross-window.
 func (s *Service) Reason() string { return s.inh.Reason() }
-

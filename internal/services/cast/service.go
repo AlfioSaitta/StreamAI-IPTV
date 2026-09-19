@@ -31,9 +31,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rs/zerolog/log"
 	gocast "github.com/barnybug/go-cast"
 	"github.com/barnybug/go-cast/controllers"
+	"github.com/rs/zerolog/log"
 
 	"github.com/AlfioSaitta/StreamAI-IPTV/internal/pkg/wailsevents"
 )
@@ -90,6 +90,18 @@ type Service struct {
 	status   Status
 	tickStop context.CancelFunc
 	tickerWG sync.WaitGroup
+
+	// sessionMu serializza instaurazione e teardown della sessione.
+	//
+	// Serve perché Wails esegue ogni chiamata bound in una goroutine propria:
+	// due Connect concorrenti (doppio click su "Connetti", auto-reconnect)
+	// passavano ENTRAMBI il controllo di `shutdownAndWait` — che vedeva
+	// `tickStop == nil` perché nessuno dei due aveva ancora avviato il ticker —
+	// e avviavano due ticker. `tickStop` veniva sovrascritto, quindi solo
+	// l'ultimo `cancel` restava raggiungibile: `tickerWG.Wait()` attendeva per
+	// sempre la goroutine orfana, bloccando Disconnect e ServiceShutdown (e
+	// quindi il quit dell'app, che il watchdog di main.go uccideva con exit 1).
+	sessionMu sync.Mutex
 }
 
 // New costruisce il servizio (singleton consigliato).
@@ -122,6 +134,10 @@ func (s *Service) Connect(host string, port int) error {
 	if port == 8008 || port == 0 {
 		port = 8009
 	}
+
+	// Una sola instaurazione di sessione alla volta: vedi `sessionMu`.
+	s.sessionMu.Lock()
+	defer s.sessionMu.Unlock()
 
 	// Chiudi sessione precedente fuori dal lock per evitare deadlock col ticker.
 	s.shutdownAndWait()
@@ -269,6 +285,11 @@ func (s *Service) Control(cmd ControlCommand) error {
 
 // Disconnect chiude la sessione e ferma il ticker.
 func (s *Service) Disconnect() error {
+	// Stesso lock di Connect: impedisce che un teardown si intrecci con
+	// un'instaurazione concorrente (era la via per il ticker orfano).
+	s.sessionMu.Lock()
+	defer s.sessionMu.Unlock()
+
 	s.shutdownAndWait()
 	s.mu.Lock()
 	snap := s.status
@@ -305,6 +326,16 @@ func (s *Service) shutdownAndWait() {
 
 // startTickerLocked: caller deve tenere s.mu.
 func (s *Service) startTickerLocked() {
+	// Rete di sicurezza: se un ticker è ancora attivo, cancellalo prima di
+	// sostituirlo. Sovrascrivere `tickStop` senza cancellarlo renderebbe la
+	// vecchia goroutine irraggiungibile e `tickerWG.Wait()` resterebbe bloccato
+	// per sempre. Non la attendiamo qui perché il caller tiene `s.mu` e
+	// `pollStatus` lo riacquisisce (deadlock); `sessionMu` garantisce comunque
+	// che non ci sia un Connect concorrente.
+	if s.tickStop != nil {
+		s.tickStop()
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	s.tickStop = cancel
 	s.tickerWG.Add(1)
@@ -411,4 +442,3 @@ func guessContentType(u string) string {
 		return "video/mp4"
 	}
 }
-

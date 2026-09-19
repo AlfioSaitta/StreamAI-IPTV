@@ -34,12 +34,12 @@ func TestClamp01(t *testing.T) {
 
 func TestGuessContentType(t *testing.T) {
 	cases := map[string]string{
-		"http://x/stream.m3u8":     "application/x-mpegURL",
-		"http://x/manifest.mpd":    "application/dash+xml",
-		"http://x/video.mkv":       "video/x-matroska",
-		"http://x/movie.mp4":       "video/mp4",
-		"http://x/segment.ts":      "video/mp2t",
-		"http://x/live/CHANNEL":    "video/mp4", // default fallback
+		"http://x/stream.m3u8":      "application/x-mpegURL",
+		"http://x/manifest.mpd":     "application/dash+xml",
+		"http://x/video.mkv":        "video/x-matroska",
+		"http://x/movie.mp4":        "video/mp4",
+		"http://x/segment.ts":       "video/mp2t",
+		"http://x/live/CHANNEL":     "video/mp4",             // default fallback
 		"HTTP://X/STREAM.M3U8?ts=1": "application/x-mpegURL", // case-insensitive
 	}
 	for in, want := range cases {
@@ -48,4 +48,3 @@ func TestGuessContentType(t *testing.T) {
 		}
 	}
 }
-

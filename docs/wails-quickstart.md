@@ -1,13 +1,18 @@
 # StreamAI Wails v3 — quick start
 
-> **Stato (2026-05-22):** backend Go completo (9 Service, 54 metodi
-> binding TS, libmpv 2.5.0 wiring + HwAccelInfo, single-instance,
-> MPRIS2, system tray, crash recovery). Frontend identico a quello
-> Electron via compat layer `services/hostBridge.ts`. Player nativo
-> con `mpv_render_context_create` → canvas WebGL2 (Fase 6.1)
-> **non ancora attivo**: la riproduzione passa ancora per il tag
-> `<video>` HTML5 dentro webkit2gtk. Vedi
-> [`docs/plan-go-wails-migration.md`](plan-go-wails-migration.md) §3.3.
+> **Stato (2026-09-18):** backend Go completo (9 Service, binding TS
+> generati, libmpv 2.5.0 wiring + HwAccelInfo, single-instance, MPRIS2,
+> system tray, crash recovery). Frontend su `services/hostBridge.ts`.
+>
+> Player **unico** libmpv: `mpv_render_context_create` (API SW) → canvas
+> WebGL2, alimentato dal middleware `/player/frame`. Il tag `<video>` HTML5
+> e il player web legacy **non esistono più** (Fase 7.3 "Stage B", commit
+> `01684c3`). Il render è ~4 ms/frame e **non** blocca sul tempo di
+> presentazione: vedi [`stage-b-assessment.md`](stage-b-assessment.md).
+>
+> PiP desktop: realizzato come **seconda finestra Wails** (`?pip=1`), perché le
+> API PiP del webview richiedono un `<video>` che il player basato su canvas non
+> ha. Tasto `P`. Vedi [`pip-design.md`](pip-design.md).
 
 ## Prerequisiti runtime (Linux)
 
@@ -68,21 +73,39 @@ property libmpv `hwdec-current`, `mpv-version`, `video-codec`. Il
 frontend lo consuma via `services/hwAccelService.ts → host.getGpuStatus()`
 con la stessa shape della controparte Electron.
 
-## Performance già verificata (smoke)
+## Performance
 
-Run #2 SPIKE-1 (NVIDIA RTX 3050 Ti, driver 580.159.03):
+**Render software — misurato (2026-09-18, Ryzen 7 6800H, sorgente
+testsrc2 1080p30):**
+
+| Output    | Tempo/frame | % di un core a 30 fps |
+| --------- | ----------- | --------------------- |
+| 960×540   | 3.31 ms     | 9.9 %                 |
+| 1280×720  | 4.36 ms     | 13.1 %                |
+| 1920×1080 | 4.53 ms     | 13.6 %                |
+
+Il costo dipende dalla conversione colori in **ingresso**, non dalla
+risoluzione di uscita. Riproducibile con
+`go test -tags 'gtk3 mpv' -run TestRender ./internal/services/player/`.
+
+**SPIKE-1 (NVIDIA RTX 3050 Ti, driver 580.159.03) — riferimento storico,
+non utilizzabile come gate:**
 
 | Configurazione  | fps  | p95   | drop  | result |
 | --------------- | ---- | ----- | ----- | ------ |
 | 1080p60 NVDEC   | 60.1 | 16.95 | 0/481 | warn¹  |
 | 4K60   NVDEC    | 58.7 | 18.19 | 15/470| fail²  |
 
-¹ warn = il KPI include il vsync wait (16.6 ms a 60 Hz). Visualmente
-fluido senza drop. Refactor `glFenceSync` previsto, vedi
+¹ warn = il KPI include il vsync wait (16.6 ms a 60 Hz): il p50 è
+esattamente 1/60 s, quindi la misura è pacing e non lavoro. Serve il
+refactor `glFenceSync` + `eglSwapInterval(0)`, vedi
 [`docs/spike1-results-2026-05-22.md`](spike1-results-2026-05-22.md).
 
-² fail = readback RGBA8 satura il PCIe a 4K (~2 GB/s sostenuti). Fase
-6.1 introdurrà transport T2 (DMA-BUF zero-copy) per sbloccare 4K.
+² fail = readback RGBA8 satura il PCIe a 4K (~2 GB/s sostenuti). SPIKE-1
+misura l'harness EGL/`glReadPixels`, cioè un transport **diverso** da quello
+in produzione (render SW): non è una baseline del codice attuale. Il 4K è
+subordinato a un gate di misura — vedi
+[`stage-b-assessment.md`](stage-b-assessment.md) §7.
 
 Cold-start binario (sul dev host openSUSE TW): **140 ms** vs ~2-3 s di
 Electron (target piano: −60 % RAM, cold-start ≤ Electron ✓).
@@ -94,10 +117,10 @@ Electron (target piano: −60 % RAM, cold-start ≤ Electron ✓).
 | Runtime                  | Node.js + Chromium             | Go + webkit2gtk-4.1 / WebView2 / WKWebView |
 | Bundle size              | ~150 MB (ASAR + electron-core) | ~19 MB binario statico                     |
 | Cold start (Linux)       | 2-3 s                          | ~140 ms                                    |
-| HW decode                | Chromium switches              | libmpv `hwdec=auto-safe`                   |
+| HW decode                | Chromium switches              | libmpv `hwdec=auto-copy-safe` (copy-back)  |
 | IPC backend ↔ frontend   | `ipcMain` / `electronAPI`      | Wails bindings TS auto-generati            |
 | Single-instance          | `app.requestSingleInstanceLock`| flock + Unix socket                        |
-| HEVC                     | patch FFmpeg custom (BranchBit)| webkit + gstreamer-vaapi                   |
+| HEVC                     | patch FFmpeg custom (BranchBit)| libmpv (NVDEC/VAAPI/D3D11VA/VideoToolbox)  |
 | Tray                     | `electron.Tray`                | libayatana-appindicator                    |
 
 ## Roadmap residua

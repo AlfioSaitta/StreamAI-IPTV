@@ -14,17 +14,17 @@ import (
 
 func TestIsIPTVRequest(t *testing.T) {
 	cases := map[string]bool{
-		"http://x.tv/live/123.m3u8":           true,
-		"http://x.tv/movie/42.mp4":            true,
-		"http://x.tv/series/9.mkv":            true,
-		"http://x.tv/player_api.php?u=a&p=b":  true,
-		"http://x.tv:8080/cmd":                true,
-		"http://x.tv:8000/cmd":                true,
-		"http://x.tv:25461/cmd":               true,
-		"http://x.tv/chunk.ts":                true,
-		"https://github.com":                  false,
-		"":                                    false,
-		"http://example.com/index.html":       false,
+		"http://x.tv/live/123.m3u8":          true,
+		"http://x.tv/movie/42.mp4":           true,
+		"http://x.tv/series/9.mkv":           true,
+		"http://x.tv/player_api.php?u=a&p=b": true,
+		"http://x.tv:8080/cmd":               true,
+		"http://x.tv:8000/cmd":               true,
+		"http://x.tv:25461/cmd":              true,
+		"http://x.tv/chunk.ts":               true,
+		"https://github.com":                 false,
+		"":                                   false,
+		"http://example.com/index.html":      false,
 	}
 	for u, want := range cases {
 		if got := IsIPTVRequest(u); got != want {
@@ -355,4 +355,3 @@ func itoa(i int) string {
 	}
 	return string(buf[n:])
 }
-

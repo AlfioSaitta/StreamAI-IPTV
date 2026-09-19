@@ -14,28 +14,39 @@
 //   - mDNS browse via github.com/grandcat/zeroconf
 //   - Subnet scan TCP con goroutine pool
 package discovery
+
 import (
 	"context"
 	"sync"
 	"time"
 )
+
 const (
 	// EventDeviceFound nome canale Wails per streaming dei device trovati.
 	EventDeviceFound = "device-found"
 	// SSDPSearchTimeout durata massima dell'M-SEARCH UDP (uguale a main.js).
 	SSDPSearchTimeout = 2500 * time.Millisecond
 	// SubnetScanConcurrency numero di goroutine concorrenti per /24 scan.
-	SubnetScanConcurrency = 24
+	//
+	// Alzato da 24 a 128: `probeDeviceServices` sonda le 5 porte in parallelo
+	// (quindi il costo per host è ~TCPProbeTimeout, non 5×), ma con 254 host e
+	// 24 worker servono ~11 tornate × 600ms ≈ 6.4s contro un budget di contesto
+	// di ~7.5s condiviso con SSDP/mDNS: qualunque rallentamento troncava la
+	// scansione a metà. Con 128 worker servono 2 tornate.
+	SubnetScanConcurrency = 128
 	// TCPProbeTimeout per ogni probe TCP (matcha main.js TCP_PROBE_TIMEOUT_MS).
 	TCPProbeTimeout = 600 * time.Millisecond
 )
+
 // Service e' il Wails v3 Service di discovery.
 type Service struct {
 	// scanMu evita scan concorrenti sovrapposti (UI-protezione).
 	scanMu sync.Mutex
 }
+
 // New costruisce il servizio.
 func New() *Service { return &Service{} }
+
 // DiscoverDevices lancia in parallelo SSDP M-SEARCH + scan sottoreti /24 di
 // tutte le interface locali up; deduplica per IP. Emette eventi
 // "device-found" via wailsevents.Emit per ogni nuovo device.
@@ -60,6 +71,17 @@ func (s *Service) DiscoverDevices() ([]Device, error) {
 			seen.addAndEmit(d)
 		}
 	}()
+	// mDNS browse — complementare a SSDP, non sostitutivo: i Chromecast moderni
+	// rispondono spesso solo via mDNS. `browseMDNS` era implementato ma non
+	// invocato da nessuno, quindi la discovery mDNS non è mai stata attiva.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for _, d := range browseMDNS(ctx, SSDPSearchTimeout) {
+			seen.addAndEmit(d)
+		}
+	}()
+
 	// Subnet scan su tutte le interface up
 	ifaces, err := localSubnetBases()
 	if err == nil {
@@ -76,6 +98,7 @@ func (s *Service) DiscoverDevices() ([]Device, error) {
 	wg.Wait()
 	return seen.values(), nil
 }
+
 // ScanIP fa probe di un singolo host (porte 8009/8008/9080/8080/7000) e
 // ritorna 0..1 device. Mantiene la stessa shape di main.js -> scanIp(target).
 func (s *Service) ScanIP(target string) ([]Device, error) {
@@ -85,6 +108,7 @@ func (s *Service) ScanIP(target string) ([]Device, error) {
 	}
 	return []Device{*d}, nil
 }
+
 // ProbeDeviceServices ritorna l'elenco di protocolli (stringhe) trovati su un
 // host. Wrapper compat per electronAPI.probeDeviceServices(ip).
 func (s *Service) ProbeDeviceServices(ip string) ([]string, error) {
@@ -95,11 +119,13 @@ func (s *Service) ProbeDeviceServices(ip string) ([]string, error) {
 	}
 	return protos, nil
 }
+
 // deviceSet e' uno set thread-safe per IP che emette anche l'evento Wails.
 type deviceSet struct {
-	mu      sync.Mutex
-	byIP    map[string]Device
+	mu   sync.Mutex
+	byIP map[string]Device
 }
+
 func newDeviceSet() *deviceSet { return &deviceSet{byIP: map[string]Device{}} }
 func (s *deviceSet) addAndEmit(d Device) {
 	s.mu.Lock()

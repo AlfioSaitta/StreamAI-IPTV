@@ -31,8 +31,8 @@ type inhibitState struct {
 func platformInhibit(_ string) (inhibitState, error) {
 	cmd := exec.Command(
 		"/usr/bin/caffeinate",
-		"-d", // prevent display sleep
-		"-i", // prevent idle sleep
+		"-d",                            // prevent display sleep
+		"-i",                            // prevent idle sleep
 		"-w", strconv.Itoa(os.Getpid()), // die when our PID dies
 	)
 	if err := cmd.Start(); err != nil {
@@ -56,4 +56,3 @@ func platformUninhibit(s inhibitState) error {
 	}
 	return nil
 }
-

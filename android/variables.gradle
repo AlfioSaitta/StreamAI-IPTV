@@ -14,8 +14,9 @@ ext {
     androidxEspressoCoreVersion = '3.7.0'
     cordovaAndroidVersion = '14.0.1'
     // ----- MED-1: AndroidX Media3 (sostituisce ExoPlayer 2.x deprecato) -----
-    // Pin 2026-05-15 a 1.10.1. Bump consentito solo a patch 1.10.x.
-    // Vedi docs/IMPROVEMENT_PLAN.md §4-bis.5
+    // Pin 2026-05-15 a 1.10.1. Bump consentito solo a patch 1.10.x: il plugin
+    // che lo usa è vendorato, quindi una minor nuova va ri-testata lì.
+    // Vedi AGENTS.md, "Punti Critici" #3-#4.
     media3Version = '1.10.1'
     playServicesCastVersion = '21.5.0'
 }

@@ -73,4 +73,3 @@ func TestInhibitor_EmptyReasonDefaults(t *testing.T) {
 		t.Fatalf("empty reason default: got %q, want %q", r, "Video playback")
 	}
 }
-

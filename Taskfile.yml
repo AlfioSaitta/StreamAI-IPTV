@@ -10,6 +10,11 @@ version: "3"
 # webkitgtk-6.0 disponibile (Ubuntu 24.04+, Fedora 40+, Arch) togli `gtk3`:
 # `task build TAGS=mpv`. Per build senza libmpv (CI senza mpv-devel)
 # togli `mpv`: `task build TAGS=gtk3` ⇒ usa lo stub che ritorna errNotBuilt.
+# NB: un solo blocco `vars:`. Un secondo blocco con la stessa chiave non
+# aggiunge variabili: il parser YAML rifiuta il file ("mapping key vars
+# already defined") e OGNI task muore al parsing — compreso `wails3 task
+# build`, che è lo step di build della pipeline `wails3 dev` (vedi
+# build/config.yml). È già successo: vedi la nota in fondo al blocco.
 vars:
   TAGS: '{{.TAGS | default "gtk3 mpv"}}'
   BIN_NAME: streamai
@@ -19,19 +24,17 @@ vars:
   COMMIT_SHA:
     sh: git rev-parse --short=7 HEAD 2>/dev/null || echo ""
   LDFLAGS: '-s -w -X main.version={{.VERSION}} -X main.commitSHA={{.COMMIT_SHA}}'
-
-# Whitelist CFLAGS richiesta da cgo per il backend `mpv` (vedi commento
-# spike:1:build). mpv-devel su openSUSE TW / Fedora / Arch espone
-# -fno-strict-overflow + -fstack-clash-protection + -fcf-protection-*
-# nelle CFLAGS pkg-config; cgo li blocca per default (go.dev/s/invalidflag).
-# Sono flag GCC innocui (hardening). Va riferita in `env:` dei task che
-# fanno `go build/run/test` con `mpv` nei tags.
-#
-# Su task >=3.32 si potrebbe alzare a top-level `env:`; qui restiamo
-# compat con 3.4 (openSUSE TW).
-#
-# Uso: `env: { CGO_CFLAGS_ALLOW: '{{.CGO_FLAGS_ALLOW}}' }` nel task.
-vars:
+  # Whitelist CFLAGS richiesta da cgo per il backend `mpv` (vedi commento
+  # spike:1:build). mpv-devel su openSUSE TW / Fedora / Arch espone
+  # -fno-strict-overflow + -fstack-clash-protection + -fcf-protection-*
+  # nelle CFLAGS pkg-config; cgo li blocca per default (go.dev/s/invalidflag).
+  # Sono flag GCC innocui (hardening). Va riferita in `env:` dei task che
+  # fanno `go build/run/test` con `mpv` nei tags.
+  #
+  # Su task >=3.32 si potrebbe alzare a top-level `env:`; qui restiamo
+  # compat con 3.4 (openSUSE TW).
+  #
+  # Uso: `env: { CGO_CFLAGS_ALLOW: '{{.CGO_FLAGS_ALLOW}}' }` nel task.
   CGO_FLAGS_ALLOW: "-fno-strict-overflow|-fstack-clash-protection|-fcf-protection|-fno-omit-frame-pointer"
 
 tasks:

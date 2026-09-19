@@ -77,4 +77,3 @@ func platformUninhibit(_ inhibitState) error {
 	}
 	return nil
 }
-

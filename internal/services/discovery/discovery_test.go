@@ -1,7 +1,9 @@
 package discovery
+
 import (
 	"testing"
 )
+
 func TestClassifyDevice(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -25,12 +27,12 @@ func TestClassifyDevice(t *testing.T) {
 }
 func TestHostFromLocation(t *testing.T) {
 	cases := map[string]string{
-		"http://192.168.1.34:8009/ssdp/device-desc.xml":           "192.168.1.34",
-		"https://10.0.0.5/desc.xml":                                "10.0.0.5",
-		"http://example.com:1900/desc.xml":                         "",
-		"  http://172.16.5.42:1234/x ":                             "172.16.5.42",
-		"":                                                         "",
-		"::1":                                                      "",
+		"http://192.168.1.34:8009/ssdp/device-desc.xml": "192.168.1.34",
+		"https://10.0.0.5/desc.xml":                     "10.0.0.5",
+		"http://example.com:1900/desc.xml":              "",
+		"  http://172.16.5.42:1234/x ":                  "172.16.5.42",
+		"":                                              "",
+		"::1":                                           "",
 	}
 	for in, want := range cases {
 		if got := hostFromLocation(in); got != want {

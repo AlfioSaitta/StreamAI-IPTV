@@ -10,12 +10,12 @@
 //   - Click sull'icona: toggle show/hide della main window
 //   - Menu:
 //     · "Mostra finestra" / "Nascondi finestra" (label dinamica via
-//       Update() su event window:focus/blur)
+//     Update() su event window:focus/blur)
 //     · "Riproduci" / "Pausa" (label dinamica via SetPlayLabel,
-//       guidata dal subscriber PlayerService in cmd/streamai/main.go)
+//     guidata dal subscriber PlayerService in cmd/streamai/main.go)
 //     · "Picture-in-Picture" (toggle PiP)
 //     · "Apri cartella log" → apre dir contenente streamai.log via
-//       xdg-open (Linux) / open (macOS) / explorer (Windows)
+//     xdg-open (Linux) / open (macOS) / explorer (Windows)
 //     · separator
 //     · "Esci" → app.Quit()
 //
@@ -232,4 +232,3 @@ func openPath(path string) error {
 	// anche se StreamAI viene chiuso subito dopo.
 	return cmd.Start()
 }
-

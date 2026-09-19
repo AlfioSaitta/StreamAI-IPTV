@@ -1,11 +1,13 @@
 package discovery
+
 import (
 	"context"
+	ssdp "github.com/koron/go-ssdp"
 	"net/url"
 	"strings"
 	"time"
-	ssdp "github.com/koron/go-ssdp"
 )
+
 // searchSSDP esegue M-SEARCH SSDP su 239.255.255.250:1900 con ST=ssdp:all,
 // poi per ogni device unico fa il probe TCP delle porte note. Compat con
 // main.js -> discoverSsdpDevices.
@@ -39,6 +41,7 @@ func searchSSDP(ctx context.Context, timeout time.Duration) ([]Device, error) {
 	}
 	return devices, nil
 }
+
 // hostFromLocation estrae l'host (IPv4) da un LOCATION SSDP (es.
 // "http://192.168.1.34:8009/ssdp/device-desc.xml" -> "192.168.1.34").
 // Rifiuta hostname non-IP per evitare falsi positivi su DNS pubblici.

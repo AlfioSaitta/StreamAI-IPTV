@@ -12,5 +12,4 @@ package powersave
 type inhibitState struct{}
 
 func platformInhibit(_ string) (inhibitState, error) { return inhibitState{}, nil }
-func platformUninhibit(_ inhibitState) error          { return nil }
-
+func platformUninhibit(_ inhibitState) error         { return nil }

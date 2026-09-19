@@ -2,8 +2,8 @@ package migration
 
 import (
 	"context"
-	"testing"
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"testing"
 )
 
 func TestService_Lifecycle(t *testing.T) {

@@ -6,6 +6,7 @@
 //
 // Vedi docs/plan-go-wails-migration.md sez. 3, Fase 2.
 package advertising
+
 import (
 	"context"
 	"errors"
@@ -17,6 +18,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
+
 // Service e' il Wails v3 Service di advertising.
 type Service struct {
 	mu       sync.Mutex
@@ -35,6 +37,7 @@ type Service struct {
 	// Le diverse signature delle librerie sono normalizzate qui in func().
 	closers []func()
 }
+
 // New costruisce il servizio. Instance default = "StreamAI-<hostname>",
 // httpPort default = 0 (= unset; SSDP NON partira', mDNS si').
 func New() *Service {
@@ -44,6 +47,7 @@ func New() *Service {
 	}
 	return &Service{instance: "StreamAI-" + host}
 }
+
 // SetInstance cambia il nome esposto nel network. Richiede Restart per
 // propagarsi.
 func (s *Service) SetInstance(name string) error {
@@ -55,6 +59,7 @@ func (s *Service) SetInstance(name string) error {
 	s.mu.Unlock()
 	return nil
 }
+
 // SetHTTPPort imposta la porta annunciata dai descrittori (DLNA/DIAL).
 func (s *Service) SetHTTPPort(port int) error {
 	if port < 0 || port > 65535 {
@@ -65,6 +70,7 @@ func (s *Service) SetHTTPPort(port int) error {
 	s.mu.Unlock()
 	return nil
 }
+
 // Start avvia mDNS + SSDP announce. Idempotente: doppia chiamata = no-op.
 // Errori SSDP sono non-fatali (mDNS resta attivo).
 func (s *Service) Start() error {
@@ -91,6 +97,7 @@ func (s *Service) Start() error {
 	s.running = true
 	return nil
 }
+
 // Stop ferma tutti gli annunci. Idempotente.
 func (s *Service) Stop() error {
 	s.mu.Lock()
@@ -110,6 +117,7 @@ func (s *Service) stopLocked() {
 	s.closers = nil
 	log.Debug().Msg("advertising: sub-services stopped")
 }
+
 // Status ritorna lo stato corrente: "running" | "stopped" | "error".
 func (s *Service) Status() (string, error) {
 	s.mu.Lock()
@@ -148,4 +156,3 @@ func (s *Service) ServiceShutdown() error {
 	log.Info().Err(err).Msg("advertising: ServiceShutdown finished")
 	return err
 }
-

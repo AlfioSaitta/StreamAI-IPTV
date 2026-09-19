@@ -12,7 +12,7 @@ Questo file serve come guida e contesto per gli agenti AI che collaborano allo s
 - **Styling:** Tailwind CSS
 - **Video Player:** 
   - *Desktop:* **libmpv** (via `useNativeMpvEngine.ts` con rendering WebGL2). Video.js e altri player web sono stati rimossi.
-  - *Android:* Capacitor Video Player (player nativo basato su **AndroidX Media3 1.10.1** — `androidx.media3:media3-exoplayer:1.10.1`, pin 2026-05-15; plugin vendorato in `android/plugins/capacitor-video-player/`, vedi MED-1 in `docs/IMPROVEMENT_PLAN.md` §4-bis)
+  - *Android:* Capacitor Video Player (player nativo basato su **AndroidX Media3 1.10.1** — `androidx.media3:media3-exoplayer:1.10.1`, pin 2026-05-15; plugin vendorato in `android/plugins/capacitor-video-player/` — vedi MED-1 nei *Punti Critici* #3-#4)
 - **AI:** Google Gemini API (@google/genai)
 - **Networking (Backend Go):** 
   - *Discovery:* Scansione attiva subnet /24 (HTTP, WebSocket).
@@ -72,9 +72,10 @@ Queste funzionalità definiscono l'identità di StreamAI e devono essere preserv
 ### 1. Picture-in-Picture (PiP)
 - **Requisito:** L'utente deve poter guardare uno stream mentre naviga.
 - **Implementazione:**
-  - *Desktop:* API `document.pictureInPictureElement` (resa possibile dal rendering in `<canvas>`).
+  - *Desktop:* **seconda finestra Wails** gestita da `internal/services/pip` (always-on-top, frameless), che carica lo stesso bundle con `?pip=1` e scarica i frame da `/player/frame`. **Non** usa `document.pictureInPictureElement`: il video è un `<canvas>`, non un `<video>`, e Document PiP non esiste su WebKitGTK/WKWebView. Design completo in `docs/pip-design.md`.
   - *Android:* Supporto nativo tramite `capacitor-video-player`.
-- **Shortcut:** Tasto `P`.
+  - *Controlli nella finestra PiP:* timeline (solo per contenuti cercabili: non live, con durata nota e server che supporta il range), salto ±10s, play/pausa, mute con volume, tutto schermo, chiusura. Tracce, sottotitoli, EPG e cast restano nella finestra principale. Cambiando canale nella finestra principale il PiP viene aggiornato (`pip.Service.Update`: titolo e tipo di canale, **senza** rubare il focus) — altrimenti mostrerebbe il canale di apertura e disegnerebbe la timeline per il tipo sbagliato.
+- **Shortcut:** Tasto `P` per aprire/chiudere il PiP (Play/Pausa resta su `Spazio` e `Invio`).
 
 ### 2. Casting & Device Discovery
 - **Requisito:** Trasmissione fluida verso Chromecast e dispositivi DLNA/UPnP.
@@ -83,7 +84,8 @@ Queste funzionalità definiscono l'identità di StreamAI e devono essere preserv
 
 ### 3. Scorciatoie da Tastiera & Remote Control
 - **Requisito:** L'app deve essere controllabile al 100% senza mouse/touch.
-- **Mappatura Standard:** `Spazio`, `Invio`, `P` (Play/Pausa), Frecce (Seek/Volume), `M` (Mute), `F` (Fullscreen), `C` (Cast), `L` (Lista), `S` (Sottotitoli), `T` (Timer), `G` (Mini-EPG), `Esc` (Indietro).
+- **Mappatura Standard:** `Spazio`, `Invio` (Play/Pausa), `P` (Picture-in-Picture), Frecce (Seek/Volume), `M` (Mute), `F` (Fullscreen), `C` (Cast), `L` (Lista), `S` (Sottotitoli), `T` (Timer), `G` (Mini-EPG), `Esc` (Indietro).
+  - Nella finestra PiP valgono `Spazio`/`Invio` (Play/Pausa), `M` (mute), `F` (tutto schermo), `←`/`→` (salto ±10s, solo contenuti cercabili) ed `Esc`, che esce dal tutto schermo se attivo e altrimenti chiude il PiP. Gli altri controlli restano nella finestra principale.
 
 ### 4. Interfaccia Unificata (Uniform UI)
 - **Filosofia:** "Write Once, Run Everywhere". L'aspetto visivo deve essere coerente su Linux, Windows, macOS e Android.
@@ -120,11 +122,12 @@ Queste funzionalità definiscono l'identità di StreamAI e devono essere preserv
 
 ## ⚠️ Punti Critici e "Gotchas"
 1.  **Sincronizzazione Backend-Frontend (Binding):** Dopo aver aggiunto o modificato un servizio Go in `internal/services/` e averlo registrato in `cmd/streamai/main.go`, è **obbligatorio** rigenerare i binding TypeScript. In caso contrario, il frontend non vedrà il nuovo servizio, causando errori `TypeError: undefined is not an object` a runtime.
-    - **Comando da eseguire:** `wails generate bindings` o `npm run wails:bindings`
+    - **Comando da eseguire:** `npm run wails:bindings` (cioè `wails3 generate bindings -ts -d frontend/bindings ./...`)
     - **Sintomo:** L'app compila ma una chiamata a un servizio (es. `host.nuovoservizio.Metodo()`) fallisce con un `TypeError`.
+    - ⚠️ **Non usare la forma nuda** `wails3 generate bindings`: senza `-ts -d frontend/bindings ./...` il comportamento dipende dal binario trovato nel PATH e su alcune build **svuota** la cartella (verificato: 35 file → 1). Con i binding svuotati la build Vite fallisce oppure — peggio — produce un bundle in cui `host.<servizio>` è `undefined`. Anche `scripts/build-wails.sh` usa ora la forma esplicita.
 2.  **Componente `PerformanceProfiler.tsx`:** Questo componente di sviluppo ha un problema di dipendenza con `react-window` che può bloccare la build di Vite. Se la build fallisce con un errore relativo a `FixedSizeList`, disabilitare temporaneamente il componente in `App.tsx` e `PerformanceProfiler.tsx` per sbloccare lo sviluppo.
 3.  **Player Android:** Su Android, usare sempre il player nativo (`capacitor-video-player` basato su **AndroidX Media3 1.10.1**) tramite `nativeVideoPlayer.ts` quando `platformService.isNative` è true.
-4.  **Plugin Android vendorato (MED-1):** Il plugin `capacitor-video-player` è vendorato in `android/plugins/capacitor-video-player/`. Le patch e gli aggiornamenti di Media3 vanno fatti lì.
+4.  **Plugin Android vendorato (MED-1):** Il plugin `capacitor-video-player` è vendorato in `android/plugins/capacitor-video-player/`. Le patch e gli aggiornamenti di Media3 vanno fatti **lì**, non sostituendo il plugin con quello a monte. Il pin `media3Version` in `android/variables.gradle` (1.10.1 dal 2026-05-15) si aggiorna **solo a patch della stessa minor**: una minor nuova cambia API sotto il plugin vendorato, e va prima ri-testata lì.
 5.  **Mixed Content:** L'app deve poter riprodurre stream HTTP.
     - Su **Wails**, questo è gestito dal **proxy HTTP locale in Go** (`internal/services/proxy/`) che agisce come middleware dell'asset server. Il frontend usa l'helper `proxyFetch` per tutte le richieste a risorse non sicure.
     - Su **Android**, è gestito da `usesCleartextTraffic="true"` in `AndroidManifest.xml`.
@@ -134,6 +137,19 @@ Queste funzionalità definiscono l'identità di StreamAI e devono essere preserv
 9.  **Versione applicazione:** La fonte di verità è `/.version`. Usa `npm run version:sync` per propagarla.
 10. **Rilevamento runtime Wails:** La presenza di `window._wails.environment` è il marcatore affidabile che l'app sta girando in un contesto Wails nativo, non la semplice esistenza di `window._wails`.
 11. **Proxy IPTV Middleware:** Il proxy Go non è un server TCP separato, ma un middleware dell'AssetServer di Wails. Il frontend costruisce URL relativi (`/iptv-proxy?u=...`) che vengono intercettati dal backend. Questo è fondamentale per evitare problemi di CORS e mixed-content nei webview.
+12. **Finestre frameless su Linux:** `WebviewWindowOptions.Frameless` **non basta** su Wayland. Wails lo implementa con `gtk_window_set_decorated(FALSE)`: GTK3 ubbidisce, ma il compositor — non trovando una superficie di decorazione lato client — disegna le proprie, quindi la finestra resta decorata. Per una finestra davvero pulita serve il workaround in `internal/pkg/gtkframe` (titlebar vuota lato client), chiamato dopo la creazione: è idempotente e no-op fuori da GTK3. Verifica: `go test -tags 'gtk3 gtkframetest' ./internal/pkg/gtkframe/`. Dettagli in `docs/pip-design.md` §3-bis.
+    - **Trascinare:** solo le aree con `--wails-draggable: drag` (custom property: si eredita, quindi marcare la radice rende trascinabile tutto il riquadro; `no-drag` protegge pulsanti e maniglie).
+    - **Ridimensionare:** il runtime JS gestisce i bordi **solo su Windows** (`drag.js`: `!IsWindows()` esce subito). Su Linux le maniglie le disegna la vista e il resize parte da `pip.Service.StartResize` → `Window.HandleMessage("wails:resize:<edge>")`, che riusa le coordinate già catturate dal gestore nativo.
+    - **"Sempre sopra" non esiste su Wayland:** nessun protocollo consente a un client di chiedere di restare sopra le altre finestre, quindi `AlwaysOnTop` è un no-op lì (funziona su X11/Windows/macOS). Workaround: regola di finestra del compositor (`scripts/kwin-pip-above.sh`), oppure `GDK_BACKEND=x11`. Per questo il titolo **di sistema** del PiP è **costante** e senza nome del canale (`osTitle`): la regola cerca quella stringa esatta, e un titolo variabile la obbligherebbe a un confronto per sottostringa — cioè a indovinare un valore numerico di `kwinrulesrc` che, se sbagliato, rende la regola inerte **in silenzio**. Guard: `TestOSTitle_MatchesWindowRuleScript`. Dettagli in `docs/pip-design.md` §4-quater.
+13. **Contesto WebGL del canvas:** **non** chiamare `WEBGL_lose_context.loseContext()` nel cleanup di `useMpvCanvasRenderer`. Quel cleanup gira a ogni ri-esecuzione dell'effect (non solo allo smontaggio: `enabled` e `targetFPS` sono fra le dipendenze) e per specifica un canvas conserva il proprio contesto: dopo `loseContext()` il contesto resta morto e tutte le chiamate GL vengono ignorate in silenzio. È successo davvero: aprendo il PiP `enabled` andava a false, il contesto veniva perso, e alla chiusura del PiP il video non riprendeva più nella finestra principale. Le risorse GPU si liberano con i `delete*` espliciti (già presenti) e al massimo alla distruzione definitiva del canvas. Guard: `frontend/tests/hooks/useMpvCanvasRenderer.test.tsx`.
+14. **Transport di render del player:** il frame arriva al canvas via **render software** di libmpv (`MPV_RENDER_API_TYPE_SW`, RGBA) + middleware HTTP `/player/frame` — *non* via zero-copy/DMA-BUF. Il costo è ~4 ms per frame (3.3 ms @540p, 4.5 ms @1080p, sorgente 1080p) e dipende dalla conversione colori in **ingresso**, non dalla risoluzione di uscita: **ottimizzare i filtri di scaling non serve** (provato, esito nullo — `docs/stage-b-assessment.md` §4-bis). Il loop di rendering è **su richiesta**: `X-Frame-New: 0` significa "nessun frame nuovo, salta upload e trasferimento". La politica sta in `internal/services/player/gating.go` (`shouldReuseFrame`) ed è testata: **non** attivare il riuso fuori da quelle condizioni, altrimenti si serve un frame vecchio (video bloccato). E **non** togliere `MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME = 0` dal render SW: senza, la call blocca ~26 ms per frame in attesa del tempo di presentazione, parkando goroutine e connessioni HTTP e facendo credere al loop adattivo del frontend di essere sotto carico (31 ms → 4 ms misurati). Guard: `render_cost_test.go`.
+
+15. **Catalogo persistente su disco (avvio cache-first):** la pipeline Xtream costa 30-50 s (sei fetch in parallelo, ~10 MB il solo blocco VOD, su un pannello che sotto carico tronca le risposte lente). Il backend salva quindi l'ultimo catalogo **completo** in `os.UserCacheDir()/streamai/catalog/<hash(server|utente)>.json` (`internal/services/playlist/cache.go`) e il frontend lo carica **prima** della rete: l'app si apre con i contenuti già a schermo e l'aggiornamento arriva dopo, in background.
+    - **Chi decide quando aggiornare:** le impostazioni del profilo (`contentAutoRefreshEnabled` + `contentAutoRefreshIntervalMinutes`). Il timestamp della copia diventa `contentLastRefreshAt`, così l'effetto di auto-refresh la considera un aggiornamento appena fatto invece di ripartire subito. Con l'auto-refresh **disattivato** (default attuale) un avvio non aggiorna nulla: resta il refresh manuale dalla UI.
+    - **Non salvare cataloghi degradati:** se un blocco è fallito (`FailedBlocks` non vuoto) il file su disco non viene toccato — altrimenti al prossimo avvio si vedrebbe il catalogo mutilato e senza il segnale del fallimento.
+    - **`catalogCacheSchemaVersion` va incrementata** quando cambia la forma di `FullPlaylist`: un file vecchio si decodifica *senza errore* ma con campi a zero (canali senza nome), cioè un catalogo rotto che sembra valido.
+    - Il file elenca i contenuti dell'utente: directory 0700, file 0600, scrittura atomica (tmp + rename), e `LoadCachedCatalog` non fallisce mai per un file assente o corrotto (ritorna `null`: si va di rete).
+    - Guard: `go test ./internal/services/playlist/` (round-trip, catalogo degradato non salvato, schema diverso, file corrotto, isolamento per profilo).
 
 ## 🚀 Comandi Utili
 - `npm run dev`: Avvia l'ambiente di sviluppo Wails (Go + React con hot-reload).

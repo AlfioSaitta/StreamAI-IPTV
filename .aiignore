@@ -1,0 +1,86 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Track build artifacts of the vendored capacitor-video-player plugin so the
+# Vite/Electron web bundle can resolve its main/module entries on CI (the
+# global `dist` rule above would otherwise drop them, breaking `npm ci`).
+!android/plugins/capacitor-video-player/dist/
+!android/plugins/capacitor-video-player/dist/**
+.env
+.env.*
+!.env.example
+
+# Generated outputs / signing material
+android/app/build/
+android/app/src/main/assets/public/
+android/streamai-release.keystore
+android/**/*.keystore
+android/**/*.jks
+android/keystore.properties
+android/.jdk-mirror/
+*.apk
+*.aab
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Test runner
+coverage/
+.vitest-cache/
+
+# GPG signing material — keep only public key + fingerprint
+docs/keys/*.key
+docs/keys/*.key.asc
+docs/keys/*.key.asc.gpg
+docs/keys/*-revoke.asc
+docs/keys/*.secret.asc
+
+# Linux packaging output
+public-repo/
+build/icons/
+
+
+# electron-builder per-distro output (when directories.output is set locally)
+/release/
+# ---- Go / Wails v3 (migrazione, vedi docs/plan-go-wails-migration.md) ----
+# Binari prodotti da `task build` / `wails3 build`
+/build/bin/
+# Output Vite (compilato): la dir `frontend/dist/`  generata da
+# `vite build`. Manteniamo tracciato solo il placeholder `.gitkeep`
+# affinche' `//go:embed all:frontend/dist` (assets.go) abbia sempre
+# almeno una entry quando il binario Go viene compilato standalone.
+/frontend/dist/*
+!/frontend/dist/.gitkeep
+# Binding generati da `wails3 generate bindings`
+/frontend/bindings/
+# Debug build
+*.test
+*-debug
+
+# Wails build binary at root (task build:dev)
+/streamai
+/spike-mpv-render
+
+# SPIKE-1 smoke reports (generati da task spike:1:smoke)
+/dist/spike1/
+/.ai-skeleton.md
+/bash

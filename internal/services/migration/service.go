@@ -2,8 +2,8 @@ package migration
 
 import (
 	"context"
-	"github.com/rs/zerolog/log"
 	"github.com/AlfioSaitta/StreamAI-IPTV/internal/pkg/migrate"
+	"github.com/rs/zerolog/log"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 

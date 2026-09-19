@@ -159,4 +159,3 @@ func TestAcquire_StaleSocketReused(t *testing.T) {
 	}
 	defer func() { _ = lock.Release() }()
 }
-

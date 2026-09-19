@@ -80,4 +80,3 @@ func KeyBindings() map[string]func(window application.Window) {
 		"f12":               open,
 	}
 }
-

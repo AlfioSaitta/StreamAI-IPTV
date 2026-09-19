@@ -30,4 +30,3 @@ var AppIcon256 []byte
 //
 //go:embed icon-512.png
 var AppIcon512 []byte
-

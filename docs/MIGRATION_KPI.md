@@ -1,14 +1,17 @@
 # 📊 Migration KPI Baseline — Electron 1.x → Wails v3 2.0.0
 
-> Baseline KPI catturati **prima** dell'inizio della migrazione, da
-> confrontare con i numeri post-migrazione per soddisfare i criteri di
-> accettazione §11 di `docs/plan-go-wails-migration.md`.
+> **Status (2026-09-18): la baseline v1 non è più ottenibile.** Electron è
+> stato rimosso dal progetto (Fase 7.3), quindi le colonne "Valore" riferite
+> alla build Electron 1.x non sono più raccoglibili e il confronto
+> before/after previsto in origine non è riproducibile.
 >
-> **Status:** ☐ baseline da raccogliere (Fase 0)
+> Questo file va quindi usato come **modulo di accettazione v2.0.0**: le
+> misure si raccolgono sulla build Wails corrente e si confrontano con i
+> criteri di §11 di [`plan-go-wails-migration.md`](plan-go-wails-migration.md),
+> non con un baseline Electron.
 >
-> Compilare un blocco per OS. Le misure vanno raccolte con build Electron
-> `1.x` corrente (`npm run dist:linux` per Linux, build manuale per
-> Windows/macOS via `electron-builder`).
+> Compilare un blocco per OS sulle build `streamai-iptv_${version}_${distro}_x86_64.rpm`
+> (`npm run dist:linux`) e sugli installer Windows/macOS.
 
 ---
 
@@ -100,8 +103,10 @@
 - **Cold-start** = chiusura completa app + svuotamento page cache (`echo 3 > /proc/sys/vm/drop_caches` su Linux) + lancio + cronometro fino a primo frame UI renderizzato.
 - **TTFF** = dal click "Play canale" a primo frame video visibile (non al primo network byte).
 - **RAM** = working-set / RSS, non virtual size.
-- **Dropped frames** = catturato via `chrome://media-internals` su Electron (`videoFrameMetadata.droppedVideoFrames` su `HTMLVideoElement`); su Wails sarà via `mpv` property `frame-drop-count`.
-- **AV-sync drift** = differenza tra timestamp audio e video clock; su Wails letto direttamente da `mpv` property `avsync`.
+- **Dropped frames** = da `mpv` property `frame-drop-count`, esposta nel pannello Diagnostica Stream (`components/player/StreamDiagnostics.tsx`). Nota: il player web (`HTMLVideoElement`, `chrome://media-internals`) non esiste più — il riferimento a Electron è stato rimosso.
+- **AV-sync drift** = differenza tra timestamp audio e video clock; letto direttamente da `mpv` property `avsync`.
+- **Costo per frame del render** = `go test -tags 'gtk3 mpv' -run TestRender ./internal/services/player/` (headless, nessun display richiesto; numeri di riferimento in [`stage-b-assessment.md`](stage-b-assessment.md) §4-bis). In sessione live: log `player: render pipeline stats` ogni 30 s.
+- **Pacing del render** = non deve superare l'intervallo di frame della sorgente: se il costo per frame si avvicina a 33 ms a 30 fps, il blocco sul tempo di presentazione è tornato (guard: `TestRenderDoesNotBlockForTargetTime`).
 - **Sessioni "live 1h"** = stream IPTV reale (preferito) o registrazione locale loopata con `ffmpeg -stream_loop -1`.
 
 Tutti i numeri "TBD" vanno compilati nella Fase 0 prima di iniziare il porting (vedi roadmap §6 Fase 0).

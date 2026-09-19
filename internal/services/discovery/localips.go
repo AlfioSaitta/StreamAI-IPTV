@@ -1,8 +1,10 @@
 package discovery
+
 import (
 	"net"
 	"strings"
 )
+
 // GetLocalIPs ritorna le interface di rete locali (escludendo loopback e
 // interface DOWN). Mantiene la shape attesa da services/deviceDiscovery.ts.
 func (s *Service) GetLocalIPs() ([]NetInterface, error) {
@@ -52,8 +54,15 @@ func (s *Service) GetLocalIPs() ([]NetInterface, error) {
 	}
 	return out, nil
 }
+
 // localSubnetBases ritorna le base /24 (es. "192.168.1") per ogni interface
 // up, non loopback, con IPv4 valida — input per scanSubnet.
+//
+// La /24 è una scelta deliberata, non una netmask ignorata per disattenzione:
+// sondare l'intero spazio di una /16 (65534 host) è impraticabile, e la /24 che
+// contiene l'indirizzo locale è l'approssimazione bounded che copre il caso
+// reale (LAN domestiche/ufficio sono /24). Su reti più ampie la copertura
+// completa la forniscono SSDP e mDNS, che non dipendono dal prefisso di rete.
 func localSubnetBases() ([]string, error) {
 	ifaces, err := net.Interfaces()
 	if err != nil {

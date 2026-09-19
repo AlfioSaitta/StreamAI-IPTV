@@ -12,4 +12,3 @@ import "os"
 
 func tryFlock(_ *os.File) error { return nil }
 func unflock(_ *os.File) error  { return nil }
-

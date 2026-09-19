@@ -125,4 +125,3 @@ func (i *Inhibitor) Reason() string {
 	defer i.mu.Unlock()
 	return i.reason
 }
-
