@@ -71,14 +71,19 @@ const (
 //	Album    → xesam:album (string)
 //	ArtURL   → mpris:artUrl (string, "file://" o "https://")
 //	Duration → mpris:length (int64, microsecondi; 0 = live/unknown)
-//	TrackID  → mpris:trackid (object path; auto-generato se vuoto)
+//	TrackID  → mpris:trackid (object path)
 type Metadata struct {
 	Title    string
 	Artist   string
 	Album    string
 	ArtURL   string
 	Duration int64 // microseconds; 0 = live/unknown
-	TrackID  string
+
+	// TrackID identifica il brano/canale corrente. Non deve essere un object
+	// path valido in partenza: il valore viene convertito in modo
+	// deterministico (vedi trackPath in mediakeys_linux.go), così il chiamante
+	// può passare direttamente l'id del canale. Vuoto → generato.
+	TrackID string
 }
 
 // Capabilities è il set di azioni che il backend può gestire.
@@ -296,5 +301,3 @@ func (c *Controller) dispatchCallback(fn func()) {
 	// DBus: una callback lenta non deve far accumulare i metodi.
 	go fn()
 }
-
-

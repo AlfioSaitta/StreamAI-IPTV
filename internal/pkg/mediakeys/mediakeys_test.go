@@ -100,4 +100,3 @@ func TestDefaultCapabilities(t *testing.T) {
 		t.Fatalf("defaults should NOT enable next/previous/seek: %+v", caps)
 	}
 }
-

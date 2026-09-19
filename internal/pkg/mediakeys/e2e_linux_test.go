@@ -88,4 +88,3 @@ func TestE2E_MethodCallDispatchesCallback(t *testing.T) {
 		t.Fatal("timeout waiting for OnPlay")
 	}
 }
-

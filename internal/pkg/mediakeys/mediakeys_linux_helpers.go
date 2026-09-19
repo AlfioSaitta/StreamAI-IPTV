@@ -8,4 +8,3 @@ import "os"
 // di importare "os" nel file principale (i tag build potrebbero
 // includere il principale anche su OS non-unix).
 func procPID() int { return os.Getpid() }
-

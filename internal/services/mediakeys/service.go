@@ -185,4 +185,3 @@ func (s *Service) SetCapabilities(in CapabilitiesInput) error {
 
 // Started ritorna true se MPRIS è attivo (utile per debug/UI status).
 func (s *Service) Started() bool { return s.ctrl.Started() }
-

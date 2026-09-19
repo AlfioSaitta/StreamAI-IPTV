@@ -21,10 +21,9 @@ package mediakeys
 // ctrlState vuoto per piattaforme senza backend nativo.
 type ctrlState struct{}
 
-func platformStart(_ *Controller) error           { return nil }
-func platformStop(_ *Controller) error            { return nil }
-func platformSyncStatus(_ *Controller) error      { return nil }
-func platformSyncMetadata(_ *Controller) error    { return nil }
+func platformStart(_ *Controller) error            { return nil }
+func platformStop(_ *Controller) error             { return nil }
+func platformSyncStatus(_ *Controller) error       { return nil }
+func platformSyncMetadata(_ *Controller) error     { return nil }
 func platformSyncCapabilities(_ *Controller) error { return nil }
-func platformSyncVolume(_ *Controller) error      { return nil }
-
+func platformSyncVolume(_ *Controller) error       { return nil }

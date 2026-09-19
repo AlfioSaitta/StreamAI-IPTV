@@ -22,4 +22,3 @@ func TestSanitizeIdentity(t *testing.T) {
 		}
 	}
 }
-

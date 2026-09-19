@@ -305,12 +305,7 @@ func rwProp(v any, cb func(*prop.Change) *dbus.Error) *prop.Prop {
 
 func toDBusMetadata(m Metadata, counter *uint64) map[string]dbus.Variant {
 	out := map[string]dbus.Variant{}
-	id := m.TrackID
-	if id == "" {
-		next := atomic.AddUint64(counter, 1)
-		id = fmt.Sprintf("/io/streamai/track/%d", next)
-	}
-	out["mpris:trackid"] = dbus.MakeVariant(dbus.ObjectPath(id))
+	out["mpris:trackid"] = dbus.MakeVariant(trackPath(m.TrackID, counter))
 	if m.Title != "" {
 		out["xesam:title"] = dbus.MakeVariant(m.Title)
 	}
@@ -325,6 +320,54 @@ func toDBusMetadata(m Metadata, counter *uint64) map[string]dbus.Variant {
 	}
 	if m.Duration > 0 {
 		out["mpris:length"] = dbus.MakeVariant(m.Duration)
+	}
+	return out
+}
+
+// trackPath costruisce mpris:trackid, che la specifica MPRIS vuole di tipo
+// object path D-Bus.
+//
+// Serve una conversione perché il chiamante passa l'identificativo del canale
+// (per Xtream un numero: "12345"), che object path non è. E non è una formalità:
+// un valore non valido non viene ignorato, fa **panicare** `conn.Emit` mentre
+// codifica PropertiesChanged (`dbus: wire format error: invalid object path`),
+// cioè dentro il percorso di riproduzione. Osservato in produzione, un errore
+// per ogni aggiornamento di metadati.
+//
+// La conversione è **deterministica**: lo stesso canale produce sempre lo stesso
+// trackid, così i widget del desktop non scambiano ogni aggiornamento di
+// metadati per un brano nuovo (gli aggiornamenti arrivano a raffica).
+func trackPath(id string, counter *uint64) dbus.ObjectPath {
+	if p := dbus.ObjectPath(id); p.IsValid() {
+		return p
+	}
+	seg := sanitizePathElement(id)
+	if seg == "" {
+		seg = fmt.Sprintf("auto%d", atomic.AddUint64(counter, 1))
+	}
+	return dbus.ObjectPath("/io/streamai/track/" + seg)
+}
+
+// sanitizePathElement riduce una stringa arbitraria a un elemento di object path
+// D-Bus (caratteri [A-Za-z0-9_]) e ritorna "" se non resta nulla di utilizzabile.
+func sanitizePathElement(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	out := strings.Trim(b.String(), "_")
+	if out == "" {
+		return ""
+	}
+	// Un elemento non può iniziare con una cifra: "12345" da solo sarebbe un
+	// object path strutturalmente valido per godbus ma non conforme alla spec.
+	if out[0] >= '0' && out[0] <= '9' {
+		out = "ch" + out
 	}
 	return out
 }
@@ -357,20 +400,46 @@ func buildIntrospection(root *mprisRoot, player *mprisPlayer, props *prop.Proper
 	}
 }
 
+// setLocalProp aggiorna una proprietà **dal lato server** ed emette
+// PropertiesChanged secondo il campo Emit della proprietà.
+//
+// PERCHÉ NON `Properties.Set`. Quello implementa
+// org.freedesktop.DBus.Properties.Set, cioè la richiesta di un **client**, e per
+// una proprietà non scrivibile restituisce ErrReadOnly (prop.go:
+// `if !prop.Writable { return ErrReadOnly }`). PlaybackStatus, Metadata e tutti
+// i Can* sono read-only per specifica MPRIS2: dichiararli scrivibili solo per
+// poterli aggiornare sarebbe una bugia detta ai client, che vedrebbero
+// nell'introspezione una scrittura non permessa. `SetMust` è invece l'API per il
+// lato server: salta il controllo di scrivibilità, copia il valore nello store
+// interno (un puntatore creato da prop.Export) ed emette il segnale.
+//
+// `SetMust` **panica** se il tipo del valore non è quello dichiarato in
+// buildPropsSpec (dbus.Store non riesce a copiarlo). Questa funzione viene
+// chiamata nel percorso di riproduzione — un panic qui chiuderebbe l'app per un
+// titolo di traccia — quindi il panic viene convertito in errore.
+func setLocalProp(props *prop.Properties, name string, v any) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("sync %s: %v", name, r)
+		}
+	}()
+	props.SetMust(mprisPlayerIface, name, v)
+	return nil
+}
+
 func platformSyncStatus(c *Controller) error {
 	if c.state.props == nil {
 		return nil
 	}
-	return c.state.props.Set(mprisPlayerIface, "PlaybackStatus",
-		dbus.MakeVariant(string(c.status)))
+	return setLocalProp(c.state.props, "PlaybackStatus", string(c.status))
 }
 
 func platformSyncMetadata(c *Controller) error {
 	if c.state.props == nil {
 		return nil
 	}
-	return c.state.props.Set(mprisPlayerIface, "Metadata",
-		dbus.MakeVariant(toDBusMetadata(c.meta, &c.state.trackIDCounter)))
+	return setLocalProp(c.state.props, "Metadata",
+		toDBusMetadata(c.meta, &c.state.trackIDCounter))
 }
 
 func platformSyncCapabilities(c *Controller) error {
@@ -390,17 +459,20 @@ func platformSyncCapabilities(c *Controller) error {
 		{"CanControl", caps.CanControl},
 	}
 	for _, u := range updates {
-		if err := c.state.props.Set(mprisPlayerIface, u.name, dbus.MakeVariant(u.val)); err != nil {
-			return fmt.Errorf("set %s: %w", u.name, err)
+		if err := setLocalProp(c.state.props, u.name, u.val); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
+// Volume è l'unica proprietà scrivibile anche dai client, e il suo Set passa
+// dalla callback volumeWrite (che richiama SetVolume). Qui siamo già dentro
+// SetVolume, quindi si aggiorna per la via locale: passare da `Set`
+// rientrerebbe nel controller senza motivo.
 func platformSyncVolume(c *Controller) error {
 	if c.state.props == nil {
 		return nil
 	}
-	return c.state.props.Set(mprisPlayerIface, "Volume", dbus.MakeVariant(c.volume))
+	return setLocalProp(c.state.props, "Volume", c.volume)
 }
-
