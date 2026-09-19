@@ -35,18 +35,82 @@ const IMAGE_URL_CACHE_MAX = 500;
 const imageUrlCache = new Map<string, string>(); // url -> objectUrl
 let lastImageCleanupAt = 0;
 
-// Funzione per gestire LRU cache
+/**
+ * Object URL evitti in attesa di revoca: `objectUrl -> timeout id`.
+ *
+ * La revoca e' DIFERITA di proposito. Revocarla subito dopo l'eviction rompeva
+ * un `<img>` gia' montato che stava ancora mostrando quell'URL: scrollando un
+ * catalogo con piu' di IMAGE_URL_CACHE_MAX loghi distinti, immagini visibili a
+ * schermo sparivano o lampeggiavano. Se nel frattempo l'URL viene ri-richiesto,
+ * la revoca viene annullata.
+ */
+const pendingRevoke = new Map<string, number>();
+const URL_REVOKE_GRACE_MS = 60_000;
+
+const cancelPendingRevoke = (objectUrl: string): void => {
+  const timeoutId = pendingRevoke.get(objectUrl);
+  if (timeoutId !== undefined) {
+    window.clearTimeout(timeoutId);
+    pendingRevoke.delete(objectUrl);
+  }
+};
+
+const scheduleRevoke = (objectUrl: string): void => {
+  cancelPendingRevoke(objectUrl);
+  const timeoutId = window.setTimeout(() => {
+    pendingRevoke.delete(objectUrl);
+    URL.revokeObjectURL(objectUrl);
+  }, URL_REVOKE_GRACE_MS);
+  pendingRevoke.set(objectUrl, timeoutId);
+};
+
+/**
+ * Cache LRU degli object URL delle immagini.
+ *
+ * `Map` conserva l'ordine di inserimento: per avere un LRU reale l'ordine va
+ * aggiornato anche in LETTURA (`touchUrlCache`), altrimenti si degrada a FIFO e
+ * i loghi piu' usati (hero, prime righe) vengono evitti per primi.
+ */
 const addToUrlCache = (url: string, objectUrl: string) => {
   if (imageUrlCache.size >= IMAGE_URL_CACHE_MAX) {
-    // Rimuovi il primo (più vecchio)
-    const firstKey = imageUrlCache.keys().next().value;
-    if (firstKey) {
-      const oldUrl = imageUrlCache.get(firstKey);
-      if (oldUrl) URL.revokeObjectURL(oldUrl);
-      imageUrlCache.delete(firstKey);
+    const oldestKey = imageUrlCache.keys().next().value;
+    if (oldestKey !== undefined) {
+      const oldestObjectUrl = imageUrlCache.get(oldestKey);
+      imageUrlCache.delete(oldestKey);
+      if (oldestObjectUrl) scheduleRevoke(oldestObjectUrl);
     }
   }
+  // L'URL potrebbe essere in attesa di revoca (ri-richiesto dopo l'eviction).
+  cancelPendingRevoke(objectUrl);
   imageUrlCache.set(url, objectUrl);
+};
+
+/** Segna `url` come usato di recente (LRU) e ritorna l'object URL. */
+const touchUrlCache = (url: string): string | undefined => {
+  const objectUrl = imageUrlCache.get(url);
+  if (objectUrl === undefined) return undefined;
+  imageUrlCache.delete(url);
+  imageUrlCache.set(url, objectUrl);
+  return objectUrl;
+};
+
+/**
+ * Svuota la cache in memoria revocando subito tutti gli object URL.
+ *
+ * Qui la revoca immediata e' corretta: e' una richiesta esplicita dell'utente
+ * ("cancella cache"), quindi non c'e' motivo di attendere la grace period.
+ * Le revoche differite ancora in coda vengono annullate per non revocare due
+ * volte lo stesso URL.
+ */
+const purgeUrlCache = (): void => {
+  for (const timeoutId of pendingRevoke.values()) {
+    window.clearTimeout(timeoutId);
+  }
+  pendingRevoke.clear();
+  for (const objectUrl of imageUrlCache.values()) {
+    URL.revokeObjectURL(objectUrl);
+  }
+  imageUrlCache.clear();
 };
 
 const isImageCacheRecord = (value: unknown): value is ImageCacheRecord => {
@@ -299,10 +363,11 @@ export const CacheService = {
   },
 
   getImage: async (url: string): Promise<string | null> => {
-    // Prima controlla cache in memoria
-    if (imageUrlCache.has(url)) {
+    // Prima controlla cache in memoria (con refresh LRU: l'uso conta).
+    const cachedObjectUrl = touchUrlCache(url);
+    if (cachedObjectUrl !== undefined) {
       CacheService.stats.hits++;
-      return imageUrlCache.get(url)!;
+      return cachedObjectUrl;
     }
 
     // E.5 — try the Cache API first (the new write path).
@@ -444,10 +509,7 @@ export const CacheService = {
     }
 
     // Pulisci anche cache in memoria
-    for (const objectUrl of imageUrlCache.values()) {
-      URL.revokeObjectURL(objectUrl);
-    }
-    imageUrlCache.clear();
+    purgeUrlCache();
 
     CacheService.stats = { hits: 0, misses: 0, writes: 0 };
   },
@@ -462,10 +524,7 @@ export const CacheService = {
       await imageCacheApi.clear();
     }
 
-    for (const objectUrl of imageUrlCache.values()) {
-      URL.revokeObjectURL(objectUrl);
-    }
-    imageUrlCache.clear();
+    purgeUrlCache();
   },
 
   cleanupOldImages: async (options: { aggressive?: boolean } = {}) => {

@@ -1,9 +1,26 @@
 import { Channel, Category } from '../types.ts';
 
+/**
+ * Hash deterministico FNV-1a a 32 bit. Serve a derivare id di canale
+ * **stabili** invece che casuali (vedi `buildStableChannelId`).
+ */
+const stableHash = (input: string): string => {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+};
+
 export const parseM3U = (content: string): Category[] => {
   const lines = content.split('\n');
   const channels: Channel[] = [];
   let currentChannel: Partial<Channel> = {};
+  // Conta le occorrenze della stessa chiave: playlist reali contengono voci
+  // duplicate identiche, e senza questo contatore colliderebbero sullo stesso
+  // id (key React duplicate + lookup ambiguo).
+  const idOccurrences = new Map<string, number>();
 
   for (let line of lines) {
     line = line.trim();
@@ -21,7 +38,6 @@ export const parseM3U = (content: string): Category[] => {
       const tvgIdMatch = info.match(/tvg-id="([^"]*)"/);
 
       currentChannel = {
-        id: crypto.randomUUID(),
         name: displayName,
         logo: logoMatch ? logoMatch[1] : undefined,
         group: groupMatch ? groupMatch[1] : 'Uncategorized',
@@ -30,8 +46,19 @@ export const parseM3U = (content: string): Category[] => {
     } else if (!line.startsWith('#')) {
       // This is the URL line
       if (currentChannel.name) {
+        // L'id viene derivato qui (non in `#EXTINF`) perché serve anche l'URL.
+        // Deve essere STABILE tra un parse e l'altro: con un UUID casuale ogni
+        // reload/refresh della playlist cambiava tutti gli id, e preferiti,
+        // "continua a guardare" e reminder EPG (che referenziano i canali per
+        // id) restavano orfani — le sezioni si svuotavano senza alcun errore.
+        const baseKey = `${currentChannel.tvgId ?? ''}|${line}|${currentChannel.name}`;
+        const occurrence = idOccurrences.get(baseKey) ?? 0;
+        idOccurrences.set(baseKey, occurrence + 1);
+        const hash = stableHash(baseKey);
+
         channels.push({
           ...currentChannel,
+          id: occurrence === 0 ? `m3u-${hash}` : `m3u-${hash}-${occurrence}`,
           url: line,
         } as Channel);
         currentChannel = {};

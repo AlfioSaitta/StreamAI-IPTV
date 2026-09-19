@@ -29,6 +29,20 @@ const splitGenres = (raw: string | undefined): string[] => {
     .filter(g => g.length > 1);
 };
 
+/**
+ * Quanti caratteri di `description`/`plot` finiscono nell'indice di ricerca.
+ *
+ * Le trame dei film arrivano a 300-500 caratteri: normalizzarle tutte, per
+ * decine di migliaia di titoli, era il costo dominante dell'indicizzazione
+ * (`normalize('NFD')` + 3 regex su stringhe lunghe) e gonfiava `haystack` di
+ * centinaia di byte per canale. Cercare oltre i primi caratteri della trama non
+ * ha valore pratico: nessuno cerca un film da una frase a met\u00e0 sinossi.
+ */
+const DESCRIPTION_SEARCH_LIMIT = 256;
+
+const truncateForSearch = (value: string | undefined): string | undefined =>
+  value && value.length > DESCRIPTION_SEARCH_LIMIT ? value.slice(0, DESCRIPTION_SEARCH_LIMIT) : value;
+
 const searchNormalizationCache = new Map<string, string>();
 
 const normalizeSearchText = (value: string | undefined): string => {
@@ -50,22 +64,45 @@ const normalizeSearchText = (value: string | undefined): string => {
   return result;
 };
 
+/**
+ * Memo dell'indicizzazione per identit\u00e0 dell'oggetto canale.
+ *
+ * Lo stesso oggetto `Channel` viene indicizzato pi\u00f9 volte: `indexedAllChannels`
+ * (live+VOD+serie) e poi le liste per tab (`indexedLive/Vod/SeriesCategories` e
+ * `indexedBaseCategories`) ripassano sugli stessi oggetti. Senza memo ogni
+ * passata ricostruiva da zero gli `IndexedChannel` (6 normalizzazioni + 2 regex
+ * + haystack + split dei generi): su un catalogo da ~45k canali erano ~90k
+ * indicizzazioni complete all'avvio, cio\u00e8 secondi di main thread bloccato.
+ *
+ * `WeakMap` perch\u00e9 le chiavi sono oggetti del catalogo: sostituendo il catalogo
+ * (refresh) le vecchie voci diventano raccoglibili dal GC, senza dover
+ * invalidare nulla a mano.
+ */
+const indexedChannelCache = new WeakMap<Channel, IndexedChannel>();
+
 export const indexChannel = (channel: Channel): IndexedChannel => {
   // Se già indicizzato (es. dal worker) E ha il nuovo campo descriptionLower, ritorna 1:1
   if ('haystack' in channel && 'descriptionLower' in channel) {
     return channel as IndexedChannel;
   }
 
+  // Stesso oggetto già indicizzato in una passata precedente (es. da
+  // `indexedAllChannels`): riusiamo il risultato invece di rifare tutto.
+  const memo = indexedChannelCache.get(channel);
+  if (memo) return memo;
+
   const nameLower = normalizeSearchText(channel.name);
   const cleanNameLower = normalizeSearchText(channel.cleanName || channel.name);
   const groupLower = normalizeSearchText(channel.group);
   const genreLower = normalizeSearchText(channel.genre);
-  const descriptionLower = normalizeSearchText(channel.description);
+  // La trama va troncata PRIMA di normalizzare: e' il campo piu' lungo e la
+  // normalizzazione (NFD + regex) scala con la sua lunghezza.
+  const descriptionLower = normalizeSearchText(truncateForSearch(channel.description));
   const year = normalizeSearchText(channel.year);
   const isHD = HD_RE.test(channel.name || '') || HD_RE.test(channel.group || '');
   const genreTokens = splitGenres(channel.genre);
 
-  return {
+  const indexed: IndexedChannel = {
     ...channel,
     nameLower,
     cleanNameLower,
@@ -77,6 +114,9 @@ export const indexChannel = (channel: Channel): IndexedChannel => {
     isHD,
     genreTokens,
   };
+
+  indexedChannelCache.set(channel, indexed);
+  return indexed;
 };
 
 /**

@@ -241,25 +241,26 @@ const GuideView: React.FC<GuideViewProps> = ({
     };
   }, [menu]);
 
-  const handleProgrammeClick = (
-    channel: Channel,
-    programme: EpgProgramme,
-    e: React.MouseEvent,
-  ) => {
-    e.stopPropagation();
-    setMenu({
-      channel,
-      programme,
-      x: e.clientX,
-      y: e.clientY,
-    });
-  };
+  // Stable identity: without useCallback this changes on every scroll-driven
+  // render and defeats React.memo(GuideRow), re-evaluating has() for every row.
+  const handleProgrammeClick = useCallback(
+    (channel: Channel, programme: EpgProgramme, e: React.MouseEvent) => {
+      e.stopPropagation();
+      setMenu({
+        channel,
+        programme,
+        x: e.clientX,
+        y: e.clientY,
+      });
+    },
+    [],
+  );
 
-  const handleToggleReminder = (channel: Channel, programme: EpgProgramme) => {
+  const handleToggleReminder = useCallback((channel: Channel, programme: EpgProgramme) => {
     EpgReminderService.toggle({ id: channel.id, name: channel.name, tvgId: channel.tvgId }, programme);
     setReminderTick(t => t + 1);
     setMenu(null);
-  };
+  }, []);
 
   return (
     <div className="fixed inset-0 z-[90] bg-[#0a0a0a] flex flex-col text-gray-100">

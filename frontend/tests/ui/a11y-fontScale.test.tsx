@@ -40,6 +40,7 @@ describe('C.6 — fontScale preference', () => {
         profile={profile}
         onBack={() => {}}
         onProfileUpdate={() => {}}
+        allChannels={[]}
       />,
     );
     const select = screen.getByLabelText(/Dimensione testo/i) as HTMLSelectElement;
@@ -62,6 +63,7 @@ describe('C.6 — fontScale preference', () => {
         profile={profile}
         onBack={() => {}}
         onProfileUpdate={() => {}}
+        allChannels={[]}
       />,
     );
     const select = screen.getByLabelText(/Dimensione testo/i) as HTMLSelectElement;

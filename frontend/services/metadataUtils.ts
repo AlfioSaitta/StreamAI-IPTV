@@ -29,6 +29,22 @@ export const extractYear = (rawName: string): string | undefined => {
   return generic?.[1];
 };
 
+/**
+ * RegExp dei tag qualita', compilata UNA volta a livello di modulo.
+ *
+ * Era costruita dentro `cleanTitle` a ogni invocazione (`new RegExp(...)` con
+ * ~40 alternative). `cleanTitle` e' chiamato in modo massivo \u2014 `isTitleMatch`
+ * lo invoca 4 volte per confronto e il matching TMDB arriva a milioni di
+ * confronti \u2014 quindi la sola compilazione dominava il costo.
+ *
+ * Sicura da condividere nonostante il flag `g` perche' viene usata solo con
+ * `String.replace`, che azzera `lastIndex`.
+ */
+const QUALITY_TAGS_REGEX = new RegExp(
+  `(?:^|[\\s()[\\]{}._-])(?:${QUALITY_TAGS.join('|')})(?=$|[\\s()[\\]{}._-])`,
+  'gi',
+);
+
 const stripDiacritics = (value: string): string => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
 export const normalizeTitleForMatch = (value: string): string => stripDiacritics(value)
@@ -52,8 +68,7 @@ export const cleanTitle = (rawName: string): string => {
   name = name.replace(/\b(ep|episode|episodio)\s*\d{1,3}\b/gi, ' ');
   name = name.replace(/[._]+/g, ' ');
 
-  const qualityRegex = new RegExp(`(?:^|[\\s()[\\]{}._-])(?:${QUALITY_TAGS.join('|')})(?=$|[\\s()[\\]{}._-])`, 'gi');
-  name = name.replace(qualityRegex, ' ');
+  name = name.replace(QUALITY_TAGS_REGEX, ' ');
   name = name.replace(/\s*[([]?(?:19|20)\d{2}[)\]]?\s*$/g, ' ');
   name = name.replace(/\[[^]]*]/g, ' ');
   name = name.replace(/[{][^}]*}/g, ' ');

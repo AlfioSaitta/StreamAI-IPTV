@@ -1,10 +1,15 @@
-// Electron remote-control bridge for the player.
-// Listens to IPC commands forwarded by the main process (mDNS/SSDP companion app)
-// and exposes a way to broadcast playback status back to remote clients.
+// Bridge di controllo remoto per il player.
+// Riceve i comandi inoltrati dal backend (companion app via mDNS/SSDP) e
+// espone la trasmissione dello stato di riproduzione verso i client remoti.
 // Extracted from components/VideoPlayerNew.tsx during refactor B.1.
+//
+// NB: la versione precedente era scritta contro l'API di video.js
+// (`player.currentTime()`, `player.volume()`, `player.muted()`, ...). video.js
+// è stato rimosso dal progetto (Stage B), quindi il hook parla ora con un
+// adapter fornito dal player attivo — libmpv su desktop, player nativo su
+// Android — restando indipendente dall'engine.
 
-import { useEffect } from 'react';
-import type Player from 'video.js/dist/types/player';
+import { useEffect, useRef } from 'react';
 import { platformService } from '../services/platformService';
 import { host } from '../services/hostBridge';
 
@@ -13,79 +18,86 @@ export interface RemoteControlCommand {
   value?: number;
 }
 
-export interface UseRemoteControlParams {
-  playerRef: React.RefObject<Player | null>;
+/**
+ * Operazioni che un engine del player deve esporre per il controllo remoto.
+ * I getter servono ai comandi relativi (volumeUp/volumeDown/mute), che devono
+ * leggere lo stato corrente al momento del comando e non quello del render in
+ * cui il listener è stato registrato.
+ */
+export interface RemotePlayerAdapter {
+  play: () => void;
+  pause: () => void;
+  seek: (seconds: number) => void;
+  skip: (deltaSeconds: number) => void;
+  /** Imposta il volume in [0,1]; il player deriva da sé il mute quando è 0. */
   setVolume: (v: number) => void;
-  setIsMuted: (m: boolean) => void;
+  toggleMute: () => void;
+  getVolume: () => number;
+}
+
+export interface UseRemoteControlParams {
+  player: RemotePlayerAdapter;
   broadcastStatus: (force?: boolean) => void;
 }
 
-export function useRemoteControl({ playerRef, setVolume, setIsMuted, broadcastStatus }: UseRemoteControlParams) {
+const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));
+
+export function useRemoteControl({ player, broadcastStatus }: UseRemoteControlParams) {
+  // Latest-ref: il listener viene registrato una volta per sessione e legge
+  // sempre l'adapter e la callback correnti, senza ri-sottoscrivere gli eventi
+  // a ogni render del player.
+  const playerRef = useRef(player);
+  const broadcastRef = useRef(broadcastStatus);
+  useEffect(() => {
+    playerRef.current = player;
+    broadcastRef.current = broadcastStatus;
+  });
+
   useEffect(() => {
     if (!platformService.isDesktop) return;
     const api = host;
-    if (!api?.onRemoteControlCommand || !api.onRequestStatusBroadcast) return;
+    if (!api?.onRemoteControlCommand || !api?.onRequestStatusBroadcast) return;
 
     const unsubCommand = api.onRemoteControlCommand((raw: unknown) => {
       const command = (raw ?? {}) as RemoteControlCommand;
-      const player = playerRef.current;
-      if (!player || player.isDisposed()) return;
+      const p = playerRef.current;
 
       switch (command.action) {
         case 'play':
-          player.play();
+          p.play();
           break;
         case 'pause':
-          player.pause();
+          p.pause();
           break;
         case 'seek':
-          if (typeof command.value === 'number') player.currentTime(command.value);
+          if (typeof command.value === 'number') p.seek(command.value);
           break;
         case 'skip':
-          if (typeof command.value === 'number') player.currentTime((player.currentTime() || 0) + command.value);
+          if (typeof command.value === 'number') p.skip(command.value);
           break;
         case 'volume':
-          if (typeof command.value === 'number') {
-            const newVol = Math.max(0, Math.min(1, command.value));
-            player.volume(newVol);
-            setVolume(newVol);
-            if (newVol > 0) { player.muted(false); setIsMuted(false); }
-            else { player.muted(true); setIsMuted(true); }
-          }
+          // Non tocchiamo il mute qui: il player lo deriva già dal volume
+          // (0 ⇒ muto), e un secondo set esplicito nella stessa sequenza
+          // sincrona lavorerebbe su uno stato non ancora aggiornato.
+          if (typeof command.value === 'number') p.setVolume(clamp01(command.value));
           break;
-        case 'volumeUp': {
-          const upVol = Math.min(1, (player.volume() || 0) + 0.1);
-          player.volume(upVol);
-          setVolume(upVol);
-          if (upVol > 0) { player.muted(false); setIsMuted(false); }
+        case 'volumeUp':
+          p.setVolume(clamp01(p.getVolume() + 0.1));
           break;
-        }
-        case 'volumeDown': {
-          const downVol = Math.max(0, (player.volume() || 0) - 0.1);
-          player.volume(downVol);
-          setVolume(downVol);
-          if (downVol === 0) { player.muted(true); setIsMuted(true); }
+        case 'volumeDown':
+          p.setVolume(clamp01(p.getVolume() - 0.1));
           break;
-        }
-        case 'mute': {
-          const newMuted = !player.muted();
-          player.muted(newMuted);
-          setIsMuted(newMuted);
-          if (!newMuted && player.volume() === 0) {
-            player.volume(0.5);
-            setVolume(0.5);
-          }
+        case 'mute':
+          p.toggleMute();
           break;
-        }
       }
     });
 
-    const unsubRequest = api.onRequestStatusBroadcast(() => broadcastStatus());
+    const unsubRequest = api.onRequestStatusBroadcast(() => broadcastRef.current());
 
     return () => {
       unsubCommand();
       unsubRequest();
     };
-  }, [playerRef, setVolume, setIsMuted, broadcastStatus]);
+  }, []);
 }
-

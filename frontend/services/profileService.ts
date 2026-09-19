@@ -4,6 +4,108 @@ import { pickDefaultAvatarFor } from './avatars.ts';
 
 const STORAGE_KEY = 'streamai_profiles';
 
+/**
+ * Intervallo di coalescing delle scritture su localStorage.
+ *
+ * `updateProgress` e' chiamato a ogni aggiornamento di posizione del player
+ * (~1 Hz) e ogni scrittura costa un `JSON.parse` + un `JSON.stringify` + un
+ * `localStorage.setItem` **sincrono** dell'intero blob profili sul main thread.
+ * Con una history di 100 elementi sono decine di KB serialize/deserializzate al
+ * secondo durante la riproduzione, con jank su seek e OSD.
+ */
+const WRITE_COALESCE_MS = 5_000;
+
+/**
+ * Cache in memoria dei profili. `null` = non ancora caricata.
+ *
+ * Serve a evitare che ogni lettura ripaghi il `JSON.parse` + `migrateProfile`
+ * dell'intero blob.
+ */
+let profilesCache: Profile[] | null = null;
+/** Handle del flush differito, se armato. */
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+/** True se la cache contiene modifiche non ancora persistite. */
+let pendingWrite = false;
+
+/** Copia superficiale profonda-abbastanza: i mutatori sostituiscono i campi. */
+const cloneProfile = (profile: Profile): Profile => ({
+  ...profile,
+  history: [...profile.history],
+  watchlist: [...profile.watchlist],
+  // `Profile.preferences` è OPZIONALE: `{ ...profile.preferences }` da solo
+  // produrrebbe proprietà opzionali (`language?: string | undefined`), non
+  // assegnabili a `ProfilePreferences` che le vuole obbligatorie. I default
+  // sono già applicati in `loadProfiles`; qui servono anche a soddisfare il tipo.
+  preferences: { ...DEFAULT_PREFERENCES, ...profile.preferences },
+});
+
+/** Carica i profili (una volta) da localStorage, applicando le migrazioni. */
+const loadProfiles = (): Profile[] => {
+  if (profilesCache) return profilesCache;
+
+  let loaded: Profile[] = [];
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    const parsed = stored ? JSON.parse(stored) : [];
+    if (Array.isArray(parsed)) {
+      loaded = parsed.map((p: Profile) =>
+        migrateProfile({
+          ...p,
+          history: p.history || [],
+          watchlist: p.watchlist || [],
+          preferences: {
+            ...DEFAULT_PREFERENCES,
+            ...(p.preferences || {}),
+          },
+        }),
+      );
+    }
+  } catch (err) {
+    console.error('[ProfileService] failed to read profiles, starting empty:', err);
+    loaded = [];
+  }
+
+  profilesCache = loaded;
+  return loaded;
+};
+
+/** Scrive subito la cache su localStorage (se ci sono modifiche pendenti). */
+const persistNow = (): void => {
+  if (flushTimer !== null) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+  if (!pendingWrite || !profilesCache) return;
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(profilesCache));
+    pendingWrite = false;
+  } catch (err) {
+    // Il flush differito non deve perdere i dati silenziosamente: la cache
+    // resta "sporca" e il prossimo flush ritenta.
+    console.error('[ProfileService] failed to persist profiles:', err);
+  }
+};
+
+/** Pianifica un flush differito, se non ce n'e' gia' uno armato. */
+const scheduleFlush = (): void => {
+  pendingWrite = true;
+  if (flushTimer !== null) return;
+  flushTimer = setTimeout(() => {
+    flushTimer = null;
+    persistNow();
+  }, WRITE_COALESCE_MS);
+};
+
+// Rete di sicurezza per il coalescing: se la finestra viene nascosta o chiusa
+// entro la finestra di 5s (chiusura app, cambio scheda, sospensione), gli
+// ultimi avanzamenti verrebbero persi. Persistiamo subito in quel caso.
+if (typeof window !== 'undefined') {
+  window.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') persistNow();
+  });
+  window.addEventListener('pagehide', () => persistNow());
+}
+
 export const DEFAULT_PREFERENCES: ProfilePreferences = {
   language: 'it',
   subtitleLanguage: 'it',
@@ -71,30 +173,27 @@ function migrateProfile(p: Profile): Profile {
 }
 
 export const ProfileService = {
-  getAll: (): Profile[] => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      const parsed = stored ? JSON.parse(stored) : [];
-      return Array.isArray(parsed)
-        ? parsed.map((p: Profile) =>
-            migrateProfile({
-              ...p,
-              history: p.history || [],
-              watchlist: p.watchlist || [],
-              preferences: {
-                ...DEFAULT_PREFERENCES,
-                ...(p.preferences || {}),
-              },
-            }),
-          )
-        : [];
-    } catch (e) {
-      return [];
-    }
-  },
+  /**
+   * Ritorna i profili.
+   *
+   * Le letture non toccano localStorage (la cache in memoria e' popolata una
+   * volta) e ritornano copie, cosi' una mutazione da parte del chiamante non
+   * corrompe la cache: chi modifica deve poi chiamare `saveAll` (e' il
+   * contratto gia' in uso in tutti i mutatori).
+   */
+  getAll: (): Profile[] => loadProfiles().map(cloneProfile),
 
+  /**
+   * Sostituisce l'intero set di profili e persiste SUBITO.
+   *
+   * La scrittura immediata e' voluta: e' un'operazione esplicita
+   * (creazione/cancellazione/cambio credenziali), dove attendere il flush
+   * differito rischierebbe di perdere la modifica in caso di chiusura.
+   */
   saveAll: (profiles: Profile[]) => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(profiles));
+    profilesCache = profiles;
+    pendingWrite = true;
+    persistNow();
   },
 
   create: (
@@ -359,21 +458,23 @@ export const ProfileService = {
   
   // Specific method to update progress without re-ordering the whole list constantly
   updateProgress: (profileId: string, channelId: string, progress: number, duration: number) => {
-      const profiles = ProfileService.getAll();
+      // Lavora direttamente sulla cache (non su una copia) e pianifica un flush
+      // differito: questo metodo e' chiamato a ogni tick di posizione del player
+      // (~1 Hz), quindi una scrittura sincrona per tick era il caso peggiore.
+      const profiles = loadProfiles();
       const pIndex = profiles.findIndex(p => p.id === profileId);
-      if (pIndex !== -1) {
-          const history = profiles[pIndex].history;
-          const hIndex = history.findIndex(h => h.channelId === channelId);
-          
-          if (hIndex !== -1) {
-              history[hIndex].progress = progress;
-              history[hIndex].duration = duration;
-              history[hIndex].timestamp = Date.now(); // Update last watched time
-              ProfileService.saveAll(profiles);
-              return profiles[pIndex];
-          }
-      }
-      return null;
+      if (pIndex === -1) return null;
+
+      const history = profiles[pIndex].history;
+      const hIndex = history.findIndex(h => h.channelId === channelId);
+      if (hIndex === -1) return null;
+
+      history[hIndex].progress = progress;
+      history[hIndex].duration = duration;
+      history[hIndex].timestamp = Date.now(); // Update last watched time
+
+      scheduleFlush();
+      return cloneProfile(profiles[pIndex]);
   },
   
   getHistory: (profileId: string): WatchHistoryItem[] => {

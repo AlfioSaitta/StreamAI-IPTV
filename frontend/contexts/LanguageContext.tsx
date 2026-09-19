@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode } from 'react';
 import { i18n, Translations, SupportedLanguage, loadLanguage } from '../services/i18n.ts';
 import { DEFAULT_PREFERENCES } from '../services/profileService.ts';
 
@@ -44,13 +44,20 @@ export const LanguageProvider: React.FC<LanguageProviderProps> = ({ children, pr
     }
   }, [profileLanguage, language]);
 
-  const setLanguage = (lang: string) => {
+  const setLanguage = useCallback((lang: string) => {
     if (i18n.isSupported(lang)) {
       setLanguageState(lang as SupportedLanguage);
     }
-  };
+  }, []);
 
-  const value: LanguageContextType = { language, setLanguage, t };
+  // Memoizzato: ricreare l'oggetto a ogni render del provider invalidava il
+  // context per tutti i consumer di `useLanguage()` (ChannelList, MovieDetail,
+  // SeriesDetail, ProfileSettings) anche quando lingua e dizionario non
+  // cambiavano, annullando i loro `React.memo`.
+  const value = useMemo<LanguageContextType>(
+    () => ({ language, setLanguage, t }),
+    [language, setLanguage, t],
+  );
 
   return (
     <LanguageContext.Provider value={value}>

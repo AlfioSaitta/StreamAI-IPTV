@@ -56,9 +56,10 @@ describe('vodProbe.probeVodSource', () => {
     expect(result.contentLength).toBe(LARGE_CL);
     expect(result.moovWarmed).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[1][1]?.headers).toMatchObject({
-      Range: expect.stringMatching(/^bytes=\d+-$/),
-    });
+    // `headers` è un'istanza di `Headers`, che non espone proprietà enumerabili:
+    // `toMatchObject` la vedeva come vuota. Va letta con `.get()`.
+    const tailHeaders = fetchMock.mock.calls[1][1]?.headers as Headers;
+    expect(tailHeaders.get('Range')).toMatch(/^bytes=\d+-$/);
   });
 
   it('detects Accept-Ranges: none and does NOT prefetch the tail', async () => {

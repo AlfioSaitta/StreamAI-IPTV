@@ -20,6 +20,60 @@ import {
 import { proxyFetch } from './proxyFetch.ts';
 export { analyzeVideoBytes } from './streamInfo';
 export type { StreamCodecInfo } from './streamInfo';
+
+/**
+ * Byte massimi letti da un probe di stream.
+ *
+ * L'analisi lavora solo sui primi KB (header fissi, PAT/PMT, manifest HLS), ma
+ * molti provider Xtream **ignorano l'header `Range`** e rispondono `200` con il
+ * body completo di uno stream live, che non termina mai. Leggere il body senza
+ * limite in quel caso significa accumulare in memoria a tempo indefinito.
+ */
+const MAX_PROBE_BYTES = 64 * 1024;
+
+/**
+ * Legge al massimo `maxBytes` dal body di `response`, interrompendo il download
+ * subito dopo. Va usata al posto di `response.arrayBuffer()` sui probe.
+ */
+const readAtMost = async (
+  response: Response,
+  maxBytes: number,
+  signal?: AbortSignal,
+): Promise<Uint8Array> => {
+  // Ambienti senza stream sul body (o risposte senza body): fallback.
+  if (!response.body) {
+    const buf = new Uint8Array(await response.arrayBuffer());
+    return buf.length > maxBytes ? buf.subarray(0, maxBytes) : buf;
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (total < maxBytes) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      chunks.push(value);
+      total += value.byteLength;
+      if (signal?.aborted) break;
+    }
+  } finally {
+    // Senza `cancel()` il body resta aperto e la connessione occupata finché
+    // il provider non decide di chiudere.
+    await reader.cancel().catch(() => undefined);
+  }
+
+  const out = new Uint8Array(Math.min(total, maxBytes));
+  let offset = 0;
+  for (const chunk of chunks) {
+    if (offset >= out.length) break;
+    const take = Math.min(chunk.byteLength, out.length - offset);
+    out.set(chunk.subarray(0, take), offset);
+    offset += take;
+  }
+  return out;
+};
 class StreamInfoService {
   private currentInfo: StreamCodecInfo | null = null;
   private logCallbacks: ((message: string, level: 'info' | 'warn' | 'error') => void)[] = [];
@@ -702,12 +756,13 @@ class StreamInfoService {
       confidence: 'low',
     };
 
+    // Dichiarati FUORI dal `try`: `const` è block-scoped, quindi dentro il
+    // blocco non sarebbero visibili dal `finally` che deve spegnere il timer.
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+
     try {
       this.log(`Tentativo analisi diretta stream: ${url.substring(0, 80)}...`);
-
-      // Fetch solo i primi 64KB per analisi header
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
 
       const response = await proxyFetch(url, {
         method: 'GET',
@@ -716,8 +771,6 @@ class StreamInfoService {
         },
         signal: controller.signal
       });
-
-      clearTimeout(timeoutId);
 
       if (!response.ok && response.status !== 206) {
         this.log(`Fetch fallito con status: ${response.status}`, 'warn');
@@ -759,8 +812,12 @@ class StreamInfoService {
         }
       }
 
-      // Leggi i primi byte per analisi binaria
-      const data = new Uint8Array(await response.arrayBuffer());
+      // Leggi i primi byte per analisi binaria. `readAtMost` (non
+      // `arrayBuffer()`) perché il body di uno stream live può essere infinito
+      // se il provider ignora `Range`, e il timeout sopra copre anche questa
+      // lettura (prima veniva cancellato subito dopo gli header, lasciando la
+      // lettura senza alcun limite di tempo né di dimensione).
+      const data = await readAtMost(response, MAX_PROBE_BYTES, controller.signal);
       this.log(`Letti ${data.length} bytes per analisi`);
 
       const textHeader = new TextDecoder('utf-8', { fatal: false }).decode(data.slice(0, Math.min(data.length, 8192)));
@@ -774,11 +831,23 @@ class StreamInfoService {
           try {
             const nestedController = new AbortController();
             const nestedTimeoutId = setTimeout(() => nestedController.abort(), 8000);
-            const nestedResponse = await proxyFetch(firstReference, { headers: { 'Range': 'bytes=0-65535' }, signal: nestedController.signal });
-            clearTimeout(nestedTimeoutId);
+            let nestedResponse: Response;
+            try {
+              nestedResponse = await proxyFetch(firstReference, { headers: { 'Range': 'bytes=0-65535' }, signal: nestedController.signal });
+            } catch (nestedFetchError) {
+              clearTimeout(nestedTimeoutId);
+              throw nestedFetchError;
+            }
 
             if (nestedResponse.ok || nestedResponse.status === 206) {
-              const nestedData = new Uint8Array(await nestedResponse.arrayBuffer());
+              // Stesso motivo del probe principale: lettura limitata e sotto
+              // il timeout, il body di un riferimento media può essere infinito.
+              let nestedData: Uint8Array;
+              try {
+                nestedData = await readAtMost(nestedResponse, MAX_PROBE_BYTES, nestedController.signal);
+              } finally {
+                clearTimeout(nestedTimeoutId);
+              }
               const nestedText = new TextDecoder('utf-8', { fatal: false }).decode(nestedData.slice(0, Math.min(nestedData.length, 8192)));
 
               if (nestedText.includes('#EXTM3U')) {
@@ -868,6 +937,10 @@ class StreamInfoService {
       } else {
         this.log(`Errore analisi stream: ${error.message}`, 'warn');
       }
+    } finally {
+      // Il timer deve restare armato per tutta la durata del probe (header +
+      // lettura del body) e va spento solo qui, a fine analisi.
+      clearTimeout(timeoutId);
     }
 
     return info;

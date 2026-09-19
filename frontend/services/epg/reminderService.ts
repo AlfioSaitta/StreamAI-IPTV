@@ -76,17 +76,34 @@ class EpgReminderServiceClass {
   private listeners: Set<Listener> = new Set();
   private intervalId: number | null = null;
   private permissionRequested = false;
+  /**
+   * In-memory id cache so `has()` — called once per rendered programme during
+   * scroll — never touches localStorage or JSON.parse. All mutators refresh it.
+   */
+  private idSet: Set<string> | null = null;
+
+  /** Lazily hydrate the id cache from storage. Pure: never writes. */
+  private ids(): Set<string> {
+    if (this.idSet === null) {
+      this.idSet = new Set(purgeStale(readAll()).map(r => r.id));
+    }
+    return this.idSet;
+  }
 
   /** Get all reminders, purging stale ones as a side-effect. */
   getAll(): EpgReminder[] {
-    const fresh = purgeStale(readAll());
-    writeAll(fresh);
+    const stored = readAll();
+    const fresh = purgeStale(stored);
+    // Only persist when purging actually dropped something, so plain reads
+    // stop rewriting localStorage on every call.
+    if (fresh.length !== stored.length) writeAll(fresh);
+    this.idSet = new Set(fresh.map(r => r.id));
     return fresh;
   }
 
   /** True if a reminder exists for the given (channelId, start). */
   has(channelId: string, start: number): boolean {
-    return this.getAll().some(r => r.id === buildId(channelId, start));
+    return this.ids().has(buildId(channelId, start));
   }
 
   /**
@@ -114,6 +131,7 @@ class EpgReminderServiceClass {
     };
     all.push(reminder);
     writeAll(all);
+    this.ids().add(id);
     void this.ensurePermission();
     this.ensureScheduler();
     return reminder;
@@ -124,6 +142,7 @@ class EpgReminderServiceClass {
     const id = buildId(channelId, start);
     const filtered = this.getAll().filter(r => r.id !== id);
     writeAll(filtered);
+    this.ids().delete(id);
   }
 
   /**

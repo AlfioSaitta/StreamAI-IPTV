@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useDeferredValue } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, useDeferredValue } from 'react';
 import { Category, Channel, StreamType, WatchHistoryItem, XtreamContent } from '../types.ts';
 import { Search, Play, Info, ChevronRight, LogOut, Clock, RefreshCw, BookmarkPlus, BookmarkCheck, Settings, X, Tv, SearchX, Server, Calendar, AlertTriangle, Film as FilmIcon, Sparkles } from 'lucide-react';
 import CachedImage from './CachedImage.tsx';
@@ -17,6 +17,13 @@ const ROW_ITEM_INCREMENT = 72;
 const HORIZONTAL_VIRTUALIZATION_THRESHOLD = 36;
 const HORIZONTAL_OVERSCAN = 8;
 const SEARCH_RESULT_LIMIT = 180;
+
+/**
+ * Costante condivisa per il caso "nessuna categoria indicizzata".
+ * Un `[]` letterale nel `useMemo` cambierebbe identità a ogni calcolo,
+ * invalidando i memo e gli effect che la usano nelle dipendenze.
+ */
+const EMPTY_INDEXED_CATEGORIES: Array<Category & { channels: IndexedChannel[] }> = [];
 
 interface ChannelListProps {
   categories: Category[];
@@ -204,10 +211,19 @@ const ContentRow = React.memo(({ title, channels, onSelect, isPoster, progressMa
     const beforeWidth = shouldVirtualize ? startIndex * itemExtent : 0;
     const afterWidth = shouldVirtualize ? Math.max(0, (pagedChannels.length - endIndex) * itemExtent) : 0;
 
+    // Dipendenze su valori PRIMITIVI (o sulla prop stabile `channels`).
+    // `visibleChannels` e `pagedChannels` sono array nuovi a ogni render,
+    // quindi usarli come dipendenze faceva ripartire l'effetto a ogni render
+    // della riga, rilanciando il preload di ~72 loghi per riga (fino a 6 righe)
+    // anche quando nulla era cambiato.
     useEffect(() => {
-        const urls = visibleChannels.map(channel => channel.logo).filter((url): url is string => Boolean(url));
+        const urls = channels
+            .slice(0, itemLimit)
+            .slice(startIndex, endIndex)
+            .map(channel => channel.logo)
+            .filter((url): url is string => Boolean(url));
         DownloadManager.preloadVisible(urls);
-    }, [visibleChannels]);
+    }, [channels, itemLimit, startIndex, endIndex]);
 
     if (channels.length === 0) return null;
 
@@ -293,7 +309,32 @@ const ChannelList: React.FC<ChannelListProps> = ({
   const indexedLiveCategories = useMemo(() => indexCategories(liveCategories), [liveCategories]);
   const indexedVodCategories = useMemo(() => indexCategories(vodCategories), [vodCategories]);
   const indexedSeriesCategories = useMemo(() => indexCategories(seriesCategories), [seriesCategories]);
-  const indexedBaseCategories = useMemo(() => indexCategories(categories), [categories]);
+
+  /**
+   * Categorie della tab attiva.
+   *
+   * `App.tsx` passa `categories={getCurrentCategories()}`, che per le tab
+   * non-home è **lo stesso riferimento** di `liveCategories`/`vodCategories`/
+   * `seriesCategories`. Indicizzarlo di nuovo era una quarta passata completa
+   * sullo stesso catalogo (decine di migliaia di canali per la tab Film) per
+   * ottenere un valore già calcolato: qui lo riusiamo.
+   *
+   * Per la Home il valore non viene usato (`activeCategories` usa
+   * `homeCategories`), quindi il ramo `default` resta la costante vuota.
+   */
+  const indexedBaseCategories = useMemo(() => {
+    switch (activeTab) {
+      case 'live':
+        return indexedLiveCategories;
+      case 'movie':
+        return indexedVodCategories;
+      case 'series':
+        return indexedSeriesCategories;
+      default:
+        return EMPTY_INDEXED_CATEGORIES;
+    }
+  }, [activeTab, indexedLiveCategories, indexedVodCategories, indexedSeriesCategories]);
+
   const indexedAllChannels = useMemo(() => indexChannels(allChannels), [allChannels]);
 
   // Debounce search term per performance (limita lavoro di filtering)
@@ -382,6 +423,18 @@ const ChannelList: React.FC<ChannelListProps> = ({
   }, [indexedBaseCategories, history, activeTab, indexedAllChannels, indexedSeriesCategories, continueWatchingCompletedThreshold, continueWatchingMoviesEnabled, continueWatchingSeriesEnabled]);
 
   const watchlistSet = useMemo(() => new Set(watchlistIds), [watchlistIds]);
+
+  /**
+   * Wrapper stabile per il toggle preferiti.
+   *
+   * `ContentRow` è `React.memo`, ma riceveva `onToggleWatchlist={(c) => ...}`
+   * creato inline: identità nuova a ogni render di ChannelList ⇒ memo sempre
+   * invalidata ⇒ tutte le righe montate (fino a 6 × 72 card) ri-renderizzavano
+   * a ogni tasto di ricerca, a ogni scroll e a ogni tick dello stato profilo.
+   */
+  const handleToggleWatchlistById = useCallback((channel: Channel) => {
+    onToggleWatchlist(channel.id);
+  }, [onToggleWatchlist]);
 
   const watchlistChannels = useMemo(() => {
       const seen = new Set<string>();
@@ -885,7 +938,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
                   isPoster={activeTab === 'movie' || activeTab === 'series' || (activeTab === 'home' && continueWatching.some(ch => ch.type !== 'live'))}
                   progressMap={progressMap}
                   watchlistSet={watchlistSet}
-                  onToggleWatchlist={(c) => onToggleWatchlist(c.id)}
+                  onToggleWatchlist={handleToggleWatchlistById}
                   onShowDetails={onShowDetails}
               />
           )}
@@ -900,7 +953,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
                   isPoster={activeTab === 'movie' || activeTab === 'series' || (activeTab === 'home' && watchlistChannels.some(ch => ch.type !== 'live'))}
                   progressMap={progressMap}
                   watchlistSet={watchlistSet}
-                  onToggleWatchlist={(c) => onToggleWatchlist(c.id)}
+                  onToggleWatchlist={handleToggleWatchlistById}
                   onShowDetails={onShowDetails}
               />
           )}
@@ -920,7 +973,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
                         isPoster={activeTab === 'movie' || activeTab === 'series' || (activeTab === 'home' && hasPortraitContent)}
                         progressMap={progressMap}
                         watchlistSet={watchlistSet}
-                        onToggleWatchlist={(c) => onToggleWatchlist(c.id)}
+                        onToggleWatchlist={handleToggleWatchlistById}
                         onShowDetails={onShowDetails}
                       />
                   );

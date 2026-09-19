@@ -6,6 +6,67 @@ import { proxyFetch } from './proxyFetch.ts';
 const MAX_CONCURRENT_DOWNLOADS = 10; // Download paralleli aumentati per Wails
 const DOWNLOAD_TIMEOUT_MS = 15000; // Timeout leggermente aumentato
 
+/** Per quanto un URL resta escluso dopo un fallimento, prima di poter ritentare. */
+const FAILED_URL_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * Attese per uno slot di download libero.
+ *
+ * Sostituiscono il busy-wait a polling che c'era in `download`: ogni waiter
+ * viene svegliato quando uno slot si libera, invece di riprovare ogni 50ms.
+ */
+const slotWaiters: Array<() => void> = [];
+
+/**
+ * Rilascia lo slot di `url` e sveglia il primo waiter in coda.
+ * Ogni percorso di uscita di `download` passa da qui (via `finally`), cosi' lo
+ * slot non puo' restare occupato per sempre.
+ */
+const releaseSlot = (url: string): void => {
+  DownloadManager.processing.delete(url);
+  const next = slotWaiters.shift();
+  if (next) next();
+};
+
+/**
+ * Attende che si liberi uno slot. Risolve `false` se nel frattempo arriva un
+ * abort (il waiter viene tolto dalla coda, cosi' non resta appeso).
+ */
+const waitForSlot = (signal?: AbortSignal): Promise<boolean> =>
+  new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve(false);
+      return;
+    }
+    const onAbort = () => {
+      const idx = slotWaiters.indexOf(waiter);
+      if (idx !== -1) slotWaiters.splice(idx, 1);
+      resolve(false);
+    };
+    const waiter = () => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve(true);
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    slotWaiters.push(waiter);
+  });
+
+/** Marca `url` come fallito per `FAILED_URL_TTL_MS`. */
+const markUrlFailed = (url: string): void => {
+  DownloadManager.failedUrls.set(url, Date.now() + FAILED_URL_TTL_MS);
+};
+
+/** True se `url` e' fallito di recente (le voci scadute vengono ripulite qui). */
+const isUrlFailed = (url: string): boolean => {
+  const expiresAt = DownloadManager.failedUrls.get(url);
+  if (expiresAt === undefined) return false;
+  if (expiresAt <= Date.now()) {
+    DownloadManager.failedUrls.delete(url);
+    return false;
+  }
+  return true;
+};
+
 // noinspection JSUnusedGlobalSymbols
 export const DownloadManager = {
   // Coda per download on-demand
@@ -23,7 +84,15 @@ export const DownloadManager = {
 
   // Cache URL già scaricati (evita richieste duplicate)
   cachedUrls: new Set<string>(),
-  failedUrls: new Set<string>(),
+  /**
+   * URL falliti di recente: `url -> timestamp di scadenza`.
+   *
+   * Prima era un `Set` senza scadenza: un fallimento transitorio (timeout sotto
+   * carico, rete instabile) escludeva quell'immagine per TUTTA la sessione e per
+   * tutti i profili, senza alcun modo di ritentarla se non svuotando la lista a
+   * mano dalle impostazioni.
+   */
+  failedUrls: new Map<string, number>(),
 
   // Statistiche
   stats: {
@@ -48,6 +117,12 @@ export const DownloadManager = {
     DownloadManager.queue.clear();
     DownloadManager.processing.clear();
     DownloadManager.queued.clear();
+
+    // Sveglia le attese in coda per uno slot: ognuna rivaluta `paused` ed esce
+    // restituendo l'URL originale. Senza questo resterebbero parcheggiate fino
+    // al prossimo slot liberato (o al timeout di un download in volo).
+    const waiters = slotWaiters.splice(0, slotWaiters.length);
+    waiters.forEach(wake => wake());
   },
 
   // Riprendi i download
@@ -81,7 +156,7 @@ export const DownloadManager = {
     }
 
     // 2. Check se già fallito di recente
-    if (DownloadManager.failedUrls.has(url)) {
+    if (isUrlFailed(url)) {
       return url;
     }
 
@@ -129,10 +204,14 @@ export const DownloadManager = {
     DownloadManager.queued.add(url);
 
     try {
-      // Limita concorrenza
+      // Limita concorrenza attendendo la liberazione di uno slot, senza polling.
+      // Il busy-wait precedente (`setTimeout(50)` in un while) con 200 richieste
+      // in coda lasciava ~190 waiter che si risvegliavano 20 volte al secondo,
+      // cioe' ~3800 timer/s di pura attesa sul main thread.
       while (DownloadManager.processing.size >= MAX_CONCURRENT_DOWNLOADS) {
         if (DownloadManager.paused || signal?.aborted) return url;
-        await new Promise(r => setTimeout(r, 50));
+        const gotSlot = await waitForSlot(signal);
+        if (!gotSlot || DownloadManager.paused || signal?.aborted) return url;
       }
 
       if (DownloadManager.paused || signal?.aborted) return url;
@@ -170,7 +249,7 @@ export const DownloadManager = {
 
         if (DownloadManager.paused || signal?.aborted) return url;
         if (!response.ok) {
-          DownloadManager.failedUrls.add(url);
+          markUrlFailed(url);
           DownloadManager.stats.failed++;
           resolveWaiting(url);
           return url;
@@ -181,7 +260,7 @@ export const DownloadManager = {
 
         // Verifica che sia un'immagine valida
         if (!blob.type.startsWith('image/') && blob.size < 100) {
-          DownloadManager.failedUrls.add(url);
+          markUrlFailed(url);
           DownloadManager.stats.failed++;
           resolveWaiting(url);
           return url;
@@ -203,7 +282,7 @@ export const DownloadManager = {
         signal?.removeEventListener('abort', onAbort);
         
         if (e.name !== 'AbortError' && !signal?.aborted) {
-          DownloadManager.failedUrls.add(url);
+          markUrlFailed(url);
           DownloadManager.stats.failed++;
         }
 
@@ -212,7 +291,7 @@ export const DownloadManager = {
       }
     } finally {
       DownloadManager.queued.delete(url);
-      DownloadManager.processing.delete(url);
+      releaseSlot(url);
     }
   },
 
@@ -222,7 +301,7 @@ export const DownloadManager = {
       u?.startsWith('http') &&
       !DownloadManager.cachedUrls.has(u) &&
       !DownloadManager.processing.has(u) &&
-      !DownloadManager.failedUrls.has(u)
+      !isUrlFailed(u)
     ).slice(0, 20); // Max 20 preload (aumentato da 10 dopo ottimizzazione abort)
 
     // Avvia download con priorità bassa (non bloccante)

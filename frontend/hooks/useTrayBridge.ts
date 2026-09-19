@@ -7,8 +7,9 @@
  *   - `tray:play-pause` → toggle Play/Pause sul `PlayerService` in base allo
  *     stato corrente (se loaded && !paused → Pause(), altrimenti Play()).
  *   - `tray:pip-toggle` → invoca la callback `onPipToggle` passata
- *     dall'host (tipicamente `usePictureInPicture` del componente
- *     `VideoPlayerNew.tsx`). Se non è fornita, log warning (no-op).
+ *     dall'host (tipicamente `togglePiP` di `VideoPlayerNew.tsx`, che apre la
+ *     finestra PiP dedicata — vedi `internal/services/pip`). Se non è
+ *     fornita, log warning (no-op).
  *
  * Solo Wails: nei build web/Capacitor `@wailsio/runtime` non è
  * disponibile, quindi l'hook fa early-return e diventa no-op silenzioso.
@@ -24,7 +25,7 @@
  * site (vs. propagare una callback `onPlayPause` esterna).
  */
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import platformService from '../services/platformService';
 import * as PlayerService from '../bindings/github.com/AlfioSaitta/StreamAI-IPTV/internal/services/player/service';
 
@@ -50,6 +51,16 @@ export interface UseTrayBridgeOptions {
 export function useTrayBridge(opts: UseTrayBridgeOptions = {}): void {
   const { onPipToggle, onPlayPause } = opts;
 
+  // Callback lette tramite ref: il chiamante le crea spesso inline, quindi
+  // averle nelle deps faceva ripartire l'effetto a ogni render di App — con
+  // teardown dei listener e un nuovo import dinamico di `@wailsio/runtime` ogni
+  // volta. Un evento tray che arrivava nel gap teardown/re-registrazione andava
+  // perso.
+  const callbacksRef = useRef({ onPipToggle, onPlayPause });
+  useEffect(() => {
+    callbacksRef.current = { onPipToggle, onPlayPause };
+  });
+
   useEffect(() => {
     if (!platformService.isWails) return;
 
@@ -67,8 +78,9 @@ export function useTrayBridge(opts: UseTrayBridgeOptions = {}): void {
         const { Events } = mod;
 
         offPlayPause = Events.On(TRAY_PLAY_PAUSE_EVENT, () => {
-          if (onPlayPause) {
-            onPlayPause();
+          const override = callbacksRef.current.onPlayPause;
+          if (override) {
+            override();
             return;
           }
           // Default: toggle basato sullo stato corrente del player.
@@ -87,8 +99,9 @@ export function useTrayBridge(opts: UseTrayBridgeOptions = {}): void {
         }) as (() => void) | undefined ?? null;
 
         offPipToggle = Events.On(TRAY_PIP_TOGGLE_EVENT, () => {
-          if (onPipToggle) {
-            onPipToggle();
+          const handler = callbacksRef.current.onPipToggle;
+          if (handler) {
+            handler();
           } else {
             console.warn(
               '[useTrayBridge] tray:pip-toggle ricevuto ma nessun handler PiP registrato',
@@ -105,7 +118,7 @@ export function useTrayBridge(opts: UseTrayBridgeOptions = {}): void {
       if (typeof offPlayPause === 'function') offPlayPause();
       if (typeof offPipToggle === 'function') offPipToggle();
     };
-  }, [onPipToggle, onPlayPause]);
+  }, []);
 }
 
 export default useTrayBridge;

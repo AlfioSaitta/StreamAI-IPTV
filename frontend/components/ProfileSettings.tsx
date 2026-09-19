@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Profile, ProfilePreferences, XtreamContent } from '../types.ts';
+import { Channel, Profile, ProfilePreferences, XtreamContent } from '../types.ts';
 import { ProfileService, DEFAULT_PREFERENCES } from '../services/profileService.ts';
 import { CacheService } from '../services/cacheService.ts';
 import { DownloadManager } from '../services/downloadManager.ts';

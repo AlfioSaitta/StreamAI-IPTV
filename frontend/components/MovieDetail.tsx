@@ -14,6 +14,7 @@ import {
 } from './shared';
 import { useMediaImages } from '../hooks/useMediaImages.ts';
 import { useMediaMetadata } from '../hooks/useMediaMetadata.ts';
+import { buildChannelSearchIndex, candidateChannels } from '../services/channelSearchIndex.ts';
 import { getMovieEnrichment, MovieEnrichment, isAiAvailable } from '../services/geminiService.ts';
 import { useFocusTrap } from '../hooks/useTvFocus.ts';
 
@@ -108,14 +109,20 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
 
   const year = movie.year || tmdbData?.release_date?.split('-')[0];
 
+  // Indice per titolo, costruito una volta per catalogo. Prima ogni ricerca
+  // scansionava l'intero catalogo con `isTitleMatch`: con 20-40 suggerimenti
+  // TMDB e 50k canali erano ~2M confronti (decine di secondi di freeze).
+  const channelIndex = useMemo(() => buildChannelSearchIndex(allChannels), [allChannels]);
+
   const findMatchingChannel = useCallback((title: string) => {
     if (!title) return null;
 
-    return (
-      allChannels.find(ch => ch.type === 'movie' && MetadataService.isTitleMatch(ch.cleanName || ch.name, title, movie.year, ch.year)) ||
-      null
-    );
-  }, [allChannels, movie.year]);
+    for (const ch of candidateChannels(channelIndex, title)) {
+      if (ch.type !== 'movie') continue;
+      if (MetadataService.isTitleMatch(ch.cleanName || ch.name, title, movie.year, ch.year)) return ch;
+    }
+    return null;
+  }, [channelIndex, movie.year]);
 
   const isVod = movie.type === 'movie' || movie.type === 'series';
 
@@ -125,13 +132,15 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
     const sim = MetadataService.getSimilar(tmdbData, movie.type === 'series' ? 'series' : 'movie');
     // Mostra solo i suggerimenti che hanno un canale locale corrispondente e id diverso dal corrente
     return sim.map(item => {
-      const match = allChannels.find(ch => {
-        if (ch.id === movie.id) return false;
-        return MetadataService.isTitleMatch(ch.cleanName || ch.name, item.title, movie.year, ch.year);
-      });
-      return match ? { ...item, channel: match } : null;
+      for (const ch of candidateChannels(channelIndex, item.title)) {
+        if (ch.id === movie.id) continue;
+        if (MetadataService.isTitleMatch(ch.cleanName || ch.name, item.title, movie.year, ch.year)) {
+          return { ...item, channel: ch };
+        }
+      }
+      return null;
     }).filter((item): item is NonNullable<typeof item> => item !== null);
-  }, [tmdbData, allChannels, movie.id, movie.type, isVod]);
+  }, [tmdbData, channelIndex, movie.id, movie.year, movie.type, isVod]);
 
   const aiSimilarChannels = useMemo(() => {
     if (!aiData?.similarMovies) return [];

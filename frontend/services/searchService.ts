@@ -1,5 +1,5 @@
 // This service manages the catalog web worker for indexing and searching.
-import { Category, Channel } from '../types.ts';
+import { Category } from '../types.ts';
 import { IndexedChannel } from './catalogIndex.ts';
 
 let worker: Worker | null = null;
@@ -11,7 +11,7 @@ const getWorker = (): Worker => {
     worker = new Worker(new URL('./catalogWorker.ts', import.meta.url), { type: 'module' });
 
     worker.onmessage = (e: MessageEvent) => {
-      const { action, result, query, id } = e.data;
+      const { action, result, id } = e.data;
       if (action === 'search') {
         const promise = searchPromises.get(id);
         if (promise) {
