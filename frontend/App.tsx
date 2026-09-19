@@ -6,7 +6,7 @@ import CodecWarning from './components/CodecWarning.tsx';
 import EmptyState from './components/shared/EmptyState.tsx';
 import ShortcutsCheatsheet from './components/ShortcutsCheatsheet.tsx';
 import CommandPalette from './components/CommandPalette.tsx';
-import TitleBar from './components/TitleBar.tsx';
+import TitleBar, { WAILS_WINDOW_IS_FRAMELESS } from './components/TitleBar.tsx';
 
 // E.1 — Heavy components are code-split via React.lazy so the initial chunk
 // stays lean. video.js + hls.js + mpegts.js (~600 kB minified) live entirely
@@ -29,7 +29,11 @@ const GuideView = lazy(() => import('./components/GuideView.tsx'));
 // nel chunk principale.
 const DesignSystemPreview = lazy(() => import('./components/DesignSystemPreview.tsx'));
 const NativeMpvSmokeTest = lazy(() => import('./components/NativeMpvSmokeTest.tsx'));
-const PerformanceProfiler = lazy(() => import('./components/dev/PerformanceProfiler.tsx'));
+// `PerformanceProfiler` espone solo un export nominato: `lazy` richiede un
+// modulo con export `default`, quindi lo adattiamo qui.
+const PerformanceProfiler = lazy(() =>
+  import('./components/dev/PerformanceProfiler.tsx').then((m) => ({ default: m.PerformanceProfiler })),
+);
 
 const shouldShowDsPreview = (): boolean => {
   if (typeof window === 'undefined') return false;
@@ -93,9 +97,90 @@ import { EpgReminderService, type ReminderFiredEvent } from './services/epg/remi
 import { useBackStack } from './hooks/useBackStack.ts';
 import { useTrayBridge } from './hooks/useTrayBridge.ts';
 import { TmdbEnricherService } from './services/tmdbEnricher.ts';
+import { normalizeGoPlaylist, type GoFullPlaylist } from './services/xtreamPayload.ts';
 import { Events } from '@wailsio/runtime';
 
 const MIN_CONTENT_REFRESH_INTERVAL_MINUTES = 60;
+
+/** Timeout di sicurezza per la pipeline playlist lato Go. */
+const GO_PLAYLIST_TIMEOUT_MS = 180_000;
+
+/**
+ * Esegue la pipeline Xtream del backend Go e attende il suo esito.
+ *
+ * `playlist.ProcessXtreamPlaylist` avvia il lavoro in una goroutine e ritorna
+ * SUBITO (vedi `internal/services/playlist/service.go`): il risultato arriva
+ * solo via evento (`playlist:success` / `playlist:error`). Questa helper
+ * correla quegli eventi alla singola chiamata, così i chiamanti possono
+ * aspettare davvero il completamento senza restare appesi per sempre.
+ *
+ * Senza di essa il ramo Wails non aveva alcun modo di sapere se/quando la
+ * pipeline finiva — e un rifiuto della chiamata lasciava `isLoading` a `true`
+ * per sempre (spinner a schermo intero senza via d'uscita).
+ */
+const runGoPlaylistPipeline = (
+  creds: XtreamCredentials,
+  timeoutMs = GO_PLAYLIST_TIMEOUT_MS,
+): Promise<GoFullPlaylist> =>
+  new Promise((resolve, reject) => {
+    let settled = false;
+
+    const cleanup = () => {
+      window.clearTimeout(timer);
+      offSuccess();
+      offError();
+    };
+    const settle = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      fn();
+    };
+
+    const offSuccess = Events.On('playlist:success', (event) => {
+      settle(() => resolve(event.data as GoFullPlaylist));
+    });
+    const offError = Events.On('playlist:error', (event) => {
+      const detail = event.data;
+      settle(() =>
+        reject(
+          new Error(
+            typeof detail === 'string' && detail ? detail : 'Elaborazione playlist fallita sul backend.',
+          ),
+        ),
+      );
+    });
+    const timer = window.setTimeout(() => {
+      settle(() => reject(new Error('Timeout: il backend non ha completato l’elaborazione della playlist.')));
+    }, timeoutMs);
+
+    Promise.resolve(host.playlist.ProcessXtreamPlaylist(creds)).catch((err) => {
+      settle(() => reject(err instanceof Error ? err : new Error(String(err))));
+    });
+  });
+
+/**
+ * Copia locale del catalogo, se il backend ne ha una su disco
+ * (`internal/services/playlist/cache.go`).
+ *
+ * Non lancia mai: qualunque problema — cache assente, illeggibile, di formato
+ * vecchio, o bindings non rigenerati — significa la stessa cosa, cioè "non c'è
+ * una copia locale", e il chiamante prosegue con la pipeline di rete. Un avvio
+ * lento è meglio di un avvio fallito.
+ */
+const loadCachedCatalog = async (
+  creds: XtreamCredentials,
+): Promise<{ playlist: GoFullPlaylist; savedAt: number } | null> => {
+  if (!platformService.isWails) return null;
+  try {
+    const cached = await host?.playlist?.LoadCachedCatalog?.(creds);
+    if (!cached?.playlist) return null;
+    return { playlist: cached.playlist as GoFullPlaylist, savedAt: Number(cached.savedAt) || 0 };
+  } catch (err) {
+    console.warn('[App] Catalogo locale non disponibile:', err);
+    return null;
+  }
+};
 
 interface ContentRefreshStatus {
   state: 'idle' | 'refreshing' | 'success' | 'error';
@@ -181,14 +266,25 @@ const AiUnavailableHint = ({
   // L'hint resta sempre dismissibile manualmente. La preferenza
   // `hideAiUnavailableHint` lo silenzia permanentemente per il profilo.
   const [dontShow, setDontShow] = useState(false);
+
+  // Il timer è armato una sola volta (deps `[]`), quindi deve leggere i valori
+  // correnti tramite ref al momento dello scatto. Con la closure diretta
+  // catturava `dontShow = false` per sempre: spuntando la checkbox entro gli
+  // 8s si otteneva `onDismiss()` (sessione) invece di `onDontShowAgain()`, e
+  // l'hint riappariva al riavvio nonostante la scelta esplicita dell'utente.
+  const dontShowRef = useRef(dontShow);
+  const callbacksRef = useRef({ onDismiss, onDontShowAgain });
+  useEffect(() => {
+    dontShowRef.current = dontShow;
+    callbacksRef.current = { onDismiss, onDontShowAgain };
+  });
+
   useEffect(() => {
     const id = setTimeout(() => {
-      if (dontShow) onDontShowAgain();
-      else onDismiss();
+      if (dontShowRef.current) callbacksRef.current.onDontShowAgain();
+      else callbacksRef.current.onDismiss();
     }, 8000);
     return () => clearTimeout(id);
-    // `dontShow` letto al fire del timer: deps minime per evitare reset.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleClose = () => {
@@ -289,6 +385,24 @@ function App() {
   const [isMigrating, setIsMigrating] = useState(platformService.isWails);
   // Ref per chiamare refreshContentFromServer da handleXtreamLogin senza TDZ.
   const refreshContentFromServerRef = useRef<((options?: { background?: boolean }) => Promise<unknown>) | null>(null);
+  // Le credenziali correnti servono anche al listener `playlist:success`, che è
+  // registrato una sola volta (deps `[]`) e quindi non può leggerle dallo stato.
+  const xtreamCredsRef = useRef<XtreamCredentials | null>(null);
+  useEffect(() => {
+    xtreamCredsRef.current = xtreamCreds;
+  }, [xtreamCreds]);
+
+  // Indice id → canale del catalogo corrente. Serve ai listener registrati una
+  // volta sola (click sulla notifica EPG) che devono comunque vedere il
+  // catalogo aggiornato. Evita anche la scansione lineare di tutti i canali.
+  const channelByIdRef = useRef<Map<string, Channel>>(new Map());
+  useEffect(() => {
+    const index = new Map<string, Channel>();
+    for (const category of [...liveCategories, ...vodCategories, ...seriesCategories]) {
+      for (const channel of category.channels) index.set(channel.id, channel);
+    }
+    channelByIdRef.current = index;
+  }, [liveCategories, vodCategories, seriesCategories]);
 
   // Latest reminder that fired — shown as an in-app toast.
   const [reminderToast, setReminderToast] = useState<ReminderFiredEvent['reminder'] | null>(null);
@@ -480,13 +594,15 @@ function App() {
     });
 
     // OS notification click → jump to that channel.
+    // Il listener è registrato una volta sola (deps `[]`), quindi il catalogo
+    // va letto da un indice aggiornato: con la closure diretta questo handler
+    // vedeva per tutta la vita dell'app le liste vuote del primo render, e il
+    // click sulla notifica di sistema non apriva mai il canale.
     const onNotifClick = (e: Event) => {
       const ev = e as CustomEvent<ReminderFiredEvent>;
       const r = ev.detail?.reminder;
       if (!r) return;
-      const ch = [...liveCategories, ...vodCategories, ...seriesCategories]
-        .flatMap(c => c.channels)
-        .find(c => c.id === r.channelId);
+      const ch = channelByIdRef.current.get(r.channelId);
       if (ch) {
         setCurrentChannel(ch);
         setReminderToast(null);
@@ -496,7 +612,16 @@ function App() {
 
     // Playlist processing events from Go backend
     const offPlaylistSuccess = Events.On('playlist:success', (event) => {
-      const content = event.data as XtreamContent;
+      // Il payload Go è la `FullPlaylist` grezza dell'API Xtream (stream senza
+      // `id`/`url`/`cleanName`): va normalizzato in `XtreamContent` prima di
+      // entrare nello stato, altrimenti i canali sono inutilizzabili.
+      const creds = xtreamCredsRef.current;
+      if (!creds) {
+        console.warn('[Go Backend] playlist:success ricevuto senza credenziali attive, payload ignorato');
+        setIsLoading(false);
+        return;
+      }
+      const content = normalizeGoPlaylist(event.data as GoFullPlaylist, creds);
       setLiveCategories(content.live);
       setVodCategories(content.vod);
       setSeriesCategories(content.series);
@@ -505,9 +630,19 @@ function App() {
     });
 
     const offPlaylistError = Events.On('playlist:error', (event) => {
-      console.error('[Go Backend] Playlist processing failed:', event.data);
+      const detail = event.data;
+      console.error('[Go Backend] Playlist processing failed:', detail);
       setIsLoading(false);
-      // TODO: Show an error toast to the user
+      // L'errore restava solo in console: lo spinner spariva senza alcuna
+      // spiegazione e l'utente non aveva modo di capire cosa fosse fallito.
+      setContentRefreshStatus({
+        state: 'error',
+        message:
+          typeof detail === 'string' && detail
+            ? detail
+            : 'Elaborazione della playlist fallita sul backend.',
+        updatedAt: Date.now(),
+      });
     });
 
     return () => {
@@ -614,10 +749,64 @@ function App() {
   const handleXtreamLogin = async (creds: XtreamCredentials, saveToProfile = true) => {
     setIsLoading(true);
     setXtreamCreds(creds);
+    // Immediato (non aspettiamo l'effetto di sync): il listener
+    // `playlist:success` legge da qui per normalizzare il payload.
+    xtreamCredsRef.current = creds;
 
     if (platformService.isWails) {
-      // Delegate to Go backend
-      await host.playlist.ProcessXtreamPlaylist(creds);
+      // 1. Prima la copia locale, se c'è. È la differenza fra un'app che si apre
+      //    con il catalogo già a schermo e 30-50 s di attesa: la pipeline di rete
+      //    scarica ~10 MB per il solo blocco VOD, su un pannello che sotto carico
+      //    tronca le risposte lente e va ritentato.
+      //
+      //    L'aggiornamento non viene dimenticato: il timestamp della copia
+      //    diventa `contentLastRefreshAt`, così l'effetto di auto-refresh la
+      //    considera dovuta secondo le impostazioni del profilo (intervallo e
+      //    interruttore), esattamente come un aggiornamento appena fatto.
+      const cached = await loadCachedCatalog(creds);
+      if (cached) {
+        const content = normalizeGoPlaylist(cached.playlist, creds);
+        setLiveCategories(content.live);
+        setVodCategories(content.vod);
+        setSeriesCategories(content.series);
+        setCatalogHealth(content.health ?? null);
+        setIsLoading(false);
+        setContentRefreshStatus({
+          state: 'success',
+          message: `Catalogo locale${cached.savedAt ? ` del ${new Date(cached.savedAt).toLocaleString()}` : ''}.`,
+          updatedAt: cached.savedAt || Date.now(),
+        });
+        if (activeProfile && cached.savedAt > 0) {
+          const updated = ProfileService.updatePreferences(activeProfile.id, {
+            contentLastRefreshAt: cached.savedAt,
+          });
+          if (updated) setActiveProfile(updated);
+        }
+      } else {
+        // 2. Nessuna copia locale (primo avvio, cache cancellata, formato
+        //    vecchio): pipeline di rete, con l'attesa che questo caso comporta.
+        //
+        //    `ProcessXtreamPlaylist` ritorna subito, quindi aspettiamo l'esito
+        //    via evento. Il `try/finally` è indispensabile: senza di esso un
+        //    fallimento della chiamata (bridge assente, servizio non registrato,
+        //    errore IPC) lasciava `isLoading` a true per sempre.
+        try {
+          const raw = await runGoPlaylistPipeline(creds);
+          const content = normalizeGoPlaylist(raw, creds);
+          setLiveCategories(content.live);
+          setVodCategories(content.vod);
+          setSeriesCategories(content.series);
+          setCatalogHealth(content.health ?? null);
+        } catch (err) {
+          console.error('[App] Wails playlist load failed:', err);
+          setLiveCategories([]);
+          setVodCategories([]);
+          setSeriesCategories([]);
+          setCatalogHealth(null);
+        } finally {
+          setIsLoading(false);
+        }
+      }
     } else {
       // Fallback to original TS implementation for web/mobile
       try {
@@ -679,7 +868,15 @@ function App() {
       }
 
       try {
-          const content = await loginXtream(activeProfile.xtreamCreds, true);
+          // Sul desktop il catalogo lo costruisce il backend Go: `loginXtream`
+          // è il path TypeScript (web/Capacitor) e instrada su un Web Worker
+          // che non ha senso né garanzie su Wails. Va scelto in base alla
+          // piattaforma, esattamente come in `handleXtreamLogin`.
+          const creds = activeProfile.xtreamCreds;
+          const content = platformService.isWails
+              ? normalizeGoPlaylist(await runGoPlaylistPipeline(creds), creds)
+              : await loginXtream(creds, true);
+          xtreamCredsRef.current = creds;
           setLiveCategories(content.live);
           setVodCategories(content.vod);
           setSeriesCategories(content.series);
@@ -776,16 +973,23 @@ function App() {
       ];
   }, [liveCategories, vodCategories, seriesCategories]);
 
+  const tmdbEnrichmentEnabled = activeProfile?.preferences?.tmdbEnrichmentEnabled ?? false;
+  const tmdbApiKey = activeProfile?.preferences?.tmdbApiKey;
+  const tmdbLanguage = activeProfile?.preferences?.language || DEFAULT_PREFERENCES.language;
+
+  // Dipendenze sulle SOLE primitive rilevanti. Con `[activeProfile, allChannels]`
+  // l'effetto ripartiva a ogni mutazione del profilo (history/watchlist/progress
+  // producono un oggetto nuovo), cioè a ogni cambio canale e a ogni ritorno dal
+  // player: l'arricchimento TMDB veniva riavviato in continuazione.
   useEffect(() => {
-    if (activeProfile?.preferences?.tmdbEnrichmentEnabled && activeProfile.preferences.tmdbApiKey && allChannels.length > 0) {
-      TmdbEnricherService.startBackgroundEnrichment(
-        allChannels,
-        activeProfile.preferences.tmdbApiKey,
-        activeProfile.preferences.language,
-        () => {} // No-op progress for automatic background task
-      );
-    }
-  }, [activeProfile, allChannels]);
+    if (!tmdbEnrichmentEnabled || !tmdbApiKey || allChannels.length === 0) return;
+    void TmdbEnricherService.startBackgroundEnrichment(
+      allChannels,
+      tmdbApiKey,
+      tmdbLanguage,
+      () => {} // No-op progress for automatic background task
+    );
+  }, [tmdbEnrichmentEnabled, tmdbApiKey, tmdbLanguage, allChannels]);
 
   const getCurrentCategories = () => {
       switch (activeTab) {
@@ -795,6 +999,21 @@ function App() {
           case 'series': return seriesCategories;
           default: return liveCategories;
       }
+  };
+
+  /**
+   * Canali candidati per le funzioni AI (raccomandazioni + lookup per nome).
+   *
+   * `getCurrentCategories()` è vuoto per design sulla tab `home`, che è anche
+   * la tab di atterraggio dopo il login: usandolo direttamente l'assistente
+   * riceveva un catalogo vuoto e `handlePlayRecommended` non trovava nulla,
+   * rendendo la feature non funzionante proprio sulla schermata iniziale.
+   * Fuori dalla Home il comportamento resta quello limitato alla tab attiva.
+   */
+  const getAiCandidateChannels = (): Channel[] => {
+      const scoped = getCurrentCategories();
+      if (scoped.length > 0) return scoped.flatMap(c => c.channels);
+      return [...liveCategories, ...vodCategories, ...seriesCategories].flatMap(c => c.channels);
   };
 
   const handleChannelSelect = (channel: Channel) => {
@@ -936,7 +1155,9 @@ function App() {
   };
 
   const handlePlayRecommended = (name: string) => {
-      const allCurrent = getCurrentCategories().flatMap(c => c.channels);
+      // Deve usare lo stesso insieme passato all'AI, altrimenti sulla Home le
+      // raccomandazioni non sono risolvibili in un canale.
+      const allCurrent = getAiCandidateChannels();
       let found = allCurrent.find(c => c.name === name);
       if (!found) found = allCurrent.find(c => c.name.toLowerCase() === name.toLowerCase());
       if (!found) found = allCurrent.find(c => c.name.toLowerCase().includes(name.toLowerCase()));
@@ -1138,7 +1359,9 @@ function App() {
   return (
     <LanguageProvider profileLanguage={activeProfile?.preferences?.language || DEFAULT_PREFERENCES.language}>
       <div className="min-h-screen w-screen bg-[var(--bg-primary)] overflow-x-hidden relative font-sans text-gray-100 flex flex-col">
-        {platformService.isDesktop && <TitleBar />}
+        {/* Solo con finestra frameless: con la title bar nativa questa striscia
+            invisibile intercetterebbe i click sui primi 32px della finestra. */}
+        {platformService.isDesktop && WAILS_WINDOW_IS_FRAMELESS && <TitleBar />}
         {renderContent()}
 
         {selectedMovie && (
@@ -1162,7 +1385,7 @@ function App() {
         {!currentChannel && !selectedSeries && (liveCategories.length > 0 || vodCategories.length > 0) && isAiAvailable(activeProfile.preferences?.geminiApiKey) && (
             <Suspense fallback={null}>
               <AIRecommender
-                channels={getCurrentCategories().flatMap(c => c.channels)}
+                channels={getAiCandidateChannels()}
                 onPlayChannel={handlePlayRecommended}
                 activeTab={activeTab}
                 history={activeProfile.history}

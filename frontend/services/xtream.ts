@@ -89,7 +89,7 @@ const fetchDirect = async (url: string, timeoutMs = DEFAULT_FETCH_TIMEOUT_MS): P
   }
 };
 
-const normalizeBaseUrl = (url: string) => {
+export const normalizeBaseUrl = (url: string) => {
     let baseUrl = url.trim().replace(/\/$/, '');
     if (!/^https?:\/\//i.test(baseUrl)) {
         baseUrl = `http://${baseUrl}`;
@@ -373,16 +373,36 @@ export const loginXtream = async (creds: XtreamCredentials, forceRefresh = false
           return;
         }
         const worker = new CatalogWorker();
+        let settled = false;
+        // Rete di sicurezza: se il worker non risponde (crash, OOM, protocollo
+        // disallineato) degradiamo al path sincrono invece di lasciare
+        // `loginXtream` pendente per sempre. 120s è ampio per cataloghi enormi.
+        const timeoutId = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          console.warn('[Xtream] Worker timeout, fallback sincrono');
+          try { worker.terminate(); } catch { /* già terminato */ }
+          resolve(processContent(categories, streams, type));
+        }, 120_000);
         worker.onmessage = (e) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeoutId);
           resolve(e.data.result);
           worker.terminate();
         };
         worker.onerror = (err) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeoutId);
           console.error('[Xtream] Worker error:', err);
           resolve(processContent(categories, streams, type));
           worker.terminate();
         };
-        worker.postMessage({ categories, streams, type, baseUrl, credentials: creds });
+        // `action: 'index'` è il discriminante richiesto da catalogWorker.ts
+        // (`const { action } = e.data`). Senza di esso il worker non entra in
+        // nessun ramo, non risponde e la Promise resta pendente per sempre.
+        worker.postMessage({ action: 'index', categories, streams, type, baseUrl, credentials: creds });
       });
     };
 
