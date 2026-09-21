@@ -1,0 +1,78 @@
+{
+  "_comment": [
+    "Tabella distro → formato di pacchetto e dipendenze runtime, per scripts/build-linux.sh.",
+    "",
+    "Le dipendenze NON sono indovinate: sono le librerie condivise che il binario",
+    "richiede davvero (verificate con `objdump -p build/bin/streamai`): libgtk-3,",
+    "libwebkit2gtk-4.1, libjavascriptcoregtk-4.1, libmpv. Bastano quindi tre voci",
+    "per distro — lo stack glib/cairo/pango arriva transitivamente con gtk3.",
+    "",
+    "Il vecchio build/depends/*.json elencava ~16 dipendenze per distro (xdg-utils,",
+    "libnotify4, libnss3, libXss1, libXtst6, libatk*, libsecret, libdrm, libgbm,",
+    "libasound2, libcups2, libxkbcommon0): erano i requisiti di Chromium/Electron,",
+    "non di questa applicazione, ed è stato sostituito da questo file.",
+    "",
+    "ATTENZIONE alle alternative `A | B`: valgono SOLO per deb (dpkg le supporta).",
+    "In un RPM o in .PKGINFO diventerebbero un Requires letterale inesistente, quindi",
+    "rpm e archlinux ricevono sempre un nome singolo.",
+    "",
+    "`ids` serve a riconoscere la distro host da /etc/os-release (ID, poi ID_LIKE).",
+    "`packager: \"tar\"` è un sentinella: nfpm non ha un packager tar, quindi",
+    "scripts/build-linux.sh costruisce l'archivio portatile da sé."
+  ],
+  "distros": {
+    "opensuse": {
+      "label": "openSUSE (Tumbleweed / Leap)",
+      "ids": ["opensuse-tumbleweed", "opensuse-leap", "opensuse", "suse"],
+      "packager": "rpm",
+      "ext": "rpm",
+      "depends": ["libgtk-3-0", "libwebkit2gtk-4_1-0", "libmpv2"]
+    },
+    "fedora": {
+      "label": "Fedora",
+      "ids": ["fedora"],
+      "packager": "rpm",
+      "ext": "rpm",
+      "depends": ["gtk3", "webkit2gtk4.1", "mpv-libs"]
+    },
+    "rhel": {
+      "label": "RHEL / Rocky / AlmaLinux",
+      "ids": ["rhel", "centos", "rocky", "almalinux"],
+      "packager": "rpm",
+      "ext": "rpm",
+      "depends": ["gtk3", "webkit2gtk4.1"],
+      "_note": "mpv-libs sta in RPM Fusion, non nei repo base: come Requires renderebbe il pacchetto non installabile su un RHEL pulito. Va in Recommends, così l'app si installa e perde solo il player nativo.",
+      "recommends": ["mpv-libs"]
+    },
+    "debian": {
+      "label": "Debian",
+      "ids": ["debian"],
+      "packager": "deb",
+      "ext": "deb",
+      "depends": ["libgtk-3-0", "libwebkit2gtk-4.1-0", "libmpv2"]
+    },
+    "ubuntu": {
+      "label": "Ubuntu / Mint / Pop!_OS",
+      "ids": ["ubuntu", "linuxmint", "pop", "elementary", "zorin"],
+      "packager": "deb",
+      "ext": "deb",
+      "_note": "Da 24.04 la transizione time_t ha rinominato libgtk-3-0 in libgtk-3-0t64: l'alternativa copre entrambe le generazioni. libmpv2 | libmpv1 copre 22.04 (mpv1) e 24.04+ (mpv2).",
+      "depends": ["libgtk-3-0t64 | libgtk-3-0", "libwebkit2gtk-4.1-0", "libmpv2 | libmpv1"]
+    },
+    "arch": {
+      "label": "Arch / Manjaro / EndeavourOS / CachyOS",
+      "ids": ["arch", "manjaro", "endeavouros", "cachyos", "garuda"],
+      "packager": "archlinux",
+      "ext": "pkg.tar.zst",
+      "depends": ["gtk3", "webkit2gtk-4.1", "mpv"]
+    },
+    "portable": {
+      "label": "Archivio portatile (qualunque glibc ≥ 2.34)",
+      "ids": [],
+      "packager": "tar",
+      "ext": "tar.gz",
+      "depends": [],
+      "_note": "Copre le derivate non elencate sopra (Rocky/Alma senza RPM Fusion, distro minori). Installabile in ~/.local con l'install.sh incluso."
+    }
+  }
+}

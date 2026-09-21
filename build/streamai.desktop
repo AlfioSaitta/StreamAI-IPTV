@@ -2,13 +2,20 @@
 Name=StreamAI
 GenericName=IPTV Player
 Comment=AI-powered IPTV Player with casting and PiP
-Exec=streamai %U
+# Niente `%U`: `cmd/streamai/main.go` non legge `os.Args`, quindi un file passato
+# dal file manager veniva ignorato e l'app si apriva e basta. Quando l'apertura
+# dei file sarà implementata, va reintrodotto qui insieme al campo MimeType.
+Exec=streamai
+TryExec=streamai
 Terminal=false
 Type=Application
 Icon=streamai
-Categories=AudioVideo;Video;Player;TV;Network;
-MimeType=application/vnd.apple.mpegurl;application/x-mpegURL;video/mp2t;application/x-mpegurl;application/octet-stream;
+Categories=AudioVideo;Video;Player;TV;
+# `MimeType` è assente di proposito. Prima dichiarava
+# `application/octet-stream`, che rivendica *tutti* i file binari sconosciuti del
+# sistema: il file manager offriva "Apri con StreamAI" su qualunque cosa. Le voci
+# m3u/mp2t sono state rimosse per lo stesso motivo di `%U`: senza parsing degli
+# argomenti l'associazione non porta a nulla.
 Keywords=IPTV;Video;Player;Streaming;Cast;Chromecast;DLNA;
 StartupWMClass=StreamAI
 StartupNotify=true
-

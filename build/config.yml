@@ -18,8 +18,7 @@ info:
   description: "AI-powered IPTV player — Wails v3 build"
   copyright: "(c) 2026, StreamAI"
   comments: "Linux/Windows/macOS desktop runtime, libmpv backend"
-  version: "1.0.0"
-
+  version: "1.0.1"
 # Pipeline `wails3 dev`. Su file change (debounce 1s) Wails ri-esegue
 # in sequenza: build Go (blocking) + run (primary). Il frontend Vite
 # gira in background con HMR — l'asset server di Wails fa proxy verso

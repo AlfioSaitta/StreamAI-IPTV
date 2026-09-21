@@ -1,4 +1,17 @@
+# Config nfpm di BASE — non usare direttamente con `nfpm pkg`.
+#
+# Le dipendenze sono per-distro e nfpm supporta `overrides` solo per packager,
+# quindi il blocco `overrides:` NON è qui: lo genera
+# `scripts/make-nfpm-config.mjs <distro>` a partire dalla tabella
+# `build/depends/distros.json`, e `scripts/build-linux.sh` lo passa a nfpm con
+# `--config`. Usare questo file così com'è produrrebbe un pacchetto senza
+# dipendenze dichiarate.
+#
+# `${VERSION}` e `${RELEASE}` sono espansi da nfpm dall'ambiente: lo script li
+# esporta prima di invocarlo.
 name: "streamai-iptv"
+# Solo x86_64: la build è nativa (cgo + libmpv) e non c'è cross-compilazione.
+# Per aarch64 servirebbe parametrizzare anche questo campo.
 arch: "amd64"
 platform: "linux"
 version: "${VERSION}"
@@ -32,24 +45,3 @@ contents:
     dst: "/usr/share/icons/hicolor/256x256/apps/streamai.png"
   - src: "./build/icons/512x512.png"
     dst: "/usr/share/icons/hicolor/512x512/apps/streamai.png"
-
-overrides:
-  deb:
-    depends:
-      - libgtk-3-0
-      - libwebkit2gtk-4.1-0
-      - libmpv2 | libmpv1
-    recommends:
-      - gstreamer1.0-plugins-good
-      - gstreamer1.0-plugins-bad
-      - gstreamer1.0-plugins-ugly
-  rpm:
-    depends:
-      - gtk3
-      - webkit2gtk4.1
-      - mpv-libs
-  archlinux:
-    depends:
-      - gtk3
-      - webkit2gtk-4.1
-      - mpv

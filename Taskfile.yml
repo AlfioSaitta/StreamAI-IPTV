@@ -120,14 +120,17 @@ tasks:
     cmds:
       - go mod tidy
 
-  # ---- Packaging (Linux, fase 8) ----
+  # ---- Packaging (Linux) ----
   package:linux:
     desc: |
-      Build pacchetto Linux per la distro host. Vedi docs/plan-go-wails-migration.md §5.1.
-      Usa nfpm dopo aver buildato il binario (Fase 8 del piano migrazione).
+      Pacchetto Linux per la distro host (.deb/.rpm/.pkg.tar.zst), con le
+      dipendenze corrette per quella distro. Vedi build/depends/distros.json.
+      Il binario lo produce la task `build` (dep), quindi qui si passa
+      --skip-build: senza, si compilerebbe due volte.
+      Per tutte le distro: `npm run dist:linux` (o `bash scripts/build-linux.sh`).
     deps: [build]
     cmds:
-      - echo "TODO Fase 8 — placeholder per nfpm pkg --packager deb|rpm|archlinux"
+      - bash scripts/build-linux.sh --host --skip-build --verify
 
   package:windows:
     desc: |

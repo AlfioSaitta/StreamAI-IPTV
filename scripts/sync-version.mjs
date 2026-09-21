@@ -10,6 +10,7 @@
  *   - android/app/build.gradle → versionName "x.y.z"
  *   - android/app/build.gradle → versionCode <integer> (derived from
  *     x*10000 + y*100 + z; never decreases as long as components grow)
+ *   - build/config.yml → info.version (letto da `wails3 dev`)
  *
  * In CI the *full* version printed by --print-full appends a short commit
  * SHA so that artefact filenames carry the build provenance, e.g.
@@ -105,6 +106,27 @@ if (existsSync(gradle)) {
     console.log(`✓ android/app/build.gradle → versionName "${base}" / versionCode ${code}`);
   } else {
     console.log(`= android/app/build.gradle already in sync`);
+  }
+}
+
+// ---- Sync to build/config.yml ---------------------------------------------
+// Letto da `wails3 dev`. Restava fermo a 1.0.0 mentre .version era 1.0.1: una
+// versione che mente, anche se il file non entra negli artefatti di release.
+// Il blocco `info:` è indentato, quindi la sostituzione è ancorata alla riga.
+const wailsCfg = resolve(ROOT, 'build/config.yml');
+if (existsSync(wailsCfg)) {
+  const txt = readFileSync(wailsCfg, 'utf8');
+  const verRe = /^(\s+version:\s*)(['"])[^'"]*\2\s*$/m;
+  if (verRe.test(txt)) {
+    const newTxt = txt.replace(verRe, `$1"${base}"`);
+    if (newTxt !== txt) {
+      writeFileSync(wailsCfg, newTxt);
+      console.log(`✓ build/config.yml → info.version "${base}"`);
+    } else {
+      console.log(`= build/config.yml already in sync`);
+    }
+  } else {
+    console.warn(`⚠ build/config.yml: nessuna riga 'version:' trovata sotto info:`);
   }
 }
 
