@@ -1,0 +1,267 @@
+name: Linux release
+
+# Costruisce, firma e pubblica i pacchetti Linux: .deb (Debian, Ubuntu),
+# .rpm (openSUSE, Fedora, RHEL), .pkg.tar.zst (Arch) e un archivio portatile.
+#
+# Si attiva su tag `v*` e manualmente (workflow_dispatch). Prima di questo file
+# `.github/workflows/` non esisteva, quindi README.md, AGENTS.md e
+# docs/SIGNING.md promettevano una pipeline che non c'era.
+#
+# Runner: ubuntu-22.04, NON `ubuntu-latest`. Serve la glibc più vecchia che
+# vogliamo supportare: un binario compilato su 24.04 (glibc 2.39) non parte su
+# Debian 12 (2.36) né su Ubuntu 22.04 (2.35), e i pacchetti per quelle distro
+# sarebbero inutilizzabili. Il binario è lo stesso per tutte le distro, quindi
+# questa scelta vale per l'intera matrice.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      publish_pages:
+        description: 'Pubblica anche il repository statico su GitHub Pages'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  # ─── build + firma + verifica ──────────────────────────────────────────────
+  build:
+    name: Pacchetti firmati
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Librerie di sviluppo per il backend cgo (gtk3 + mpv), più gli strumenti
+      # di packaging e verifica. `debsigs` serve per la firma dei .deb (non
+      # disponibile su openSUSE/Fedora: la CI è l'unico posto dove si fa).
+      - name: Dipendenze di sistema
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-3-dev libwebkit2gtk-4.1-dev libmpv-dev \
+            rpm debsigs reprepro createrepo-c
+
+      - name: nfpm
+        run: |
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.47.0
+          # `go install` scrive in $GOPATH/bin, che i passi successivi non hanno
+          # nel PATH: senza questo `build-linux.sh` non trova nfpm e esce 5.
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Wails CLI
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha.93
+
+      - name: Dipendenze npm
+        run: npm ci
+
+      # Il tag è la versione dichiarata: `v1.0.1` deve corrispondere a `.version`.
+      # Senza questo controllo si pubblicherebbe un pacchetto 1.0.1 da un tag
+      # `v1.0.2`, cioè un artefatto che mente sul proprio contenuto.
+      - name: Coerenza tag ↔ .version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          ver="$(cat .version)"
+          if [ "$tag" != "$ver" ]; then
+            echo "::error::tag '$GITHUB_REF_NAME' ≠ .version '$ver' (atteso v$ver)"
+            exit 1
+          fi
+          echo "✓ tag $GITHUB_REF_NAME corrisponde a .version $ver"
+
+      - name: Import chiave di firma
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: bash scripts/import-gpg-key.sh
+
+      # `--sign` firma per formato (embedded per deb/rpm, .sig binario per
+      # pacman) e `--verify` estrae il binario da ogni pacchetto confrontando le
+      # sha256: se un pacchetto contenesse un binario diverso, fallisce.
+      - name: Build e packaging (7 artefatti)
+        env:
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          PATH: /home/runner/go/bin:${{ env.PATH }}
+        run: bash scripts/build-linux.sh --all --sign --verify
+
+      # La firma rpm è embedded nell'header: si verifica con rpm, non con gpg.
+      #
+      # ATTENZIONE all'exit code: `rpm --checksig` su un pacchetto NON firmato
+      # stampa "digests OK" ed esce 0. L'esito va quindi letto dall'output, e
+      # serve la parola "Signature": "digests OK" da solo significa che il
+      # pacchetto è integro ma non firmato.
+      #
+      # Per i .deb `debsigs --verify` richiederebbe una policy in
+      # /etc/debsig/policies/<FPR>/: si estrae il membro `_gpgorigin` e si
+      # ricostruisce il blob nell'ordine reale dei membri `ar` (l'ordine
+      # canonico non funziona, debsigs firma i byte nell'ordine effettivo di
+      # compressione). La presenza di `_gpgorigin` è il requisito; la verifica
+      # crittografica è un avviso, perché questo è l'unico passo che non è
+      # stato possibile esercitare in locale (debsigs non esiste su openSUSE).
+      - name: Verifica firme
+        run: |
+          rpm --import docs/keys/streamai-pubkey.asc
+          fail=0
+
+          for f in dist/packages/*.rpm; do
+            out="$(rpm --checksig "$f" 2>&1 || true)"
+            if grep -qE 'Signature.*OK|signatures OK' <<<"$out"; then
+              echo "  ✅ rpm firmato: $(basename "$f")"
+            else
+              echo "::error::$f non firmato (output: $out)"; fail=1
+            fi
+          done
+
+          for f in dist/packages/*.deb; do
+            if ! ar t "$f" | grep -qx '_gpgorigin'; then
+              echo "::error::$f non contiene _gpgorigin: non è firmato"; fail=1
+              continue
+            fi
+            work="$(mktemp -d)"
+            blob="$work/blob"; sig="$work/sig"
+            : > "$blob"
+            while IFS= read -r m; do
+              [ "$m" = "_gpgorigin" ] && continue
+              ar p "$f" "$m" >> "$blob"
+            done < <(ar t "$f")
+            ar p "$f" _gpgorigin > "$sig"
+            if gpg --verify "$sig" "$blob" >/dev/null 2>&1; then
+              echo "  ✅ deb firmato e verificato: $(basename "$f")"
+            else
+              echo "::warning::$f ha _gpgorigin ma la verifica crittografica non è passata (blob ricostruito: controllare l'ordine dei membri ar)"
+            fi
+            rm -rf "$work"
+          done
+
+          for f in dist/packages/*.pkg.tar.zst; do
+            gpg --verify "$f.sig" "$f" >/dev/null 2>&1 \
+              && echo "  ✅ pacman .sig valido: $(basename "$f")" \
+              || { echo "::error::firma mancante o non valida per $f"; fail=1; }
+          done
+
+          exit $fail
+
+      - name: Attestazione di provenienza (SLSA)
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/packages/*.deb
+            dist/packages/*.rpm
+            dist/packages/*.pkg.tar.zst
+            dist/packages/*.tar.gz
+
+      - name: Upload artefatti
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: |
+            dist/packages/*
+          retention-days: 14
+          if-no-files-found: error
+
+  # ─── GitHub Release (solo su tag) ─────────────────────────────────────────
+  release:
+    name: GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-packages
+          path: dist/packages
+
+      - name: Crea la release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/packages/* \
+            --title "StreamAI IPTV $GITHUB_REF_NAME" \
+            --generate-notes \
+            --verify-tag
+
+  # ─── Repository statico su GitHub Pages ───────────────────────────────────
+  # Richiede che in Settings → Pages la sorgente sia "GitHub Actions".
+  # `reprepro`/`createrepo_c` sono già installati nel job `build`, ma i job non
+  # condividono il filesystem: si reinstallano qui.
+  publish-repo:
+    name: Repository APT/RPM/Arch
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.publish_pages
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dipendenze di sistema
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            rpm debsigs reprepro createrepo-c
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-packages
+          path: dist/packages
+
+      - name: Import chiave di firma
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: bash scripts/import-gpg-key.sh
+
+      # `repo-add` per il canale Arch gira in un container archlinux: docker c'è
+      # sui runner Ubuntu, ma va avviato (di default è presente ma inattivo).
+      - name: Avvia docker
+        run: sudo systemctl start docker || true
+
+      - name: Assembla public-repo/
+        env:
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          REPO_BASE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+        run: bash scripts/publish-repo.sh
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public-repo
+
+      - name: Deploy su Pages
+        id: deploy
+        uses: actions/deploy-pages@v4

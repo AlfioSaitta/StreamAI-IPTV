@@ -19,21 +19,39 @@
 #   GPG_KEY_ID, GPG_PASSPHRASE  Signing material (imported in current gpg)
 #   REPO_BASE_URL               Public URL, e.g.
 #                               https://<user>.github.io/StreamAI-IPTV
+#
+# Tool richiesti (NON tutti presenti su ogni distro: serve un host
+# Debian-family, oppure il runner ubuntu della CI):
+#   dpkg-deb     indicizzazione dei canali apt
+#   reprepro     gestione del pool apt
+#   createrepo_c indicizzazione dei canali rpm
+#   docker       `repo-add` per il canale Arch (gira in un container archlinux)
+#   gpg          firma di repomd.xml
+# I pacchetti si leggono da dist/packages (output di scripts/build-linux.sh).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-DIST="$ROOT/dist"
+# `dist/packages` è dove scrive build-linux.sh. Con il vecchio `dist/` i glob
+# `*_<distro>_*.deb` non matchavano nulla, quindi i canali apt/rpm/arch non
+# venivano popolati e lo script "pubblicava" solo index.html e pubkey.asc.
+DIST="${DIST_DIR:-$ROOT/dist/packages}"
 OUT="$ROOT/public-repo"
 KEYS="$ROOT/docs/keys"
 REPO_BASE_URL="${REPO_BASE_URL:-https://example.github.io/StreamAI-IPTV}"
 
 : "${GPG_KEY_ID:?GPG_KEY_ID must be set}"
 
-GPG_ARGS=(--batch --yes --pinentry-mode loopback -u "$GPG_KEY_ID")
-if [[ -n "${GPG_PASSPHRASE:-}" ]]; then
-  GPG_ARGS+=(--passphrase "$GPG_PASSPHRASE")
-fi
+# La passphrase non passa da argv (visibile a `ps`): `gpg` la legge da stdin.
+gpg_sign() { # $1=output  $2=input  [altri flag]
+  local out="$1" in="$2"; shift 2
+  if [[ -n "${GPG_PASSPHRASE:-}" ]]; then
+    printf '%s' "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback \
+      --passphrase-fd 0 -u "$GPG_KEY_ID" --output "$out" "$@" "$in"
+  else
+    gpg --batch --yes --pinentry-mode loopback -u "$GPG_KEY_ID" --output "$out" "$@" "$in"
+  fi
+}
 
 FPR="$(cat "$KEYS/streamai-fingerprint.txt" 2>/dev/null || echo "$GPG_KEY_ID")"
 
@@ -150,9 +168,7 @@ build_rpm_channel() {
     cp -f "$rpm" "$channel_dir/$(basename "$rpm")"
   done
   createrepo_c --update "$channel_dir" 2>/dev/null || createrepo_c "$channel_dir"
-  gpg "${GPG_ARGS[@]}" --armor --detach-sign --yes \
-    --output "$channel_dir/repodata/repomd.xml.asc" \
-    "$channel_dir/repodata/repomd.xml"
+  gpg_sign "$channel_dir/repodata/repomd.xml.asc" "$channel_dir/repodata/repomd.xml" --armor --detach-sign
   cat > "$channel_dir/streamai.repo" <<EOF
 [streamai]
 name=StreamAI IPTV (${distro})

@@ -155,8 +155,25 @@ avviare l'app sotto XWayland (`GDK_BACKEND=x11 streamai`), dove il compositor
 onora la richiesta — al costo di un livello di compatibilità in più su tutto il
 rendering.
 
-## AppImage / tar.xz (disponibili a breve)
-Le versioni universali AppImage e tar.xz sono in fase di migrazione verso il nuovo runtime Wails e non sono ancora disponibili per la versione 2.0.0. Utilizza i pacchetti nativi (.deb, .rpm, .pkg.tar.zst) per la migliore integrazione con il sistema.
+## Archivio portatile (distro non elencate)
+
+Per le derivate non coperte dai canali sopra (Rocky/Alma senza RPM Fusion,
+distro minori) ogni release include
+`streamai-iptv_<versione>_<commit>_portable_amd64.tar.gz`. Contiene il binario,
+la voce desktop e le icone, più uno script di installazione:
+
+```bash
+tar -xzf streamai-iptv_*_portable_amd64.tar.gz
+cd streamai-iptv-*/
+./install.sh              # in ~/.local (non serve root)
+./install.sh --system     # in /usr/local (serve root)
+```
+
+Richiede le stesse librerie dei pacchetti nativi (GTK3, WebKitGTK 4.1, libmpv) e
+**glibc ≥ 2.34**: esclude Ubuntu 20.04 e Debian 11, non aggirabile perché il
+binario è compilato nativamente. AppImage non è previsto: richiederebbe
+`appimagetool` e FUSE, e l'archivio portatile copre lo stesso caso d'uso senza
+quella dipendenza.
 
 ---
 

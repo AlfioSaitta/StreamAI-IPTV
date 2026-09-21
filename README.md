@@ -84,17 +84,34 @@ npm run dev
 
 ### Build Produzione
 ```bash
-# Genera i pacchetti Linux (.deb, .rpm, .pkg.tar.zst)
+# Genera i pacchetti per tutte le distro supportate
+# (.deb per Debian/Ubuntu, .rpm per openSUSE/Fedora/RHEL, .pkg.tar.zst per Arch,
+#  più un archivio portatile)
 npm run dist:linux
 
-# Solo build binario locale
-npm run wails:build
+# Solo la distro su cui stai lavorando, con verifica dei metadata
+npm run dist:linux:host
+
+# Una distro specifica (opensuse, fedora, rhel, debian, ubuntu, arch, portable)
+npm run dist:linux:arch
 ```
 
-Gli artefatti finiscono in `dist/packages/`. La versione proviene dal file `.version` ed è propagata automaticamente agli altri file di progetto tramite `npm run version:sync`.
+Gli artefatti finiscono in `dist/packages/`. Le dipendenze dichiarate in ogni
+pacchetto sono **specifiche per la distro** (openSUSE e Fedora sono entrambe rpm
+ma con nomi di libreria diversi): la tabella è in `build/depends/distros.json`.
+La versione proviene dal file `.version` ed è propagata automaticamente agli
+altri file di progetto tramite `npm run version:sync`.
 
 ### Release automatiche (GitHub Actions)
-Un push di tag `v*` attiva il workflow che costruisce, firma (GPG) e pubblica i pacchetti per Linux su GitHub Releases e sul repository statico di GitHub Pages.
+Un push di tag `v*` attiva il workflow [`.github/workflows/linux-release.yml`](.github/workflows/linux-release.yml),
+che costruisce i pacchetti per le 6 distro, li firma con GPG (per formato:
+embedded per deb/rpm, `.sig` binario per pacman), verifica le firme, genera
+l'attestazione di provenienza SLSA e pubblica tutto su GitHub Releases e sul
+repository statico di GitHub Pages. La build gira su `ubuntu-22.04` per non
+alzare il requisito minimo di glibc del binario.
+
+Lo stesso tag deve corrispondere a `.version`: il workflow si ferma se non
+coincidono, così non si pubblica un pacchetto che mente sulla propria versione.
 
 ---
 
@@ -131,14 +148,24 @@ L'applicazione è completamente controllabile via tastiera per un'esperienza "Le
 
 | Tasto | Azione |
 |-------|--------|
-| `Spazio` / `Invio` / `P` | Play/Pausa |
+| `Spazio` / `Invio` | Play/Pausa |
+| `P` | Picture-in-Picture |
 | `←` / `→` | Seeking -/+ 10 secondi |
 | `↑` / `↓` | Volume +/- 10% |
 | `M` | Mute/Unmute |
 | `F` | Fullscreen Toggle |
 | `C` | Menu Casting |
-| `L` | Mostra/Nascondi Playlist |
+| `L` | Mostra/Nascondi Playlist (live e serie) |
+| `G` | Mini-EPG (canali live) |
+| `S` | Sottotitoli |
+| `T` | Sleep timer |
+| `Ctrl+K` | Command palette (ricerca globale) |
+| `?` | Scheda delle scorciatoie |
 | `Esc` | Indietro / Chiudi menu |
+
+> Nella finestra PiP valgono `Spazio`/`Invio`, `M`, `F`, `←`/`→` e `Esc`. Le
+> altre restano nella finestra principale. La mappa è fissata dai test in
+> `frontend/tests/hooks/usePlayerShortcuts.test.tsx`.
 
 ---
 
