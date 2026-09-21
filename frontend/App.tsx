@@ -392,6 +392,16 @@ function App() {
     xtreamCredsRef.current = xtreamCreds;
   }, [xtreamCreds]);
 
+  // Profilo attivo letto da ref: `refreshContentFromServer` è usato dall'effect
+  // di auto-refresh, e se dipendesse da `activeProfile` (oggetto ricreato a ogni
+  // mutazione: toggle watchlist, ritorno dal player, dismiss dell'hint AI…)
+  // cambiherebbe identità a ogni azione e l'effect riarmerebbe il timer da capo,
+  // rimandando indefinitamente l'aggiornamento periodico.
+  const activeProfileRef = useRef<Profile | null>(null);
+  useEffect(() => {
+    activeProfileRef.current = activeProfile;
+  }, [activeProfile]);
+
   // Indice id → canale del catalogo corrente. Serve ai listener registrati una
   // volta sola (click sulla notifica EPG) che devono comunque vedere il
   // catalogo aggiornato. Evita anche la scansione lineare di tutti i canali.
@@ -488,8 +498,15 @@ function App() {
         setShowCheatsheet(prev => !prev);
         return;
       }
-      // 'F' / 'f' → toggle window fullscreen (Fase 7.2)
+      // 'F' / 'f' → toggle window fullscreen (Fase 7.2).
+      // Con il player aperto il tasto è di `usePlayerShortcuts` (registrato da
+      // `VideoPlayerNew`, montato solo con `currentChannel`): entrambi i
+      // listener stanno su `window` in fase bubble e scattano comunque, quindi
+      // senza questa guardia il fullscreen veniva commutato DUE volte (una per
+      // handler) e tornava allo stato di partenza. Stessa logica di Ctrl+K qui
+      // sopra e di 'G' qui sotto.
       if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+        if (stateRef.current.currentChannel) return;
         if (platformService.isWails && host?.toggleFullscreen) {
           e.preventDefault();
           host.toggleFullscreen().catch(console.error);
@@ -847,7 +864,13 @@ function App() {
   };
 
   const refreshContentFromServer = useCallback(async (options: { background?: boolean } = {}) => {
-      if (!activeProfile?.id || !activeProfile.xtreamCreds) {
+      // Profilo letto dalla ref (vedi `activeProfileRef`): con `[activeProfile]`
+      // nelle dipendenze questa callback cambiava identità a ogni mutazione del
+      // profilo, e l'effect di auto-refresh — che la ha fra le dipendenze —
+      // riarmava timeout e interval da capo, rimandando l'aggiornamento
+      // periodico a ogni toggle di watchlist o ritorno dal player.
+      const profile = activeProfileRef.current;
+      if (!profile?.id || !profile.xtreamCreds) {
           const message = 'Configura prima un server Xtream per questo profilo.';
           setContentRefreshStatus({ state: 'error', message, updatedAt: Date.now() });
           throw new Error(message);
@@ -872,7 +895,7 @@ function App() {
           // è il path TypeScript (web/Capacitor) e instrada su un Web Worker
           // che non ha senso né garanzie su Wails. Va scelto in base alla
           // piattaforma, esattamente come in `handleXtreamLogin`.
-          const creds = activeProfile.xtreamCreds;
+          const creds = profile.xtreamCreds;
           const content = platformService.isWails
               ? normalizeGoPlaylist(await runGoPlaylistPipeline(creds), creds)
               : await loginXtream(creds, true);
@@ -881,10 +904,10 @@ function App() {
           setVodCategories(content.vod);
           setSeriesCategories(content.series);
           setCatalogHealth(content.health ?? null);
-          setXtreamCreds(activeProfile.xtreamCreds);
+          setXtreamCreds(profile.xtreamCreds);
 
           const refreshedAt = Date.now();
-          const updatedProfile = ProfileService.updatePreferences(activeProfile.id, {
+          const updatedProfile = ProfileService.updatePreferences(profile.id, {
               contentLastRefreshAt: refreshedAt,
               contentLastRefreshError: undefined
           });
@@ -900,7 +923,7 @@ function App() {
           return { lastRefreshAt: refreshedAt };
       } catch (error) {
           const message = error instanceof Error ? error.message : 'Errore sconosciuto durante aggiornamento catalogo.';
-          const updatedProfile = ProfileService.updatePreferences(activeProfile.id, {
+          const updatedProfile = ProfileService.updatePreferences(profile.id, {
               contentLastRefreshError: message
           });
           if (updatedProfile) {
@@ -913,7 +936,7 @@ function App() {
       } finally {
           contentRefreshInFlightRef.current = false;
       }
-  }, [activeProfile]);
+  }, []);
 
   // Aggiorna il ref ogni volta che la callback cambia (BUG-1 §2.3 Step 4).
   useEffect(() => {

@@ -1,14 +1,15 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback, useDeferredValue } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, useDeferredValue, startTransition } from 'react';
 import { Category, Channel, StreamType, WatchHistoryItem, XtreamContent } from '../types.ts';
 import { Search, Play, Info, ChevronRight, LogOut, Clock, RefreshCw, BookmarkPlus, BookmarkCheck, Settings, X, Tv, SearchX, Server, Calendar, AlertTriangle, Film as FilmIcon, Sparkles } from 'lucide-react';
 import CachedImage from './CachedImage.tsx';
 import { useLanguage } from '../contexts/LanguageContext.tsx';
 import EmptyState from './shared/EmptyState.tsx';
-import { Button } from './shared';
+import { Button, Spinner } from './shared';
 import { useInitialTvFocus, useTvSpatialNavigation } from '../hooks/useTvFocus.ts';
 import { DownloadManager } from '../services/downloadManager.ts';
 import { IndexedChannel, indexCategories, indexChannels, searchIndexedChannels } from '../services/catalogIndex.ts';
 import { getSemanticSearchResults, isAiAvailable } from '../services/geminiService.ts';
+import { isUsableViewportWidth, virtualWindow } from '../services/virtualWindow.ts';
 
 const INITIAL_VISIBLE_ROWS = 6;
 const ROW_BATCH_SIZE = 6;
@@ -17,6 +18,14 @@ const ROW_ITEM_INCREMENT = 72;
 const HORIZONTAL_VIRTUALIZATION_THRESHOLD = 36;
 const HORIZONTAL_OVERSCAN = 8;
 const SEARCH_RESULT_LIMIT = 180;
+
+/**
+ * Quanti elementi oltre la finestra visibile precaricare mentre la macchina è
+ * inattiva: circa una schermata, così quando l'utente riprende a scorrere le
+ * copertine sono già in cache.
+ */
+const PRELOAD_AHEAD_ITEMS = 12;
+
 
 /**
  * Costante condivisa per il caso "nessuna categoria indicizzata".
@@ -165,9 +174,16 @@ const ChannelItem = React.memo(({
         </button>
     );
 }, (prev, next) => (
-    prev.channel.id === next.channel.id && 
-    prev.progress === next.progress && 
-    prev.isInWatchlist === next.isInWatchlist
+    prev.channel.id === next.channel.id &&
+    prev.progress === next.progress &&
+    prev.isInWatchlist === next.isInWatchlist &&
+    // `isPoster` decide le classi di layout (`w-[150px] aspect-[2/3]` vs
+    // `w-[140px] aspect-square`, riga ~116) e il fitting dell'immagine
+    // (`object-cover` vs `object-contain`, riga ~153): senza questo confronto
+    // la stessa card (stesso `id`) cambia aspetto fra una riga poster e una
+    // riga quadrata — es. "Continua a guardare" all'alternarsi dei tab — e
+    // React fa bail-out lasciando le classi vecchie.
+    prev.isPoster === next.isPoster
 ));
 
 // Memoized Content Row
@@ -176,9 +192,31 @@ const ContentRow = React.memo(({ title, channels, onSelect, isPoster, progressMa
     const [itemLimit, setItemLimit] = useState(INITIAL_ROW_ITEMS);
     const [scrollState, setScrollState] = useState({ scrollLeft: 0, viewportWidth: 1200 });
 
+    const pagedChannels = channels.slice(0, itemLimit);
+    const hasMoreItems = itemLimit < channels.length;
+    const itemExtent = isPoster ? 196 : 176;
+    const shouldVirtualize = pagedChannels.length > HORIZONTAL_VIRTUALIZATION_THRESHOLD;
+    const { start: startIndex, end: endIndex } = virtualWindow(
+        scrollState.scrollLeft,
+        scrollState.viewportWidth,
+        itemExtent,
+        pagedChannels.length,
+        HORIZONTAL_OVERSCAN,
+        shouldVirtualize,
+    );
+    const visibleChannels = pagedChannels.slice(startIndex, endIndex);
+    const beforeWidth = shouldVirtualize ? startIndex * itemExtent : 0;
+    const afterWidth = shouldVirtualize ? Math.max(0, (pagedChannels.length - endIndex) * itemExtent) : 0;
+
     useEffect(() => {
         setItemLimit(INITIAL_ROW_ITEMS);
-        setScrollState({ scrollLeft: 0, viewportWidth: rowRef.current?.clientWidth || 1200 });
+        // Una larghezza non utilizzabile non deve cancellare quella che si ha:
+        // vedi `isUsableViewportWidth`.
+        const larghezza = rowRef.current?.clientWidth ?? 0;
+        setScrollState(prev => ({
+            scrollLeft: 0,
+            viewportWidth: isUsableViewportWidth(larghezza) ? larghezza : prev.viewportWidth,
+        }));
         rowRef.current?.scrollTo({ left: 0, behavior: 'auto' });
     }, [channels, title]);
 
@@ -186,30 +224,61 @@ const ContentRow = React.memo(({ title, channels, onSelect, isPoster, progressMa
         const row = rowRef.current;
         if (!row) return;
 
-        const updateMetrics = () => setScrollState({ scrollLeft: row.scrollLeft, viewportWidth: row.clientWidth || 1200 });
-        updateMetrics();
-        row.addEventListener('scroll', updateMetrics, { passive: true });
+        // Lo scorrimento emette decine di eventi al secondo e ogni `setState` è
+        // un re-render dell'intera riga con le sue copertine. Due accorgimenti:
+        //
+        //  - una sola lettura per fotogramma (`requestAnimationFrame`) invece di
+        //    una per evento;
+        //  - se la finestra visibile non cambia (stessi indici), lo stato non
+        //    viene toccato: la riga è già quella giusta e non c'è nulla da
+        //    ridisegnare. È il caso più frequente, perché gli elementi misurano
+        //    ~180 px e un evento di scroll sposta molto meno.
+        let frame = 0;
+        const finestra: { start: number; end: number } = { start: -1, end: -1 };
 
-        const resizeObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(updateMetrics) : null;
+        const applica = () => {
+            frame = 0;
+            const target = rowRef.current;
+            if (!target) return;
+
+            const scrollLeft = target.scrollLeft;
+            const viewportWidth = target.clientWidth;
+            // Misura non utilizzabile (riga saltata dal rendering): si aspetta
+            // il prossimo fotogramma invece di restringere la finestra a una
+            // decina di elementi.
+            if (!isUsableViewportWidth(viewportWidth)) return;
+            const next = virtualWindow(
+                scrollLeft,
+                viewportWidth,
+                itemExtent,
+                pagedChannels.length,
+                HORIZONTAL_OVERSCAN,
+                shouldVirtualize,
+            );
+            if (next.start === finestra.start && next.end === finestra.end) return;
+
+            finestra.start = next.start;
+            finestra.end = next.end;
+            setScrollState({ scrollLeft, viewportWidth });
+        };
+
+        const schedule = () => {
+            if (frame) return;
+            frame = window.requestAnimationFrame(applica);
+        };
+
+        applica();
+        row.addEventListener('scroll', schedule, { passive: true });
+
+        const resizeObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(schedule) : null;
         resizeObserver?.observe(row);
 
         return () => {
-            row.removeEventListener('scroll', updateMetrics);
+            if (frame) window.cancelAnimationFrame(frame);
+            row.removeEventListener('scroll', schedule);
             resizeObserver?.disconnect();
         };
-    }, []);
-
-    const pagedChannels = channels.slice(0, itemLimit);
-    const hasMoreItems = itemLimit < channels.length;
-    const itemExtent = isPoster ? 196 : 176;
-    const shouldVirtualize = pagedChannels.length > HORIZONTAL_VIRTUALIZATION_THRESHOLD;
-    const startIndex = shouldVirtualize ? Math.max(0, Math.floor(scrollState.scrollLeft / itemExtent) - HORIZONTAL_OVERSCAN) : 0;
-    const endIndex = shouldVirtualize
-        ? Math.min(pagedChannels.length, Math.ceil((scrollState.scrollLeft + scrollState.viewportWidth) / itemExtent) + HORIZONTAL_OVERSCAN)
-        : pagedChannels.length;
-    const visibleChannels = pagedChannels.slice(startIndex, endIndex);
-    const beforeWidth = shouldVirtualize ? startIndex * itemExtent : 0;
-    const afterWidth = shouldVirtualize ? Math.max(0, (pagedChannels.length - endIndex) * itemExtent) : 0;
+    }, [itemExtent, pagedChannels.length, shouldVirtualize]);
 
     // Dipendenze su valori PRIMITIVI (o sulla prop stabile `channels`).
     // `visibleChannels` e `pagedChannels` sono array nuovi a ogni render,
@@ -217,26 +286,40 @@ const ContentRow = React.memo(({ title, channels, onSelect, isPoster, progressMa
     // della riga, rilanciando il preload di ~72 loghi per riga (fino a 6 righe)
     // anche quando nulla era cambiato.
     useEffect(() => {
-        const urls = channels
-            .slice(0, itemLimit)
-            .slice(startIndex, endIndex)
-            .map(channel => channel.logo)
-            .filter((url): url is string => Boolean(url));
-        DownloadManager.preloadVisible(urls);
+        const loghi = (da: number, a: number) =>
+            channels
+                .slice(0, itemLimit)
+                .slice(da, a)
+                .map(channel => channel.logo)
+                .filter((url): url is string => Boolean(url));
+
+        DownloadManager.preloadVisible(loghi(startIndex, endIndex));
+
+        // Guardare avanti mentre l'utente è fermo: quando riprende a scorrere,
+        // le copertine della schermata successiva sono già in cache. In idle,
+        // perché durante lo scroll quel tempo serve a ciò che sta guardando.
+        DownloadManager.preloadLater(loghi(endIndex, endIndex + PRELOAD_AHEAD_ITEMS));
     }, [channels, itemLimit, startIndex, endIndex]);
 
     if (channels.length === 0) return null;
 
     return (
-        <div className="space-y-3 group/row py-2">
+        <div className="offscreen-skip space-y-3 group/row py-2">
             <h2 className="text-xl font-semibold text-gray-200 group-hover/row:text-white transition-colors pl-1 flex items-center gap-2">
                 {title} <ChevronRight className="w-4 h-4 opacity-0 group-hover/row:opacity-100 transition-opacity text-gray-400" />
             </h2>
             
             <div className="relative">
-                <div 
+                <div
                     ref={rowRef}
-                    className="flex gap-4 overflow-x-auto no-scrollbar scroll-smooth px-1 py-4"
+                    // Niente `scroll-smooth`: `scroll-behavior: smooth` vale anche
+                    // per le chiamate che chiedono `behavior:'auto'`, quindi il
+                    // riallineamento a inizio riga al cambio tab animava, e
+                    // animava *mentre* la finestra virtuale cambiava sotto.
+                    // Lo scorrimento animato da tastiera resta: `useTvFocus`
+                    // chiede `behavior:'smooth'` esplicitamente, e l'opzione
+                    // esplicita vince sul CSS.
+                    className="flex gap-4 overflow-x-auto no-scrollbar px-1 py-4"
                 >
                     {beforeWidth > 0 && <div className="flex-none" style={{ width: beforeWidth }} aria-hidden="true" />}
                     {visibleChannels.map((channel) => (
@@ -305,6 +388,10 @@ const ChannelList: React.FC<ChannelListProps> = ({
   const [aiSearchEnabled, setAiSearchEnabled] = useState(false);
   const [aiSearchResults, setAiSearchResults] = useState<string[] | null>(null);
   const [aiSearchLoading, setAiSearchLoading] = useState(false);
+  const [aiSearchError, setAiSearchError] = useState<string | null>(null);
+  // Incrementato dal pulsante "Riprova": rientra nelle dipendenze dell'effect
+  // per rilanciare la stessa query senza toccare il testo di ricerca.
+  const [aiSearchRetryNonce, setAiSearchRetryNonce] = useState(0);
 
   const indexedLiveCategories = useMemo(() => indexCategories(liveCategories), [liveCategories]);
   const indexedVodCategories = useMemo(() => indexCategories(vodCategories), [vodCategories]);
@@ -526,10 +613,32 @@ const ChannelList: React.FC<ChannelListProps> = ({
   }, []);
 
   // Navbar Scroll
+  //
+  // Una lettura per fotogramma invece di una per evento: lo scorrimento ne
+  // emette decine al secondo e ognuna aggiornava lo stato della navbar (che è
+  // `fixed`, quindi ogni commit tocca la barra sopra il contenuto che scorre).
+  // `passive` perché qui non si annulla nulla: dichiararlo evita che il browser
+  // debba aspettare l'handler prima di iniziare a scorrere.
   useEffect(() => {
-    const handleScroll = () => setScrolled(window.scrollY > 50);
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
+    let frame = 0;
+    const applica = () => {
+      frame = 0;
+      const next = window.scrollY > 50;
+      // Il valore si confronta prima di scrivere: senza, il commit parte a ogni
+      // fotogramma anche quando la navbar non deve cambiare nulla.
+      setScrolled(prev => (prev === next ? prev : next));
+    };
+    const schedule = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(applica);
+    };
+
+    applica();
+    window.addEventListener('scroll', schedule, { passive: true });
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      window.removeEventListener('scroll', schedule);
+    };
   }, []);
 
   // Featured Item - Seleziona contenuto di qualità per l'Hero
@@ -582,9 +691,20 @@ const ChannelList: React.FC<ChannelListProps> = ({
 
   // Infinite Scroll Observer
   useEffect(() => {
+      // Le righe nuove si montano in una transizione, non in un aggiornamento
+      // urgente: l'osservatore scatta con 400 px di anticipo, cioè quasi sempre
+      // *mentre* l'utente sta scorrendo, e montare 6 righe (≈90 card, ognuna con
+      // la sua richiesta immagine) è la fetta di lavoro più grossa della
+      // schermata. Come transizione React può interromperla se arriva un
+      // fotogramma di scorrimento e riprenderla dopo.
+      //
+      // Non `requestIdleCallback`: WebKitGTK non lo espone (vedi
+      // `downloadManager.ts`, che per lo stesso motivo ha un fallback a mano).
       const observer = new IntersectionObserver((entries) => {
           if (entries[0].isIntersecting) {
-              setVisibleRows(prev => Math.min(prev + ROW_BATCH_SIZE, filteredCategories.length));
+              startTransition(() => {
+                  setVisibleRows(prev => Math.min(prev + ROW_BATCH_SIZE, filteredCategories.length));
+              });
           }
       }, { rootMargin: '400px' });
 
@@ -603,19 +723,42 @@ const ChannelList: React.FC<ChannelListProps> = ({
   }, [activeTab, homeCategories, indexedBaseCategories]);
 
   useEffect(() => {
-    if (aiSearchEnabled && deferredSearchTerm.length > 1) {
-      const performAiSearch = async () => {
-        setAiSearchLoading(true);
-        setAiSearchResults(null);
-        const results = await getSemanticSearchResults(indexedAllChannels, deferredSearchTerm, activeTab, true, geminiApiKey);
-        setAiSearchResults(results);
-        setAiSearchLoading(false);
-      };
-      performAiSearch();
-    } else {
+    if (!aiSearchEnabled || deferredSearchTerm.length <= 1) {
       setAiSearchResults(null);
+      setAiSearchError(null);
+      setAiSearchLoading(false);
+      return;
     }
-  }, [aiSearchEnabled, deferredSearchTerm, indexedAllChannels, activeTab, geminiApiKey]);
+
+    // `cancelled` copre due casi distinti: la query cambia mentre la richiesta
+    // è in volo (una risposta lenta non deve sovrascrivere una più recente) e
+    // lo smontaggio del componente (niente setState su un albero smontato).
+    let cancelled = false;
+    setAiSearchLoading(true);
+    setAiSearchError(null);
+    setAiSearchResults(null);
+
+    void (async () => {
+      try {
+        const results = await getSemanticSearchResults(indexedAllChannels, deferredSearchTerm, activeTab, true, geminiApiKey);
+        if (!cancelled) setAiSearchResults(results);
+      } catch (err) {
+        if (cancelled) return;
+        // `getSemanticSearchResults` cattura già i propri errori e ritorna `[]`,
+        // ma la fase di arricchimento TMDB (`Promise.all` dei candidati) sta
+        // FUORI da quel try/catch: una sua rejection arrivava qui come promise
+        // rifiutata non gestita, lasciando `aiSearchLoading` true per sempre e
+        // l'area contenuti bianca senza alcun messaggio.
+        console.error('[ChannelList] AI search failed:', err);
+        setAiSearchError(err instanceof Error ? err.message : String(err));
+        setAiSearchResults([]);
+      } finally {
+        if (!cancelled) setAiSearchLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [aiSearchEnabled, deferredSearchTerm, indexedAllChannels, activeTab, geminiApiKey, aiSearchRetryNonce]);
 
   const filteredCategories = useMemo(() => {
     if (!deferredSearchTerm) return activeCategories;
@@ -640,11 +783,19 @@ const ChannelList: React.FC<ChannelListProps> = ({
     }
 
     if (aiSearchEnabled) {
-      if (aiSearchLoading) {
-        return [{ name: "Ricerca AI in corso...", channels: [] }];
-      }
+      // Loading ed errore non producono righe: lo stato lo rende il blocco
+      // dedicato più sotto. Prima si restituiva una pseudo-categoria
+      // (`channels: []`) che `ContentRow` scarta con `return null` quando la
+      // lista è vuota — quindi l'area contenuti restava completamente bianca,
+      // senza spinner né messaggio.
+      if (aiSearchLoading || aiSearchError) return [];
       if (aiSearchResults) {
         const searchChannels = channelsToSearch.filter(c => aiSearchResults.includes(c.name));
+        // Zero risultati (query senza corrispondenze, oppure AI sospesa: in
+        // entrambi i casi il servizio ritorna `[]`, che è truthy). Lasciar
+        // cadere il ramo sull'EmptyState di ricerca evita la riga vuota
+        // "Risultati AI (0)".
+        if (searchChannels.length === 0) return [];
         return [{ name: `Risultati AI (${searchChannels.length})`, channels: searchChannels }];
       }
     }
@@ -655,7 +806,7 @@ const ChannelList: React.FC<ChannelListProps> = ({
         return [{ name: t.search + ` (${searchChannels.length})`, channels: searchChannels.slice(0, 100) }];
     }
     return [];
-  }, [activeCategories, deferredSearchTerm, indexedAllChannels, activeTab, indexedVodCategories, indexedSeriesCategories, indexedLiveCategories, t, aiSearchEnabled, aiSearchResults, aiSearchLoading]);
+  }, [activeCategories, deferredSearchTerm, indexedAllChannels, activeTab, indexedVodCategories, indexedSeriesCategories, indexedLiveCategories, t, aiSearchEnabled, aiSearchResults, aiSearchLoading, aiSearchError]);
 
   const displayedCategories = filteredCategories.slice(0, visibleRows);
 
@@ -677,11 +828,35 @@ const ChannelList: React.FC<ChannelListProps> = ({
 
   const reloadPage = () => window.location.reload();
 
+  // Ricerca AI: caricamento ed errore sono stati dell'area contenuti, non
+  // righe di catalogo. Condizioni esplicite invece di dedurle da
+  // `displayedCategories` (che ora è vuoto in entrambi i casi).
+  const isAiSearchPending = aiSearchEnabled && deferredSearchTerm.length > 1 && aiSearchLoading;
+  const isAiSearchFailed = aiSearchEnabled && deferredSearchTerm.length > 1 && !aiSearchLoading && !!aiSearchError;
+
   return (
     <div ref={screenRef} className="min-h-screen bg-[var(--bg-primary)] font-sans pb-20 safe-area-screen">
 
       {/* --- NAVBAR --- */}
-      <nav className={`fixed top-0 w-full z-50 transition-all duration-500 px-safe md:px-safe py-3 flex items-center justify-between gap-3 ${scrolled ? 'bg-[var(--bg-primary)] shadow-xl' : 'bg-gradient-to-b from-black/90 via-black/50 to-transparent'}`}>
+      {/*
+        La dissolvenza fra sfondo trasparente e barra piena è la stessa di prima,
+        ma si ottiene incrociando l'opacità di due livelli invece di animare
+        `background-image` con `transition-all`: un gradiente non è componibile,
+        quindi la barra — che è `fixed` e larga tutto lo schermo — veniva
+        ridipinta sul thread principale a ogni fotogramma per mezzo secondo,
+        proprio mentre l'utente scorre e attraversa la soglia dei 50 px.
+        `opacity` invece la gestisce il compositore. I due livelli sono
+        `pointer-events-none` perché stanno sopra il contenuto della barra.
+      */}
+      <nav className="fixed top-0 w-full z-50 px-safe md:px-safe py-3 flex items-center justify-between gap-3">
+        <div
+          aria-hidden="true"
+          className={`pointer-events-none absolute inset-0 -z-10 bg-gradient-to-b from-black/90 via-black/50 to-transparent transition-opacity duration-500 ${scrolled ? 'opacity-0' : 'opacity-100'}`}
+        />
+        <div
+          aria-hidden="true"
+          className={`pointer-events-none absolute inset-0 -z-10 bg-[var(--bg-primary)] shadow-xl transition-opacity duration-500 ${scrolled ? 'opacity-100' : 'opacity-0'}`}
+        />
          <div className="flex items-center gap-4 md:gap-8 min-w-0">
              <h1
                 className="text-xl sm:text-2xl md:text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-brand-primary to-brand-primary-hover tracking-tight cursor-pointer drop-shadow-sm select-none flex-shrink-0"
@@ -806,10 +981,16 @@ const ChannelList: React.FC<ChannelListProps> = ({
        {!searchTerm && featuredItem ? (
           <div className="relative h-[60vh] sm:h-[70vh] md:h-[85vh] min-h-[280px] w-full group">
               <div className="absolute inset-0">
-                  <CachedImage 
-                    src={featuredItem.logo || ''} 
-                    alt="Hero" 
-                    className="w-full h-full object-cover object-top transition-transform duration-[10s] group-hover:scale-105"
+                  {/*
+                    Lo zoom al passaggio del mouse durava 10 secondi: a quella
+                    velocità è quasi impercettibile, ma tiene in vita per tutto
+                    quel tempo un'animazione su un livello grande quanto l'85%
+                    della finestra — sopra due sfumature a tutta pagina.
+                  */}
+                  <CachedImage
+                    src={featuredItem.logo || ''}
+                    alt="Hero"
+                    className="w-full h-full object-cover object-top transition-transform duration-[1500ms] group-hover:scale-105"
                   />
                   <div className="absolute inset-0 bg-gradient-to-r from-[var(--bg-primary)] via-[var(--bg-primary)]/50 to-transparent" />
                   <div className="absolute inset-0 bg-gradient-to-t from-[var(--bg-primary)] via-transparent to-transparent" />
@@ -958,7 +1139,32 @@ const ChannelList: React.FC<ChannelListProps> = ({
               />
           )}
 
-          {displayedCategories.length > 0 ? (
+          {isAiSearchPending ? (
+              // Prima qui non c'era nulla: la pseudo-categoria "Ricerca AI in
+              // corso..." non produceva righe e l'utente vedeva solo un'area
+              // bianca mentre la richiesta era in volo.
+              <div
+                  role="status"
+                  aria-live="polite"
+                  className="flex flex-col items-center justify-center py-20 text-content-secondary"
+              >
+                  <Spinner size="lg" tone="brand" />
+                  <p className="mt-4 text-base text-content-muted">Ricerca AI in corso…</p>
+              </div>
+          ) : isAiSearchFailed ? (
+              <EmptyState
+                  icon={AlertTriangle}
+                  title="Ricerca AI non disponibile"
+                  description={
+                    `La ricerca intelligente non ha risposto (${aiSearchError}). ` +
+                    'Puoi riprovare, oppure cercare con la ricerca normale del catalogo.'
+                  }
+                  actions={[
+                      { label: 'Riprova', onClick: () => setAiSearchRetryNonce(n => n + 1) },
+                      { label: 'Cancella ricerca', onClick: () => setSearchTerm(''), variant: 'secondary' },
+                  ]}
+              />
+          ) : displayedCategories.length > 0 ? (
               displayedCategories.map((cat) => {
                   // Decide la forma della cover per la riga:
                   //  - "portrait" (2:3) se la categoria contiene movies o series;

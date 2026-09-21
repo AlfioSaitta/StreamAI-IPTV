@@ -34,6 +34,18 @@ import { Avatar, AvatarPicker, Button, Card, FormField, Input, Select, ToggleSwi
 import { DEFAULT_AVATAR_ID } from '../services/avatars';
 import { TmdbEnricherService } from '../services/tmdbEnricher.ts';
 
+/**
+ * Preferenze del profilo complete dei default, nella forma in cui le persiste
+ * `ProfileService`. Usata per idratare lo stato locale e come baseline del
+ * diff: `ProfilePreferences` è un'interfaccia piatta (solo valori primitivi),
+ * quindi il confronto per chiave con `Object.is` è esatto e non serve un
+ * confronto profondo.
+ */
+const normalizePreferences = (preferences?: ProfilePreferences): ProfilePreferences => ({
+  ...DEFAULT_PREFERENCES,
+  ...(preferences || {}),
+});
+
 interface ProfileSettingsProps {
   profile: Profile;
   onBack: () => void;
@@ -151,7 +163,18 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
 }) => {
   const { t } = useLanguage();
   const [preferences, setPreferences] = useState<ProfilePreferences>(
-    { ...DEFAULT_PREFERENCES, ...(profile.preferences || {}) }
+    () => normalizePreferences(profile.preferences)
+  );
+  /**
+   * Ultimo valore di `profile.preferences` (lato "server", cioè il profilo
+   * persistito) da cui è stato idratato lo stato locale. Due usi:
+   *  - distinguere i campi che l'utente ha davvero modificato (valore locale
+   *    diverso dalla baseline) da quelli solo aggiornati in background;
+   *  - salvare esclusivamente i primi, perché `updatePreferences` fa un merge
+   *    e inviare l'intero oggetto annullava gli aggiornamenti di `App.tsx`.
+   */
+  const preferencesBaselineRef = useRef<ProfilePreferences>(
+    normalizePreferences(profile.preferences)
   );
   const [profileName, setProfileName] = useState(profile.name);
   const [profileColor, setProfileColor] = useState(profile.color);
@@ -171,8 +194,41 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
   useEscapeKey(true, onBack);
   useTvSpatialNavigation(true, screenRef);
 
+  /**
+   * Risincronizzazione dal prop. `App.tsx` aggiorna le preferenze in background
+   * (auto-refresh del catalogo → `contentLastRefreshAt`/`contentLastRefreshError`,
+   * vedi App.tsx:894 e :910) e questa schermata ne mostra alcune (l'ultimo
+   * aggiornamento e l'ultimo errore): senza questo effect lo stato locale
+   * restava indietro e l'utente vedeva un timestamp vecchio.
+   *
+   * Regola di merge: si adotta il valore in arrivo SOLO per le chiavi che
+   * l'utente non ha toccato (valore locale ancora uguale alla baseline). Le
+   * modifiche non ancora salvate vincono sempre, quindi il merge non può
+   * cancellare quello che l'utente sta editando.
+   */
   useEffect(() => {
-    const originalPrefs = { ...DEFAULT_PREFERENCES, ...(profile.preferences || {}) };
+    const incoming = normalizePreferences(profile.preferences);
+    const baseline = preferencesBaselineRef.current;
+    preferencesBaselineRef.current = incoming;
+    setPreferences(prev => {
+      let changed = false;
+      const next: ProfilePreferences = { ...prev };
+      // TS non riesce a correlare `key` e `prev[key]` dentro un loop su
+      // `keyof`: il cast resta locale alla singola assegnazione, e a runtime
+      // il valore è sempre quello della stessa chiave.
+      const target = next as unknown as Record<string, unknown>;
+      for (const key of Object.keys(incoming) as (keyof ProfilePreferences)[]) {
+        if (Object.is(prev[key], baseline[key]) && !Object.is(prev[key], incoming[key])) {
+          target[key] = incoming[key];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [profile.preferences]);
+
+  useEffect(() => {
+    const originalPrefs = normalizePreferences(profile.preferences);
     const prefsChanged = JSON.stringify(preferences) !== JSON.stringify(originalPrefs);
     const nameChanged = profileName !== profile.name;
     const colorChanged = profileColor !== profile.color;
@@ -199,7 +255,24 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      let updatedProfile = ProfileService.updatePreferences(profile.id, preferences);
+      // Si salvano SOLO le preferenze effettivamente modificate rispetto alla
+      // baseline. `updatePreferences` fa un merge sui valori persistiti, quindi
+      // inviare l'intero oggetto locale riscriveva anche i campi aggiornati nel
+      // frattempo da `App.tsx` (auto-refresh: `contentLastRefreshAt`,
+      // `contentLastRefreshError`), riportandoli al valore vecchio — una
+      // regressione silenziosa, perché il salvataggio sembrava riuscire.
+      const baseline = preferencesBaselineRef.current;
+      const changedPreferences: Partial<ProfilePreferences> = {};
+      const changedTarget = changedPreferences as unknown as Record<string, unknown>;
+      for (const key of Object.keys(preferences) as (keyof ProfilePreferences)[]) {
+        if (!Object.is(preferences[key], baseline[key])) {
+          changedTarget[key] = preferences[key];
+        }
+      }
+
+      let updatedProfile = Object.keys(changedPreferences).length > 0
+        ? ProfileService.updatePreferences(profile.id, changedPreferences)
+        : profile;
       const originalAvatar = profile.avatar || DEFAULT_AVATAR_ID;
       if (
         profileName !== profile.name ||
@@ -213,6 +286,9 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({
         });
       }
       if (updatedProfile) {
+        // La baseline avanza a quanto appena persistito: da qui in poi un
+        // aggiornamento in background dello stesso campo viene adottato.
+        preferencesBaselineRef.current = normalizePreferences(updatedProfile.preferences);
         onProfileUpdate(updatedProfile);
         setHasChanges(false);
       }
