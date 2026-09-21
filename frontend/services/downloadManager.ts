@@ -1,6 +1,6 @@
 
 import { CacheService } from './cacheService.ts';
-import { proxyFetch } from './proxyFetch.ts';
+import { proxyFetch, resolveProxyURL } from './proxyFetch.ts';
 
 // Configurazione
 const MAX_CONCURRENT_DOWNLOADS = 10; // Download paralleli aumentati per Wails
@@ -12,8 +12,47 @@ const DOWNLOAD_TIMEOUT_MS = 15000; // Timeout leggermente aumentato
  */
 const PRELOAD_QUEUE_LIMIT = 24;
 
+/**
+ * Quanti download sono ammessi **mentre si guarda un canale live**.
+ *
+ * Durante un live la banda è dello stream, e scaricare immagini è una causa
+ * diretta di rebuffering. Ma le copertine che l'utente ha davanti vanno
+ * mostrate: senza, navigare il catalogo mentre si guarda qualcosa diventa un
+ * muro di segnaposto. La via di mezzo è questa — poche connessioni, solo per le
+ * immagini visibili — sapendo che finiscono nella cache su disco condivisa,
+ * quindi si pagano una volta sola.
+ */
+const PAUSED_MAX_CONCURRENT_DOWNLOADS = 4;
+
+/**
+ * Priorità minima per scaricare durante la pausa: sotto questa soglia il lavoro
+ * è prefetch, e in pausa resta fermo.
+ */
+const VISIBLE_PRIORITY_MIN = 1;
+
+/**
+ * `requestIdleCallback` non esiste in tutte le webview (WebKitGTK non lo espone)
+ * e non è nel lib DOM di tutte le versioni di TypeScript: lo dichiariamo qui
+ * invece di dipendere dal tipo globale.
+ */
+type IdleCapableWindow = Window & {
+  requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+};
+
 /** Per quanto un URL resta escluso dopo un fallimento, prima di poter ritentare. */
 const FAILED_URL_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * True se, con un canale in riproduzione, questa richiesta non ha diritto alla
+ * banda: sotto `VISIBLE_PRIORITY_MIN` il lavoro è prefetch, e in pausa resta
+ * fermo.
+ *
+ * È l'unica definizione della regola. La usa `requestImage` per rifiutare, e
+ * `CachedImage` per capire che il valore tornato è un rifiuto — non una copia da
+ * mostrare — e che quindi non deve finire comunque in un `<img src>`.
+ */
+const isDownloadBlockedWhilePlaying = (priority: number): boolean =>
+  DownloadManager.paused && priority < VISIBLE_PRIORITY_MIN;
 
 /**
  * Attese per uno slot di download libero, **ordinate per priorità**.
@@ -117,7 +156,6 @@ export const DownloadManager = {
   }>(),
   processing: new Set<string>(),
   queued: new Set<string>(), // Nuova tracciabilità per evitare duplicati in attesa
-  abortController: null as AbortController | null,
 
   // Stato pausa globale (per streaming live)
   paused: false,
@@ -144,25 +182,32 @@ export const DownloadManager = {
     preloadSkipped: 0
   },
 
-  // Pausa tutti i download (chiamato quando si avvia un live)
+  // Pausa il lavoro *nuovo* sulle immagini (chiamato quando si avvia un live)
   pause: () => {
     DownloadManager.paused = true;
-    // Annulla download in corso
-    if (DownloadManager.abortController) {
-      DownloadManager.abortController.abort();
-      DownloadManager.abortController = null;
-    }
+    // I download già in volo NON vengono annullati: i byte sono già stati
+    // spesi, e portarli a termine li mette in cache invece di buttarli. A
+    // fermare il lavoro nuovo ci pensano il tetto ridotto in `download` e la
+    // soglia di priorità in `requestImage`.
+    //
+    // (Qui c'era un `abortController.abort()`, ma quel campo non veniva mai
+    // assegnato da nessuno: dava l'impressione di interrompere i download in
+    // corso senza interrompere nulla.)
+    //
     // Risolvi tutte le richieste in attesa con URL originale
     DownloadManager.queue.forEach(({ resolves }, url) => {
       resolves.forEach(resolve => resolve(url));
     });
     DownloadManager.queue.clear();
-    DownloadManager.processing.clear();
     DownloadManager.queued.clear();
+    // `processing` NON viene svuotato: i download in volo proseguono davvero, e
+    // azzerare il contatore ora ammetterebbe più lavoro del tetto ridotto.
 
-    // Sveglia le attese in coda per uno slot: ognuna rivaluta `paused` ed esce
-    // restituendo l'URL originale. Senza questo resterebbero parcheggiate fino
-    // al prossimo slot liberato (o al timeout di un download in volo).
+    // Sveglia le attese in coda per uno slot: il loro `download` prosegue e
+    // viene ammesso secondo il tetto ridotto. Senza questo resterebbero
+    // parcheggiate fino al prossimo slot liberato (o al timeout di un download
+    // in volo), cioè esattamente quelle immagini visibili che ora vogliamo
+    // mostrare.
     const waiters = slotWaiters.splice(0, slotWaiters.length);
     waiters.forEach(waiter => waiter.wake());
   },
@@ -175,17 +220,16 @@ export const DownloadManager = {
   // Verifica se è in pausa
   isPaused: () => DownloadManager.paused,
 
+  /** Vedi `isDownloadBlockedWhilePlaying`: è la stessa regola, esposta a chi
+   *  deve decidere se mostrare un'immagine. */
+  isDownloadBlockedWhilePlaying,
+
   // Richiedi un'immagine (chiamato da CachedImage)
   // Ritorna l'URL dell'immagine (da cache o scaricata)
   requestImage: async (url: string, priority: number = 1, signal?: AbortSignal): Promise<string | null> => {
     if (!url || !url.startsWith('http')) return null;
 
     if (signal?.aborted) return url;
-
-    // Se in pausa, ritorna URL originale senza scaricare
-    if (DownloadManager.paused) {
-      return url;
-    }
 
     // 1. Check memoria locale
     if (DownloadManager.cachedUrls.has(url)) {
@@ -210,7 +254,15 @@ export const DownloadManager = {
       return cached;
     }
 
-    // 4. Se già in download o in coda, attendi
+    // 4. In pausa (live in riproduzione) si scarica solo ciò che l'utente sta
+    //    guardando: sotto la soglia il lavoro è prefetch, e resta fermo perché
+    //    la banda è dello stream. Le cache sono state consultate sopra, quindi
+    //    ciò che è già scaricato si mostra comunque — non costa nulla.
+    if (isDownloadBlockedWhilePlaying(priority)) {
+      return url;
+    }
+
+    // 5. Se già in download o in coda, attendi
     if (DownloadManager.processing.has(url) || DownloadManager.queued.has(url)) {
       return new Promise((resolve) => {
         const existing = DownloadManager.queue.get(url);
@@ -235,13 +287,54 @@ export const DownloadManager = {
       });
     }
 
-    // 5. Avvia download
+    // 6. Avvia download
     return DownloadManager.download(url, priority, signal);
+  },
+
+  /**
+   * Ritorna un'immagine **solo se è già in cache**, senza mai scaricare.
+   *
+   * Guarda prima la cache del webview (memoria + IndexedDB) e poi quella su
+   * disco del proxy, che è condivisa fra profili e sessioni. La seconda costa
+   * una `HEAD`: il proxy risponde dalla cache senza toccare l'host dell'immagine,
+   * quindi la domanda è gratuita anche quando la risposta è "no".
+   *
+   * Serve a mostrare le copertine mentre si guarda un canale live, quando
+   * scaricare significherebbe contendere banda allo stream: un'immagine già
+   * scaricata non costa nulla, una che manca resta un segnaposto.
+   */
+  requestCachedImage: async (url: string): Promise<string | null> => {
+    if (!url || !url.startsWith('http')) return null;
+
+    const locale = await CacheService.getImage(url);
+    if (locale) {
+      DownloadManager.cachedUrls.add(url);
+      DownloadManager.stats.fromCache++;
+      return locale;
+    }
+
+    // Senza il proxy locale (web, Android) la cache su disco non esiste: la
+    // sonda andrebbe dritta all'host dell'immagine, cioè sarebbe esattamente la
+    // richiesta di rete che questa funzione esiste per evitare.
+    if (resolveProxyURL(url) === url) return null;
+
+    try {
+      const sonda = await proxyFetch(url, { method: 'HEAD' });
+      if (sonda.headers.get('X-StreamAI-Cache') === 'hit') {
+        // È sul disco del proxy: l'`<img>` la chiederà e il proxy la servirà da
+        // lì, senza rete.
+        DownloadManager.stats.fromCache++;
+        return resolveProxyURL(url);
+      }
+    } catch {
+      // Nessuna rete o proxy assente: si resta sul segnaposto.
+    }
+    return null;
   },
 
   // Download effettivo
   download: async (url: string, priority: number, signal?: AbortSignal): Promise<string | null> => {
-    if (DownloadManager.paused || signal?.aborted) return url;
+    if (signal?.aborted) return url;
 
     DownloadManager.queued.add(url);
 
@@ -250,13 +343,18 @@ export const DownloadManager = {
       // Il busy-wait precedente (`setTimeout(50)` in un while) con 200 richieste
       // in coda lasciava ~190 waiter che si risvegliavano 20 volte al secondo,
       // cioe' ~3800 timer/s di pura attesa sul main thread.
-      while (DownloadManager.processing.size >= MAX_CONCURRENT_DOWNLOADS) {
-        if (DownloadManager.paused || signal?.aborted) return url;
+      //
+      // Durante un live il tetto scende: le immagini visibili devono poter
+      // arrivare anche mentre si guarda un canale, ma senza occupare la banda
+      // che serve allo stream.
+      const limite = DownloadManager.paused ? PAUSED_MAX_CONCURRENT_DOWNLOADS : MAX_CONCURRENT_DOWNLOADS;
+      while (DownloadManager.processing.size >= limite) {
+        if (signal?.aborted) return url;
         const gotSlot = await waitForSlot(priority, signal);
-        if (!gotSlot || DownloadManager.paused || signal?.aborted) return url;
+        if (!gotSlot || signal?.aborted) return url;
       }
 
-      if (DownloadManager.paused || signal?.aborted) return url;
+      if (signal?.aborted) return url;
 
       DownloadManager.queued.delete(url);
       DownloadManager.processing.add(url);
@@ -289,7 +387,10 @@ export const DownloadManager = {
         clearTimeout(timeoutId);
         signal?.removeEventListener('abort', onAbort);
 
-        if (DownloadManager.paused || signal?.aborted) return url;
+        // Un download già partito si porta a termine anche se nel frattempo è
+        // iniziato un live: i byte sono spesi, e in cache servono. A trattenere
+        // il lavoro *nuovo* ci pensa la pausa in `requestImage`.
+        if (signal?.aborted) return url;
         if (!response.ok) {
           markUrlFailed(url);
           DownloadManager.stats.failed++;
@@ -298,7 +399,7 @@ export const DownloadManager = {
         }
 
         const blob = await response.blob();
-        if (DownloadManager.paused || signal?.aborted) return url;
+        if (signal?.aborted) return url;
 
         // Verifica che sia un'immagine valida
         if (!blob.type.startsWith('image/') && blob.size < 100) {
@@ -362,6 +463,31 @@ export const DownloadManager = {
     });
   },
 
+  /**
+   * Precarica le immagini che serviranno probabilmente fra poco (la schermata
+   * successiva), ma **solo quando la macchina è inattiva**.
+   *
+   * La differenza con `preloadVisible` è il momento: mentre l'utente scorre,
+   * banda e CPU servono alle copertine che ha sotto gli occhi; appena si ferma,
+   * è il momento giusto per preparare quelle che vedrà scorrendo ancora.
+   * Vale lo stesso tetto: se la pipeline è piena, non si accoda nulla.
+   */
+  preloadLater: (urls: string[]) => {
+    if (urls.length === 0) return;
+
+    const run = () => DownloadManager.preloadVisible(urls);
+    const idle = (window as IdleCapableWindow).requestIdleCallback;
+
+    if (typeof idle === 'function') {
+      idle(run, { timeout: 2000 });
+      return;
+    }
+
+    // Webview senza requestIdleCallback (WebKitGTK non lo espone): un ritardo
+    // breve ottiene lo stesso effetto, cioè non competere con lo scroll.
+    setTimeout(run, 800);
+  },
+
   // Cancella URL falliti per permettere retry
   clearFailed: () => {
     DownloadManager.failedUrls.clear();
@@ -369,10 +495,6 @@ export const DownloadManager = {
 
   // Reset completo
   reset: () => {
-    if (DownloadManager.abortController) {
-      DownloadManager.abortController.abort();
-      DownloadManager.abortController = null;
-    }
     DownloadManager.queue.clear();
     DownloadManager.processing.clear();
     DownloadManager.queued.clear();

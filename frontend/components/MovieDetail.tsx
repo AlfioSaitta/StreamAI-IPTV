@@ -17,6 +17,7 @@ import { useMediaMetadata } from '../hooks/useMediaMetadata.ts';
 import { buildChannelSearchIndex, candidateChannels } from '../services/channelSearchIndex.ts';
 import { getMovieEnrichment, MovieEnrichment, isAiAvailable } from '../services/geminiService.ts';
 import { useFocusTrap } from '../hooks/useTvFocus.ts';
+import { proxyImageURL } from '../services/proxyFetch.ts';
 
 interface MovieDetailProps {
   movie: Channel;
@@ -180,7 +181,7 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
       {/* Background */}
       {backdrop && (
         <div className="absolute inset-0 opacity-50">
-          <img src={backdrop} alt="backdrop" className="w-full h-full object-cover" />
+          <img src={proxyImageURL(backdrop)} alt="backdrop" className="w-full h-full object-cover" />
           <div className="absolute inset-0 bg-gradient-to-t from-surface-0 via-surface-0/60 to-transparent" />
           <div className="absolute inset-0 bg-gradient-to-r from-surface-0 via-surface-0/60 to-transparent" />
         </div>
@@ -203,7 +204,7 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
           <div className="w-full lg:w-1/3 max-w-sm mx-auto lg:mx-0">
             {poster ? (
               <img
-                src={poster}
+                src={proxyImageURL(poster)}
                 alt={movie.name}
                 className="w-full rounded-card shadow-elev-3 border border-DEFAULT"
               />
@@ -355,7 +356,7 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
                   className="tv-focus flex-none w-[180px] md:w-[200px] rounded-card overflow-hidden bg-surface-1 border border-DEFAULT hover:border-strong shadow-elev-2 text-left"
                 >
                   {ch.logo ? (
-                    <img src={ch.logo} alt={ch.name} className="w-full h-48 object-cover" />
+                    <img src={proxyImageURL(ch.logo)} alt={ch.name} className="w-full h-48 object-cover" />
                   ) : (
                     <div className="w-full h-48 flex items-center justify-center text-content-muted text-sm">{ch.cleanName || ch.name}</div>
                   )}
@@ -382,7 +383,7 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movie, onClose, onPlay, watch
                   disabled={!sim.channel}
                 >
                   {sim.poster ? (
-                    <img src={sim.poster} alt={sim.title} className="w-full h-48 object-cover" />
+                    <img src={proxyImageURL(sim.poster)} alt={sim.title} className="w-full h-48 object-cover" />
                   ) : (
                     <div className="w-full h-48 flex items-center justify-center text-content-muted text-sm">{sim.title}</div>
                   )}

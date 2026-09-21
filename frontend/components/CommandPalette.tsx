@@ -9,6 +9,7 @@ import {
   type IndexedChannel,
 } from '../services/catalogIndex.ts';
 import { Chip, IconButton } from './shared';
+import { proxyImageURL } from '../services/proxyFetch.ts';
 
 const RECENT_SEARCHES_KEY_PREFIX = 'streamai.cmdk.recent';
 const MAX_RECENT = 6;
@@ -451,7 +452,7 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose, channe
                         {channel.logo ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
-                            src={channel.logo}
+                            src={proxyImageURL(channel.logo)}
                             alt=""
                             className="w-full h-full object-contain"
                             loading="lazy"

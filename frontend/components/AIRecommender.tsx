@@ -4,6 +4,7 @@ import { getRecommendations, isAiAvailable } from '../services/geminiService.ts'
 import { Channel, Recommendation, StreamType, WatchHistoryItem } from '../types.ts';
 import { useFocusTrap } from '../hooks/useTvFocus.ts';
 import { Chip, IconButton } from './shared';
+import { proxyImageURL } from '../services/proxyFetch.ts';
 
 interface AIRecommenderProps {
   channels: Channel[];
@@ -191,7 +192,7 @@ const AIRecommender: React.FC<AIRecommenderProps> = ({ channels, onPlayChannel, 
                   <div className="w-16 h-16 bg-surface-3 shrink-0 relative flex items-center justify-center">
                     {details?.logo ? (
                       <img
-                        src={details.logo}
+                        src={proxyImageURL(details.logo)}
                         className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
                         alt=""
                       />

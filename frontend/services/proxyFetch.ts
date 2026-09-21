@@ -39,6 +39,23 @@ export const resolveProxyURL = (url: string): string => {
 };
 
 /**
+ * URL di un'immagine da far passare dal proxy locale, e quindi dalla sua cache
+ * su disco (condivisa fra profili e fra sessioni).
+ *
+ * Da usare in ogni `<img src=...>` che punti a un'immagine remota: è la stessa
+ * strada di `proxyFetch`, applicata a un attributo invece che a una fetch.
+ *
+ * Solo gli URL remoti vengono riscritti: `data:`, `blob:`, i percorsi relativi e
+ * le stringhe vuote restano come sono. Il proxy accetta esclusivamente http/https
+ * e su qualunque altra cosa risponderebbe 400 — cioè romperebbe un'immagine che
+ * prima funzionava.
+ */
+export const proxyImageURL = (url: string | null | undefined): string => {
+  if (!url || !/^https?:\/\//i.test(url)) return url ?? '';
+  return resolveProxyURL(url);
+};
+
+/**
  * Wrapper attorno a fetch() che instrada la richiesta attraverso il proxy locale
  * se l'ambiente lo richiede (es. Wails su Linux per evitare blocchi CORS/Mixed-Content).
  *
