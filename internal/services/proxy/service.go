@@ -32,6 +32,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -100,6 +101,44 @@ type Service struct {
 	httpClient *http.Client
 	started    bool
 	closers    []func()
+	// imageCache è la cache su disco delle immagini (vedi imagecache.go).
+	// Condivisa fra profili, quindi la chiave è l'URL upstream. Nil se non è
+	// stato possibile prepararla: il proxy funziona lo stesso.
+	imageCache *imageCache
+}
+
+// imageCacheRef legge la cache sotto lock: viene assegnata all'avvio, ma le
+// richieste possono arrivare mentre il servizio si sta ancora inizializzando.
+func (s *Service) imageCacheRef() *imageCache {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.imageCache
+}
+
+// initImageCache prepara la cache immagini su disco.
+//
+// Best-effort per scelta: se la directory di sistema non è disponibile o non è
+// scrivibile, il proxy deve continuare a funzionare come prima — una cache non
+// deve mai essere la ragione per cui le copertine non si vedono.
+func (s *Service) initImageCache() {
+	base, err := os.UserCacheDir()
+	if err != nil {
+		log.Warn().Err(err).Msg("proxy: cache immagini disabilitata (cache dir di sistema non disponibile)")
+		return
+	}
+	cache, err := newImageCache(filepath.Join(base, "streamai", "images"), imageCacheBytesLimit, imageCacheTTL)
+	if err != nil {
+		log.Warn().Err(err).Msg("proxy: cache immagini disabilitata")
+		return
+	}
+	s.mu.Lock()
+	s.imageCache = cache
+	// Manutenzione periodica: senza, la cache si ripulisce solo all'avvio o
+	// quando una voce viene richiesta, e una sessione lunga non sfoltisce mai.
+	stopJanitor := make(chan struct{})
+	go cache.runJanitor(imageCacheJanitorInterval, stopJanitor)
+	s.closers = append(s.closers, func() { close(stopJanitor) })
+	s.mu.Unlock()
 }
 
 // New costruisce il Service. Legge env `STREAMAI_INSECURE_PROXY` /
@@ -114,6 +153,7 @@ func New() *Service {
 
 // ServiceStartup lifecycle Wails v3 — bind 127.0.0.1:0 + Serve in goroutine.
 func (s *Service) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
+	s.initImageCache()
 	return s.Start()
 }
 
@@ -298,6 +338,40 @@ func (s *Service) handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+
+	// Cache immagini. Solo per le GET — una POST non è una copertina. La
+	// decisione definitiva la prende comunque il Content-Type della risposta:
+	// un indirizzo può sembrare un'immagine e non esserlo, e viceversa.
+	//
+	// `no-cache` salta la **lettura** ma non la scrittura (significa "non
+	// servirmi la copia vecchia", non "non conservare": quello è `no-store`).
+	// Così un refresh forzato riempie anche la cache, invece di lasciarla com'era.
+	requestCacheControl := strings.ToLower(r.Header.Get("Cache-Control"))
+	cache := s.imageCacheRef()
+	cacheKey := ""
+	if cache != nil && (r.Method == http.MethodGet || r.Method == http.MethodHead) &&
+		!strings.Contains(requestCacheControl, "no-store") {
+		cacheKey = imageCacheKey(upstreamURL)
+		if !strings.Contains(requestCacheControl, "no-cache") {
+			if path, contentType, ok := cache.get(cacheKey); ok {
+				if r.Method == http.MethodHead {
+					if serveImageHeadersFromCache(w, path, contentType) {
+						return
+					}
+				} else if serveImageFromCache(w, path, contentType) {
+					return
+				}
+			} else if r.Method == http.MethodHead {
+				// Sonda di presenza: si risponde "no" senza andare upstream.
+				// Senza questo, chiedere se un'immagine è in cache costerebbe
+				// esattamente la banda che si sta cercando di risparmiare.
+				w.Header().Set("X-StreamAI-Cache", "miss")
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+		}
+	}
+
 	upstreamReq, err := http.NewRequestWithContext(ctx, r.Method, upstreamURL, r.Body)
 	if err != nil {
 		http.Error(w, "upstream request build failed", http.StatusBadGateway)
@@ -316,6 +390,33 @@ func (s *Service) handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
+
+	// Immagine: la serviamo e la memorizziamo nello stesso passaggio, così la
+	// richiesta successiva — anche da un altro profilo, anche fra un mese — non
+	// tocca affatto l'upstream.
+	if cache != nil && cacheKey != "" && resp.StatusCode == http.StatusOK && isCacheableImageType(resp.Header.Get("Content-Type")) {
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, imageCacheEntryLimit+1))
+		if readErr == nil && int64(len(body)) <= imageCacheEntryLimit {
+			cache.put(cacheKey, resp.Header.Get("Content-Type"), body)
+			rewriteResponseHeaders(w.Header(), resp.Header)
+			w.Header().Set("X-StreamAI-Cache", "stored")
+			w.WriteHeader(resp.StatusCode)
+			_, _ = w.Write(body)
+			return
+		}
+		if len(body) > 0 {
+			// Oltre il tetto, o lettura interrotta a metà: quello che abbiamo
+			// letto va servito comunque, ma non entra in cache.
+			rewriteResponseHeaders(w.Header(), resp.Header)
+			w.Header().Set("X-StreamAI-Cache", "skipped")
+			w.WriteHeader(resp.StatusCode)
+			_, _ = w.Write(body)
+			if readErr == nil {
+				flushStream(w, resp.Body, upstreamURL)
+			}
+			return
+		}
+	}
 
 	rewriteResponseHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
