@@ -102,6 +102,15 @@ const ScrollPerfOverlay: React.FC = () => {
   const fotogrammi = useRef<Fotogramma[]>([]);
   const lunghi = useRef<Fotogramma[]>([]);
   const corsa = useRef<{ attiva: boolean; dt: number[] }>({ attiva: false, dt: [] });
+  /**
+   * Id del `requestAnimationFrame` della corsa di misura.
+   *
+   * La corsa è un ciclo che chiama `window.scrollTo` a ogni fotogramma per
+   * `CORSA_MS`: senza questo riferimento non c'era modo di fermarla, quindi
+   * smontando il pannello mentre è in corso (o chiudendo l'app) il ciclo
+   * proseguiva e l'app continuava a **scorrersi da sola** fino a 6 secondi.
+   */
+  const corsaRaf = useRef(0);
   const [stat, setStat] = useState<Statistiche | null>(null);
   const [corsaEsito, setCorsaEsito] = useState<EsitoCorsa | null>(null);
   const [inCorsa, setInCorsa] = useState(false);
@@ -183,6 +192,13 @@ const ScrollPerfOverlay: React.FC = () => {
     return () => window.clearInterval(id);
   }, []);
 
+  // Ferma la corsa di misura se il pannello sparisce mentre è in corso: senza,
+  // il ciclo di `scrollTo` resta orfano e continua a muovere la pagina.
+  useEffect(() => () => {
+    if (corsaRaf.current) window.cancelAnimationFrame(corsaRaf.current);
+    corsa.current = { attiva: false, dt: [] };
+  }, []);
+
   const eseguiCorsa = useCallback(() => {
     const partenza = window.scrollY;
     const t0 = performance.now();
@@ -196,11 +212,12 @@ const ScrollPerfOverlay: React.FC = () => {
       // animato misurerebbe l'animazione, non il costo del rendering.
       window.scrollTo({ top: partenza + CORSA_PX * k, behavior: 'auto' });
       if (k < 1) {
-        window.requestAnimationFrame(passo);
+        corsaRaf.current = window.requestAnimationFrame(passo);
         return;
       }
       const dt = corsa.current.dt;
       corsa.current = { attiva: false, dt: [] };
+      corsaRaf.current = 0;
       setInCorsa(false);
       setCorsaEsito({
         p95: percentile(dt, 95),
@@ -209,7 +226,7 @@ const ScrollPerfOverlay: React.FC = () => {
         lunghi: dt.filter(v => v > 50).length,
       });
     };
-    window.requestAnimationFrame(passo);
+    corsaRaf.current = window.requestAnimationFrame(passo);
   }, []);
 
   const azzera = useCallback(() => {
