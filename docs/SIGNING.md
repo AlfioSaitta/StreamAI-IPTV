@@ -20,6 +20,44 @@ curl -fsSL https://<user>.github.io/StreamAI-IPTV/pubkey.asc \
   | gpg --import
 ```
 
+## Firma in locale
+
+La firma dei pacchetti si fa con `scripts/sign-linux-packages.sh`, che
+`scripts/build-linux.sh` invoca quando `GPG_KEY_ID` è impostato (o con
+`--sign`). Prima serve importare la chiave di firma nel keyring locale:
+
+```bash
+# 1. Decifra il backup della subkey di firma (chiede la BACKUP passphrase).
+gpg --decrypt docs/keys/streamai-signing.key.asc.gpg > /tmp/signing.key.asc
+
+# 2. Importa e pre-carica la passphrase in gpg-agent.
+#    Il pre-caricamento serve ai tool che NON possono ricevere la passphrase
+#    (debsigs, rpm --addsign): lo fa già import-gpg-key.sh.
+GPG_PRIVATE_KEY="$(cat /tmp/signing.key.asc)" \
+GPG_KEY_ID="$(cat docs/keys/streamai-fingerprint.txt)" \
+GPG_PASSPHRASE="..." \
+  bash scripts/import-gpg-key.sh
+
+# 3. Verifica che la chiave ci sia, poi firma.
+gpg --list-secret-keys --keyid-format LONG
+GPG_KEY_ID="$(cat docs/keys/streamai-fingerprint.txt)" npm run dist:linux -- --sign
+```
+
+`sign-linux-packages.sh` firma **per formato**, come richiesto dai gestori:
+`.deb` e `.rpm` con firma *embedded* (debsigs / rpmsign), `.pkg.tar.zst` con un
+`.sig` **binario** (pacman non legge l'armor), l'archivio portatile con `.asc`.
+Una firma `.asc` unica per tutti i formati — come faceva la pipeline
+precedente — non è verificabile da `rpm --checksig` né da `pacman -U`: i
+pacchetti sembravano firmati e non lo erano.
+
+**Cosa non è possibile in locale.** La firma dei `.deb` richiede `debsigs` o
+`dpkg-sig`, che sono pacchetti Debian-family: su openSUSE/Fedora/Arch lo script
+avvisa e prosegue con gli altri formati (con `--strict` invece fallisce). La
+firma rpm richiede il plugin `rpm-sign` (`zypper in rpm-sign` su openSUSE).
+Entrambe sono coperte dalla CI. La passphrase **non** viene mai passata sulla
+riga di comando: `gpg` la legge da stdin (`--passphrase-fd 0`) e per rpm si
+affida a gpg-agent, perché `argv` è visibile a `ps`.
+
 ## Verifica firme
 
 | Formato            | Comando                                                  |
