@@ -56,8 +56,10 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             libgtk-3-dev libwebkit2gtk-4.1-dev libmpv-dev
 
-      # `wails3 generate bindings` produce frontend/bindings/, che è
-      # gitignorato: senza il CLI la build del frontend non parte.
+      # Serve il CLI `wails3` perché `npm run check` rigenera i binding
+      # (`frontend/bindings/`, gitignorato) prima di buildare il frontend:
+      # `wailsBridge.ts` li importa, quindi senza di loro `vite build` non
+      # risolve i moduli. I binding richiedono anche il toolchain Go.
       - name: Wails CLI
         run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha.93
 

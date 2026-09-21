@@ -157,12 +157,19 @@ Queste funzionalità definiscono l'identità di StreamAI e devono essere preserv
     - Guard: `go test ./internal/services/playlist/` (round-trip, catalogo degradato non salvato, schema diverso, file corrotto, isolamento per profilo).
 
 ## 🚀 Comandi Utili
+- `npm run check`: **Il gate.** Guardie di coerenza → binding Wails → typecheck → test → build frontend → `go vet`/`go build`. È ciò che esegue la CI: se passa in locale, passa in CI.
+  - L'ordine non è arbitrario: i binding servono a `vite build` (importati da `wailsBridge.ts`) e `frontend/dist` serve a `go build` (è embeddato da `assets.go`), quindi la build del frontend deve precedere `check:go`. Invertirli fa fallire il comando su un clone pulito con `pattern all:frontend/dist: no matching files found`.
+  - Richiede il CLI `wails3` nel PATH (come `npm run dev`).
 - `npm run dev`: Avvia l'ambiente di sviluppo Wails (Go + React con hot-reload).
 - `npm run wails:build`: Compila l'applicazione per produzione.
 - `npm run wails:bindings`: Rigenera i binding TypeScript dal backend Go.
 - `npm run android:run`: Build, Sync e Run su dispositivo Android.
-- `npm run dist:linux`: Builda i pacchetti Linux per la distro host.
-- `npm run version:sync`: Sincronizza il numero di versione da `/.version` agli altri file di progetto.
+- `npm run dist:linux`: Builda i pacchetti per **tutte** le distro supportate (`.deb`, `.rpm`, `.pkg.tar.zst`, archivio portatile) con le dipendenze corrette per ciascuna. Tabella in `build/depends/distros.json`; `npm run dist:linux:host` per la sola distro corrente, `--verify` per ispezionare i metadata.
+- `npm run version:sync`: Sincronizza il numero di versione da `/.version` agli altri file di progetto (`package.json`, `android/app/build.gradle`, `build/config.yml`).
 
 ## 📦 Pipeline Linux Release (CI)
-Il workflow [`.github/workflows/linux-release.yml`](.github/workflows/linux-release.yml) si attiva su tag `v*` e `workflow_dispatch`. Esegue la build dei pacchetti per 6 distro, li firma con GPG, esegue verifiche e li pubblica su GitHub Releases e sul repository statico di GitHub Pages. Il processo è automatizzato e non richiede più interazione con `git push` per il deploy della Pages.
+Il workflow [`.github/workflows/linux-release.yml`](.github/workflows/linux-release.yml) si attiva su tag `v*` e `workflow_dispatch`. Esegue la build dei pacchetti per 6 distro, li firma con GPG (per formato: embedded per deb/rpm, `.sig` binario per pacman), verifica le firme, genera l'attestazione SLSA e li pubblica su GitHub Releases e sul repository statico di GitHub Pages.
+
+Il gate su push/PR è [`.github/workflows/ci.yml`](.github/workflows/ci.yml): esegue `npm run check` più i test Go con i tag reali e con `-race`.
+
+⚠️ **La build gira su `ubuntu-22.04`, non `ubuntu-latest`.** Il binario è lo stesso per tutte le distro, quindi la glibc del runner è il requisito minimo di *tutte*: compilare su 24.04 (glibc 2.39) renderebbe i pacchetti inutilizzabili su Debian 12 (2.36) e Ubuntu 22.04 (2.35). Non cambiare il pin senza aver verificato `objdump -T build/bin/streamai | grep -o 'GLIBC_[0-9.]*' | sort -Vu | tail -1`.
