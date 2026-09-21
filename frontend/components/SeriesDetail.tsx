@@ -17,6 +17,7 @@ import {
 import { useMediaImages } from '../hooks/useMediaImages.ts';
 import { useMediaMetadata } from '../hooks/useMediaMetadata.ts';
 import { useFocusTrap } from '../hooks/useTvFocus.ts';
+import { proxyImageURL } from '../services/proxyFetch.ts';
 
 interface SeriesDetailProps {
   series: Channel;
@@ -221,7 +222,9 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
 
       {/* Background */}
       <div className="absolute inset-0 z-0 h-[80vh]">
-          <img src={backdrop || ''} alt="" className="w-full h-full object-cover opacity-40" />
+          {/* Solo se c'è: un `<img src="">` non è "vuoto", è una richiesta
+              dell'URL del documento, cioè una seconda copia dell'app. */}
+          {backdrop && <img src={proxyImageURL(backdrop)} alt="" className="w-full h-full object-cover opacity-40" />}
           <div className="absolute inset-0 bg-gradient-to-t from-surface-0 via-surface-0/60 to-transparent" />
           <div className="absolute inset-0 bg-gradient-to-r from-surface-0 via-surface-0/80 to-transparent" />
       </div>
@@ -240,7 +243,13 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
                   {t.back}
               </Button>
 
-              <img src={poster || ''} className="w-2/3 md:w-3/4 rounded-card shadow-elev-3 mb-8 self-center md:self-start border border-DEFAULT" alt="Cover" />
+              {poster ? (
+                  <img src={proxyImageURL(poster)} className="w-2/3 md:w-3/4 rounded-card shadow-elev-3 mb-8 self-center md:self-start border border-DEFAULT" alt="Cover" />
+              ) : (
+                  // Segnaposto: tiene lo spazio della copertina, così titolo e
+                  // trama non saltano quando l'immagine arriva.
+                  <div className="w-2/3 md:w-3/4 aspect-[2/3] rounded-card shadow-elev-3 mb-8 self-center md:self-start border border-DEFAULT bg-surface-1" />
+              )}
 
               <h1 className="text-4xl md:text-5xl font-bold text-content-primary mb-4 leading-tight">{seriesName}</h1>
 
@@ -323,12 +332,16 @@ const SeriesDetail: React.FC<SeriesDetailProps> = ({ series, creds, onPlayEpisod
                         key={ep.id}
                         onClick={() => handlePlay({...ep, season: Number(activeSeason)})}
                         onFocus={handleElementFocus}
-                        className="tv-focus-dense group flex items-center gap-6 p-4 rounded-control hover:bg-surface-2 transition-colors text-left border-b border-subtle hover:border-transparent relative overflow-hidden"
+                        // `offscreen-skip-dense`: una stagione può avere centinaia
+                        // di puntate, ognuna con la sua copertina e con un'ombra
+                        // da 28 px sulla barra di avanzamento. Fuori schermo non
+                        // vengono renderizzate affatto.
+                        className="offscreen-skip-dense tv-focus-dense group flex items-center gap-6 p-4 rounded-control hover:bg-surface-2 transition-colors text-left border-b border-subtle hover:border-transparent relative overflow-hidden"
                     >
                         <span className="text-2xl font-light text-content-muted w-8 text-center">{idx + 1}</span>
                         <div className="relative w-32 aspect-video bg-surface-2 rounded-control overflow-hidden shrink-0">
                             {ep.info?.movie_image ? (
-                                <img src={ep.info.movie_image} className="w-full h-full object-cover" alt="" />
+                                <img src={proxyImageURL(ep.info.movie_image)} className="w-full h-full object-cover" alt="" />
                             ) : (
                                 <div className="w-full h-full flex items-center justify-center text-content-disabled">
                                     <Film className="w-icon-xl h-icon-xl" />

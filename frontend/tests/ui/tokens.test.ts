@@ -146,6 +146,47 @@ function contrastRatio(hex1: string, hex2: string): number {
   return (a + 0.05) / (b + 0.05);
 }
 
+/**
+ * `transition-all` su una classe ripetuta centinaia di volte non è una scelta
+ * stilistica: è un costo. `.tv-focus` sta su ogni card del catalogo, e nel CSS
+ * compilato viene emessa dopo le utility di Tailwind, quindi vinceva anche sul
+ * `transition-transform` scritto sulla card — cioè *tutte* le proprietà
+ * animabili venivano ricontrollate a ogni ricalcolo di stile.
+ *
+ * Queste due verifiche difendono la proprietà che conta: che l'elenco resti
+ * esplicito e che contenga `transform`, senza il quale si perderebbe
+ * l'ingrandimento al focus (`scale-105` compila in `transform`).
+ */
+describe('F5 — transizioni delle classi di focus', () => {
+  // I commenti si tolgono prima di guardare: il blocco di `.tv-focus` *spiega*
+  // perché `transition-all` è stato tolto, e il nome compare nella prosa.
+  // Qui interessano le dichiarazioni, non la documentazione.
+  const senzaCommenti = indexCss.replace(/\/\*[\s\S]*?\*\//g, '');
+
+  const bloccoDi = (classe: string): string => {
+    const m = senzaCommenti.match(new RegExp(`\\${classe}\\s*\\{[^}]*\\}`));
+    expect(m, `atteso un blocco ${classe} in index.css`).toBeTruthy();
+    return m![0];
+  };
+
+  it('tv-focus non usa transition-all', () => {
+    const blocco = bloccoDi('.tv-focus');
+    expect(blocco).not.toMatch(/transition-all/);
+    expect(blocco).not.toMatch(/transition-property:\s*all/);
+  });
+
+  it('tv-focus elenca le proprietà e include transform', () => {
+    const elenco = bloccoDi('.tv-focus').match(/transition-property:\s*([^;]+);/);
+    expect(elenco, 'atteso un transition-property esplicito').toBeTruthy();
+    const proprieta = elenco![1].split(',').map(p => p.trim());
+    expect(proprieta).toContain('transform');
+    // Le proprietà che cambiano davvero su questi elementi fra hover e focus.
+    for (const p of ['background-color', 'color', 'box-shadow']) {
+      expect(proprieta, `manca ${p}`).toContain(p);
+    }
+  });
+});
+
 function relativeLuminance(hex: string): number {
   const h = hex.replace('#', '');
   const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;

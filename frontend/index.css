@@ -122,7 +122,24 @@ body {
      mangiare contenuto nelle liste dense. La box-shadow `--focus-ring`
      aggiunge il glow morbido coerente con il brand. */
   .tv-focus {
-    @apply transition-all duration-300 outline-none cursor-pointer min-h-[44px];
+    @apply duration-300 outline-none cursor-pointer min-h-[44px];
+    /*
+      Elenco esplicito al posto di `transition-all`.
+      `all` fa ricontrollare a ogni ricalcolo di stile l'intero insieme delle
+      proprietà animabili, e questa classe sta su ogni card del catalogo
+      (centinaia) oltre che sulle voci di EPG e liste. In più `.tv-focus` viene
+      emessa dopo le utility di Tailwind, quindi vinceva anche sul
+      `transition-transform` scritto sulla card: lì il risultato era una
+      transizione su *tutte* le proprietà, non sul transform come sembrava.
+      L'elenco tiene animato tutto ciò che oggi cambia davvero su questi
+      elementi — scala del focus, anello (outline + box-shadow), sfondi e testo
+      in hover/focus — e lascia fuori le proprietà di layout (larghezza,
+      margini, posizione), che è ciò che rende `all` costoso e imprevedibile.
+      `transform` è obbligatorio: `scale-105` del focus compila in `transform`.
+    */
+    transition-property: transform, opacity, background-color, border-color, color, box-shadow, outline-color;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    transition-duration: 300ms;
     -webkit-tap-highlight-color: transparent;
   }
 
@@ -164,6 +181,7 @@ body {
     .animate-slide-up,
     .animate-pulse,
     .animate-ping,
+    .placeholder-pulse,
     .skeleton {
       animation: none !important;
     }
@@ -216,6 +234,46 @@ body {
 
   .touch-target {
     @apply min-h-[48px] min-w-[48px];
+  }
+
+  /*
+    Riga di catalogo fuori schermo: non viene renderizzata affatto.
+    Il catalogo monta le righe in modo cumulativo (mai smontate) e ognuna porta
+    fino a 20 card con la loro copertina: senza questo, scorrendo si arriva a
+    centinaia di card dipinte per fotogramma. `auto` fa saltare stile, layout e
+    verniciatura di ciò che è fuori dalla finestra — e con essi le animazioni
+    dei segnaposto, che altrimenti continuano a girare a vuoto.
+    `auto` dentro `contain-intrinsic-size` fa ricordare l'altezza reale dopo il
+    primo render: la stima di 250 px serve solo per una riga mai disegnata,
+    quindi non può muovere ciò che l'utente sta guardando.
+    (`overflow-anchor` non c'è: WebKit non implementa l'ancoraggio dello
+    scorrimento — è di Chromium — quindi non ci sarebbe nulla da disattivare.)
+  */
+  .offscreen-skip {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 250px;
+  }
+
+  /* Variante per le liste dense (righe puntata), dove una riga è ~110 px. */
+  .offscreen-skip-dense {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 110px;
+  }
+
+  /*
+    Segnaposto di caricamento: pulsa **per un tempo limitato**, non per sempre.
+    Otto secondi (quattro cicli) coprono il caricamento di una copertina; oltre,
+    l'immagine non arriverà, e un segnaposto che pulsa all'infinito è solo costo
+    — su un catalogo intero sono centinaia di animazioni che continuano a
+    girare. Finisce sul fotogramma di opacità piena, quindi il segnaposto resta
+    identico, solo fermo.
+  */
+  .placeholder-pulse {
+    animation: placeholder-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) 4;
+  }
+
+  @keyframes placeholder-pulse {
+    50% { opacity: 0.5; }
   }
 
   .android-tv-surface {
@@ -292,6 +350,7 @@ body.platform-native .backdrop-blur-xl {
 
 body.tv-low-power .animate-ping,
 body.tv-low-power .animate-pulse,
+body.tv-low-power .placeholder-pulse,
 body.tv-low-power .skeleton {
   animation-duration: 2.4s;
 }

@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import * as Sentry from "@sentry/react";
 import App from './App.tsx';
 import PipWindow from './components/PipWindow.tsx';
+import ScrollPerfOverlay from './components/dev/ScrollPerfOverlay.tsx';
 import './index.css';
 
 /**
@@ -12,6 +13,13 @@ import './index.css';
  * perché entrambe le finestre caricano la stessa entry HTML di Vite.
  */
 const isPipWindow = new URLSearchParams(window.location.search).get('pip') === '1';
+
+/**
+ * Misuratore di fluidità dello scorrimento (`?perf=1`). Non è una vista
+ * dell'app: si aggancia accanto ad essa per misurare, e senza il query param
+ * non viene nemmeno montato.
+ */
+const isPerfMode = new URLSearchParams(window.location.search).get('perf') === '1';
 
 // Sentry NON viene inizializzato nella finestra PiP: è una vista minima che
 // disegna frame, e Session Replay (che registra il DOM) sarebbe sproporzionato
@@ -46,6 +54,7 @@ root.render(
     ) : (
       <Sentry.ErrorBoundary fallback={<p>An error has occurred</p>}>
         <App />
+        {isPerfMode && <ScrollPerfOverlay />}
       </Sentry.ErrorBoundary>
     )}
   </React.StrictMode>

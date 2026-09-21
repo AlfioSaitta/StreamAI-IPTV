@@ -61,7 +61,16 @@ vi.mock('../../services/xtream.ts', () => ({
 }));
 
 vi.mock('../../services/metadata.ts', () => ({
-  MetadataService: { isConfigured: () => false, cleanTitle: (s: string) => s },
+  MetadataService: {
+    isConfigured: () => false,
+    cleanTitle: (s: string) => s,
+    // Senza chiave API il servizio vero ritorna `null` da entrambe: il
+    // componente le chiama comunque, e un mock che si dimentica questi metodi
+    // fa fallire la promise in sottofondo (senza far fallire il test, che è
+    // peggio: rumore che sembra un bug del componente).
+    getDetails: async () => null,
+    getDetailsByTitle: async () => null,
+  },
 }));
 
 vi.mock('../../hooks/useMediaImages.ts', () => ({

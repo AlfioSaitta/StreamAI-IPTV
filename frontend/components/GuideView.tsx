@@ -26,6 +26,7 @@ import type { Category, Channel, EpgProgramme, XtreamCredentials } from '../type
 import { useEpg } from '../hooks/useEpg';
 import { EpgService } from '../services/epg';
 import { EpgReminderService } from '../services/epg/reminderService';
+import { proxyImageURL } from '../services/proxyFetch.ts';
 
 interface GuideViewProps {
   liveCategories: Category[];
@@ -42,6 +43,18 @@ const CHANNEL_COL_WIDTH = 200;
 const HEADER_HEIGHT = 48;
 const HOURS_WINDOW = 24; // total guide width: 24h
 const HOURS_BEFORE_NOW = 1; // start 1h before now so recent past is visible
+
+// Formattatori creati **una volta sola**. `toLocaleTimeString` con le opzioni
+// costruisce un `Intl.DateTimeFormat` a ogni chiamata, e la griglia ne faceva
+// tre per blocco programma — su una finestra di 24 h sono migliaia di
+// formattatori ricostruiti a ogni ridisegno delle righe. Il locale resta quello
+// del sistema, come prima (`undefined` = locale dell'ambiente).
+const TIME_HM = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' });
+const TIME_HMS = new Intl.DateTimeFormat(undefined, {
+  hour: 'numeric',
+  minute: 'numeric',
+  second: 'numeric',
+});
 
 const snapToHour = (ts: number, mode: 'floor' | 'ceil'): number => {
   const d = new Date(ts);
@@ -166,11 +179,30 @@ const GuideView: React.FC<GuideViewProps> = ({
     return () => ro.disconnect();
   }, []);
 
+  // Lo scorrimento emette decine di eventi al secondo e ognuno faceva un
+  // `setState` (che ricostruisce la griglia) più due scritture sincrone sulla
+  // posizione di intestazione e colonna canali. Si legge una volta per
+  // fotogramma, e solo se la posizione è davvero cambiata: gli eventi che non
+  // spostano nulla — la gran parte — non toccano più lo stato.
+  const scrollFrameRef = useRef(0);
+  const lastScrollTopRef = useRef(-1);
   const handleBodyScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
-    setScrollTop(el.scrollTop);
-    if (headerRef.current) headerRef.current.scrollLeft = el.scrollLeft;
-    if (channelColRef.current) channelColRef.current.scrollTop = el.scrollTop;
+    const nextTop = el.scrollTop;
+    const nextLeft = el.scrollLeft;
+    if (scrollFrameRef.current) return;
+    scrollFrameRef.current = window.requestAnimationFrame(() => {
+      scrollFrameRef.current = 0;
+      if (headerRef.current) headerRef.current.scrollLeft = nextLeft;
+      if (channelColRef.current) channelColRef.current.scrollTop = nextTop;
+      if (nextTop === lastScrollTopRef.current) return;
+      lastScrollTopRef.current = nextTop;
+      setScrollTop(nextTop);
+    });
+  }, []);
+
+  useEffect(() => () => {
+    if (scrollFrameRef.current) window.cancelAnimationFrame(scrollFrameRef.current);
   }, []);
 
   // Auto-scroll to "now" on first mount once layout is ready.
@@ -406,7 +438,7 @@ const GuideView: React.FC<GuideViewProps> = ({
                   >
                     {channel.logo ? (
                       <img
-                        src={channel.logo}
+                        src={proxyImageURL(channel.logo)}
                         alt=""
                         className="w-10 h-10 rounded object-contain bg-black/40 flex-shrink-0"
                         loading="lazy"
@@ -556,6 +588,10 @@ const GuideRow: React.FC<GuideRowProps> = React.memo(
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [channel.tvgId, windowStart, windowEnd, reminderTick]);
 
+    // Una lettura dell'orologio per riga, non due per blocco: serve solo a
+    // decidere se un programma è in onda adesso.
+    const now = Date.now();
+
     return (
       <div
         className={`relative border-b border-white/5 ${
@@ -570,7 +606,8 @@ const GuideRow: React.FC<GuideRowProps> = React.memo(
             (p.stop - windowStart) * PIXELS_PER_MS,
           );
           const width = Math.max(8, right - left);
-          const isLive = Date.now() >= p.start && Date.now() < p.stop;
+          // `now` una volta per riga: era letto due volte per blocco.
+          const isLive = now >= p.start && now < p.stop;
           const hasReminder = EpgReminderService.has(channel.id, p.start);
           return (
             <button
@@ -582,19 +619,14 @@ const GuideRow: React.FC<GuideRowProps> = React.memo(
                   : 'bg-surface-1 border border-subtle hover:bg-surface-2'
               }`}
               style={{ left, width }}
-              title={`${p.title}\n${new Date(p.start).toLocaleTimeString()} – ${new Date(
-                p.stop,
-              ).toLocaleTimeString()}`}
+              title={`${p.title}\n${TIME_HMS.format(p.start)} – ${TIME_HMS.format(p.stop)}`}
             >
               <div className="flex items-center gap-1">
                 {hasReminder && <BellRing className="w-3 h-3 text-amber-400 flex-shrink-0" />}
                 <span className="text-xs font-medium truncate">{p.title}</span>
               </div>
               <div className="text-[10px] text-gray-400 tabular-nums">
-                {new Date(p.start).toLocaleTimeString(undefined, {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })}
+                {TIME_HM.format(p.start)}
               </div>
             </button>
           );
